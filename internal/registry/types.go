@@ -83,6 +83,14 @@ type Agent struct {
 	// Guard is the optional LLM message-guard policy config (CR-FEAT-010).
 	// API keys are never part of it — only env: refs (spec §4.1/§9.2).
 	Guard *guard.AgentGuardConfig `json:"guard,omitempty"`
+	// Consumer is the optional INBOX-CRIER-001 consumer contract: who reads
+	// this agent's inbox, on what cadence, and how long an unacknowledged
+	// message may sit before the expiry sweep promotes it to the dead-letter
+	// destination. Absent (omitempty) means the deployment default
+	// (registry.DefaultConsumerContractTTL) applies — the pre-INBOX-CRIER-001
+	// 24h message lifetime — so an existing registration is byte-identical
+	// on the wire and behaves exactly as it did.
+	Consumer *ConsumerContract `json:"consumer,omitempty"`
 	// A2A is the optional OPT-IN A2A interoperability block (INT-A2A-001,
 	// specs/A2A-OPTION.md §4.2) — the per-agent half of the A2A gate; the
 	// server-side half is CR_A2A_ENABLED (config.Config.A2AEnabled). Absent

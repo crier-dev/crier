@@ -291,6 +291,13 @@ type Handler struct {
 	// constant-time compared. Empty keeps the gate closed even with a store.
 	permissionsAdminToken string
 	archiveDeadLetter     func(*DeadLetter) bool
+	// consumerContractTTL is the deployment default for an agent's INBOX
+	// consumer contract (INBOX-CRIER-001) and consumerContractSet records
+	// whether it was configured — the zero value means "unconfigured, use
+	// DefaultConsumerContractTTL", while an explicit zero is the documented
+	// deployment opt-out.
+	consumerContractTTL time.Duration
+	consumerContractSet bool
 	// instanceName is this relay's name for the delivery LOCATION (CR-CHAT-029).
 	// Set from main (CR_FED_NAME / host:port, the same name /fed/peers
 	// announces); the zero value leaves the instance field absent on entries

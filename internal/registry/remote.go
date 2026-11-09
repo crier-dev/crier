@@ -335,6 +335,12 @@ func (s *RemoteStore) Register(agent *Agent) error {
 	if ns := namespace.Canonical(agent.Namespace); ns != "" {
 		body["namespace"] = ns
 	}
+	// INBOX-CRIER-001: the consumer contract travels with a proxied
+	// registration for the same reason the realm does — a relay that dropped
+	// it would silently apply its own default to an agent that declared one.
+	if agent.Consumer != nil {
+		body["consumer"] = agent.Consumer
+	}
 	// POST /agents names no agent in its route: a 404 here is the endpoint
 	// missing, not an agent (the registered id is the body's, and the server
 	// answers 409 for an id it already holds). Its 409 carries two classes, so

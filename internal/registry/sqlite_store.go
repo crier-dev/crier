@@ -106,15 +106,15 @@ func sqliteAt(n sql.NullInt64) time.Time {
 }
 func sqliteJSON(v any) ([]byte, error) { return json.Marshal(v) }
 
-const sqliteAgentColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace,'')`
+const sqliteAgentColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace,''), COALESCE(consumer,'')`
 
 type sqliteScanner interface{ Scan(...any) error }
 
 func scanSQLiteAgent(row sqliteScanner) (*Agent, error) {
 	a := &Agent{}
-	var key, caps, wh, g, aa []byte
+	var key, caps, wh, g, aa, consumer []byte
 	var registered, last int64
-	if err := row.Scan(&a.ID, &key, &caps, &a.Status, &registered, &last, &wh, &g, &aa, &a.Namespace); err != nil {
+	if err := row.Scan(&a.ID, &key, &caps, &a.Status, &registered, &last, &wh, &g, &aa, &a.Namespace, &consumer); err != nil {
 		return nil, err
 	}
 	a.PublicKey = HexKey(key)
@@ -123,7 +123,7 @@ func scanSQLiteAgent(row sqliteScanner) (*Agent, error) {
 	for _, item := range []struct {
 		raw []byte
 		out any
-	}{{caps, &a.Capabilities}, {wh, &a.Webhook}, {g, &a.Guard}, {aa, &a.A2A}} {
+	}{{caps, &a.Capabilities}, {wh, &a.Webhook}, {g, &a.Guard}, {aa, &a.A2A}, {consumer, &a.Consumer}} {
 		if len(item.raw) > 0 {
 			if err := json.Unmarshal(item.raw, item.out); err != nil {
 				return nil, err
@@ -187,11 +187,15 @@ func (s *SQLiteStore) Register(a *Agent) error {
 		if err != nil {
 			return err
 		}
+		consumer, err := sqliteJSON(a.Consumer)
+		if err != nil {
+			return err
+		}
 		key := []byte(a.PublicKey)
 		if len(key) == 0 {
 			key = nil
 		}
-		_, err = q.ExecContext(ctx, `INSERT INTO agents(id,public_key,capabilities,status,registered_at,last_seen,webhook,guard,a2a,namespace) VALUES(?,?,?,?,?,?,?,?,?,?)`, a.ID, key, caps, a.Status, sqliteTime(a.RegisteredAt), sqliteTime(a.LastSeen), wh, g, aa, nullableSQLiteString(a.Namespace))
+		_, err = q.ExecContext(ctx, `INSERT INTO agents(id,public_key,capabilities,status,registered_at,last_seen,webhook,guard,a2a,namespace,consumer) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, a.ID, key, caps, a.Status, sqliteTime(a.RegisteredAt), sqliteTime(a.LastSeen), wh, g, aa, nullableSQLiteString(a.Namespace), consumer)
 		return err
 	})
 }
@@ -275,7 +279,11 @@ func (s *SQLiteStore) Update(a *Agent) error {
 		if err != nil {
 			return err
 		}
-		_, err = q.ExecContext(ctx, `UPDATE agents SET capabilities=?,webhook=?,guard=?,a2a=?,last_seen=? WHERE id=?`, caps, wh, g, aa, sqliteTime(a.LastSeen), a.ID)
+		consumer, err := sqliteJSON(a.Consumer)
+		if err != nil {
+			return err
+		}
+		_, err = q.ExecContext(ctx, `UPDATE agents SET capabilities=?,webhook=?,guard=?,a2a=?,consumer=?,last_seen=? WHERE id=?`, caps, wh, g, aa, consumer, sqliteTime(a.LastSeen), a.ID)
 		return err
 	})
 }

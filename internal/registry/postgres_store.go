@@ -170,7 +170,7 @@ func (s *PostgresStore) operationContext() (context.Context, context.CancelFunc)
 // DEFAULT namespace (008): an existing row — and every new row in a deployment
 // that declares no namespaces — reads back as "", exactly what the in-memory
 // backend and the wire form use.
-const agentConfigColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace, '')`
+const agentConfigColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace, ''), consumer`
 
 // marshalOptionalConfig marshals one of an agent's optional configs (webhook,
 // guard, a2a) for its nullable JSONB column. A nil config — absent, or
@@ -252,6 +252,10 @@ func (s *PostgresStore) Register(agent *Agent) error {
 	if err != nil {
 		return err
 	}
+	consumerJSON, err := marshalOptionalConfig(agent.Consumer)
+	if err != nil {
+		return err
+	}
 
 	now := time.Now().UTC()
 	status := agent.Status
@@ -273,10 +277,10 @@ func (s *PostgresStore) Register(agent *Agent) error {
 
 	_, err = s.pool.Exec(ctx, `
 INSERT INTO agents (
-    id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10);`,
+    id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace, consumer
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11::jsonb);`,
 		agent.ID, pubKeyArg, capsJSON, string(status), now, now, webhookJSON, guardJSON, a2aJSON,
-		nullText(namespace.Canonical(agent.Namespace)),
+		nullText(namespace.Canonical(agent.Namespace)), consumerJSON,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -335,13 +339,14 @@ func (s *PostgresStore) Get(id string) (*Agent, error) {
 		webhookJSON      []byte
 		guardJSON        []byte
 		a2aJSON          []byte
+		consumerJSON     []byte
 	)
 	err := s.pool.QueryRow(ctx, `
 SELECT `+agentConfigColumns+`
 FROM agents
 WHERE id = $1;`, id).Scan(
 		&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
-		&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace,
+		&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace, &consumerJSON,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -373,6 +378,9 @@ WHERE id = $1;`, id).Scan(
 	}
 	if err := unmarshalOptionalConfig(a2aJSON, &agent.A2A); err != nil {
 		return nil, fmt.Errorf("get agent: unmarshal a2a: %w", err)
+	}
+	if err := unmarshalOptionalConfig(consumerJSON, &agent.Consumer); err != nil {
+		return nil, fmt.Errorf("get agent: unmarshal consumer: %w", err)
 	}
 	return &agent, nil
 }
@@ -407,9 +415,10 @@ ORDER BY registered_at ASC, id ASC;`)
 			webhookJSON      []byte
 			guardJSON        []byte
 			a2aJSON          []byte
+			consumerJSON     []byte
 		)
 		if err := rows.Scan(&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
-			&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace); err != nil {
+			&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace, &consumerJSON); err != nil {
 			slog.Error("postgres list scan", "error", err)
 			s.setListError(fmt.Errorf("postgres list: scan: %w", err))
 			return []*Agent{}
@@ -444,6 +453,11 @@ ORDER BY registered_at ASC, id ASC;`)
 		if err := unmarshalOptionalConfig(a2aJSON, &agent.A2A); err != nil {
 			slog.Error("postgres list: unmarshal a2a", "error", err, "agent_id", agent.ID)
 			s.setListError(fmt.Errorf("postgres list: agent %q: unmarshal a2a: %w", agent.ID, err))
+			return []*Agent{}
+		}
+		if err := unmarshalOptionalConfig(consumerJSON, &agent.Consumer); err != nil {
+			slog.Error("postgres list: unmarshal consumer", "error", err, "agent_id", agent.ID)
+			s.setListError(fmt.Errorf("postgres list: agent %q: unmarshal consumer: %w", agent.ID, err))
 			return []*Agent{}
 		}
 		out = append(out, &agent)
@@ -510,6 +524,10 @@ func (s *PostgresStore) Update(agent *Agent) error {
 	if err != nil {
 		return err
 	}
+	consumerJSON, err := marshalOptionalConfig(agent.Consumer)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := s.operationContext()
 	defer cancel()
@@ -523,8 +541,9 @@ func (s *PostgresStore) Update(agent *Agent) error {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	tag, err := s.pool.Exec(ctx, `
 UPDATE agents
-SET capabilities = $2::jsonb, webhook = $3::jsonb, guard = $4::jsonb, a2a = $5::jsonb, last_seen = $6
-WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, a2aJSON, now)
+SET capabilities = $2::jsonb, webhook = $3::jsonb, guard = $4::jsonb, a2a = $5::jsonb,
+consumer = $7::jsonb, last_seen = $6
+WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, a2aJSON, now, consumerJSON)
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
 	}

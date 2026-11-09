@@ -247,10 +247,16 @@ func TestPurgeExpired_NeverExpiringMessageSurvives(t *testing.T) {
 
 	never := 0
 	entry := &InboxEntry{
-		ID:         "msg-forever",
-		Payload:    []byte(`{"n":1}`),
-		Sender:     "foreman",
-		CreatedAt:  time.Now().Add(-100 * time.Hour),
+		ID:      "msg-forever",
+		Payload: []byte(`{"n":1}`),
+		Sender:  "foreman",
+		// Delivered INSIDE the consumer-contract window. Since
+		// INBOX-CRIER-001 the contract (deployment default here) is a bound on
+		// every unacknowledged message, including a never-expiring one — an
+		// entry past it is expired by TestInboxTTL_DefaultContractBoundsNever-
+		// ExpiringMessage. What this test pins is the message-TTL arm: a
+		// ttl_seconds=0 message is never purged for its OWN expiry.
+		CreatedAt:  time.Now().Add(-time.Hour),
 		TTLSeconds: &never,
 	}
 	require.NoError(t, store.Deliver("agent-1", entry))

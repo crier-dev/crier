@@ -180,6 +180,16 @@ type Config struct {
 	// /agents/{id}/inbox and POST /capabilities/{capability}/inbox
 	// (CR_INBOX_MAX_BODY_BYTES). Values must be positive; the default is 1 MiB.
 	InboxMaxBodyBytes int
+	// InboxContractTTL is the deployment default for an agent's inbox
+	// consumer contract (CR_INBOX_CONTRACT_TTL_S, INBOX-CRIER-001): the
+	// maximum time an unacknowledged message may sit before the expiry sweep
+	// promotes it to the dead-letter destination and receipts its sender.
+	// The default is 24h (registry.DefaultConsumerContractTTL) — the same
+	// lifetime messages already had — so existing agents change no behaviour.
+	// An explicit 0 disables the default contract bound: only each message's
+	// own TTL expires messages (the documented opt-out). Negative values are
+	// refused at load.
+	InboxContractTTL time.Duration
 	// GlobalRateLimitPerMinute is the global inbox-ingest budget
 	// (CR_RATE_LIMIT_GLOBAL_PER_MINUTE, CR-FEAT-035), in deliveries per minute
 	// across every agent. 0 — the default — disables it entirely: the
@@ -668,6 +678,7 @@ func LoadFrom(getenv Getenv) (Config, error) {
 		LogFormat:          "text",
 		RateLimitPerMinute: 100,
 		InboxMaxBodyBytes:  1 << 20,
+		InboxContractTTL:   registry.DefaultConsumerContractTTL,
 		RequireAgentSig:    true,
 		// CRIER-MCP-NUDGE §4: the nudge surface is ON by default (it is
 		// read-only counts), while the session-start prefix is OFF — a
@@ -1069,6 +1080,19 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_INBOX_MAX_BODY_BYTES: %q (want positive integer)", v)
 		}
 		cfg.InboxMaxBodyBytes = n
+	}
+
+	// INBOX-CRIER-001: the deployment default for an agent's inbox consumer
+	// contract. Unset keeps the seeded 24h (registry.DefaultConsumerContractTTL
+	// — the lifetime messages already had). An explicit 0 is the documented
+	// opt-out: no default bound, so only each message's own TTL expires it.
+	// A negative value is a startup error — "off" already has a spelling.
+	if v := getenv("CR_INBOX_CONTRACT_TTL_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return cfg, fmt.Errorf("invalid CR_INBOX_CONTRACT_TTL_S: %q (want non-negative seconds; 0 disables the default contract bound)", v)
+		}
+		cfg.InboxContractTTL = time.Duration(n) * time.Second
 	}
 
 	// Global ingest budget (CR-FEAT-035). Opt-in, and 0 — the default — means

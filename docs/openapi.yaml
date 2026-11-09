@@ -1319,6 +1319,9 @@ paths:
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   description: "Optional LLM message-guard policy config (CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1/§9.2) — validated at registration (400 on violation); API keys are never part of it, only env: refs"
+                consumer:
+                  $ref: "#/components/schemas/ConsumerContract"
+                  description: "Optional inbox consumer contract (INBOX-CRIER-001): who reads this agent's inbox, the expected read cadence, and the per-agent TTL that bounds how long an unacknowledged message may sit before the expiry sweep dead-letters it and receipts the sender. Absent inherits CR_INBOX_CONTRACT_TTL_S (24h). Validated at registration (400 on violation)."
                 namespace:
                   type: string
                   description: |-
@@ -1411,6 +1414,9 @@ paths:
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   description: "Optional LLM message-guard policy config (CR-FEAT-010); validated at registration (400 on violation)"
+                consumer:
+                  $ref: "#/components/schemas/ConsumerContract"
+                  description: "Optional inbox consumer contract (INBOX-CRIER-001) — same object and rules as POST /agents"
                 namespace:
                   type: string
                   description: "The namespace (realm) to register INTO (CR-FEAT-029). Absent — or `default` — is the implicit namespace; an undeclared name is 400 UNKNOWN_NAMESPACE, never a silent fallback."
@@ -1544,6 +1550,10 @@ paths:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   nullable: true
                   description: "LLM message-guard config (CR-FEAT-011, spec §9.2) — an object replaces the whole guard config (validated, 400 on violation); explicit null removes the guard (agent falls back to the server default policy); absent leaves it unchanged"
+                consumer:
+                  $ref: "#/components/schemas/ConsumerContract"
+                  nullable: true
+                  description: "Inbox consumer contract (INBOX-CRIER-001) — an object replaces the whole contract (validated, 400 on violation); explicit null returns the agent to the deployment default (CR_INBOX_CONTRACT_TTL_S); absent leaves it unchanged"
       responses:
         "200":
           description: Agent updated — the full agent object is returned
@@ -1899,12 +1909,23 @@ paths:
                   maximum: 9223372036
                   description: |
                     Message expiry in seconds. Absent leaves the server default
-                    (24h). 0 means the message never expires: `expires_at` is
-                    reported as JSON null — the key is present, its value is
-                    null — and the message is never TTL-purged. A value above
-                    the duration bound (or a negative one) is rejected with 400.
-                    Applies to messages stored in the target's inbox — a webhook
-                    delivery is not stored, so it has no expiry.
+                    (24h). 0 means the message never expires BY ITS OWN TTL:
+                    `expires_at` is reported as JSON null — the key is present,
+                    its value is null — and the message is never TTL-purged. A
+                    value above the duration bound (or a negative one) is
+                    rejected with 400. Applies to messages stored in the
+                    target's inbox — a webhook delivery is not stored, so it has
+                    no expiry.
+
+                    INBOX-CRIER-001: the RECEIVER's consumer contract is a
+                    second, independent bound on an unacknowledged message. An
+                    entry unread past the target's `consumer.ttl_seconds` (or
+                    the deployment default, CR_INBOX_CONTRACT_TTL_S = 24h) is
+                    promoted to the dead-letter destination and receipted to
+                    the sender even if `ttl_seconds` was 0 — the sender's
+                    "never expires" promise does not outlive the consumer's
+                    stated retention. Set the target's `consumer.ttl_seconds: 0`
+                    to opt that inbox out of a contract bound entirely.
       responses:
         "201":
           description: "Message stored in the target's durable inbox (transport \"inbox\"). Webhook-configured agents never answer 201 — their deliveries accept with 200 (blocking) or 202 (async/batch) and are NOT stored (DF-CRIER-157). A stored message that expires while it is still unacknowledged is dead-lettered (GET /agents/{id}/inbox/dead-letters) and produces exactly one MESSAGE_EXPIRED receipt in the SENDER's own inbox (CR-FEAT-025): a TTL expiry is reported, never silent."
@@ -2311,7 +2332,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [queue_depth, leased_count, oldest_age_ms]
+                required: [queue_depth, leased_count, oldest_age_ms, oldest_unacked, contract_ttl_secs, stale, unacked_count]
                 properties:
                   queue_depth:
                     type: integer
@@ -2322,6 +2343,20 @@ paths:
                   oldest_age_ms:
                     type: integer
                     description: Age of oldest queued message in milliseconds
+                  oldest_unacked:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: "Creation instant of the oldest unacknowledged message still in the inbox, RFC 3339. JSON null when the inbox holds no unacknowledged message — never the zero time (INBOX-CRIER-001)."
+                  contract_ttl_secs:
+                    type: integer
+                    description: "The resolved consumer contract bound for this agent, in seconds. 0 means NO contract bound (the explicit consumer.ttl_seconds=0 opt-out), never 'unset' (INBOX-CRIER-001)."
+                  stale:
+                    type: boolean
+                    description: "True when oldest_unacked is older than contract_ttl_secs — the consumer has already broken its promise, whether or not the next sweep has run. Always false when the bound is 0 (INBOX-CRIER-001)."
+                  unacked_count:
+                    type: integer
+                    description: "Number of unacknowledged messages still in the inbox (not past their own message expiry), including never-expiring ones — the population the contract is judged against (INBOX-CRIER-001)."
         "401":
           description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
         "403":
@@ -6457,6 +6492,23 @@ components:
           type: integer
           default: 30000
           description: Per-call bound for each gateway request; absent or <=0 means the documented default.
+    ConsumerContract:
+      type: object
+      required: [reader]
+      description: "The inbox consumer contract carried on an agent registration/PATCH (Agent.consumer, INBOX-CRIER-001). It states who reads the inbox, on what cadence, and how long an unacknowledged message may sit before the EXPIRY SWEEP promotes it into the dead-letter destination (GET /agents/{id}/inbox/dead-letters, reason consumer_contract_expired) and writes exactly one MESSAGE_EXPIRED receipt into the sender's inbox. Delivery semantics are unchanged: ack/lease/idempotency behave exactly as before; only the terminal outcome gains a bound the sender can rely on."
+      properties:
+        reader:
+          type: string
+          enum: [agent, harness]
+          description: "Who physically drains the inbox. `agent` = the registered agent process polls/long-polls its own inbox; `harness` = a harness (foreman, session runner, MCP bridge) reads on the agent's behalf."
+        read_cadence_secs:
+          type: integer
+          minimum: 0
+          description: "The interval the consumer expects between reads, in seconds (0 = not stated). Descriptive only — it is reported back and is never silently substituted for the TTL."
+        ttl_seconds:
+          type: integer
+          minimum: 0
+          description: "Per-agent override of the maximum time an unacknowledged message may sit. Absent → CR_INBOX_CONTRACT_TTL_S (default 86400 = 24h). 0 → NO contract bound (explicit opt-out; contract_ttl_secs reports 0 and the agent can never be `stale`), so only each message's own ttl_seconds/expires_at applies. n > 0 → n seconds."
     GuardAgentConfig:
       type: object
       required: [policies]

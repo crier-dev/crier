@@ -34,9 +34,9 @@ func TestPostgresStoreUnit_Register_PersistsA2A(t *testing.T) {
 	ag := testAgent(t)
 	ag.A2A = testA2AConfig()
 
-	mock.ExpectExec(`INSERT INTO agents \( id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace \)`).
+	mock.ExpectExec(`INSERT INTO agents \( id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace, consumer \)`).
 		WithArgs(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(StatusOnline), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			([]byte)(nil), ([]byte)(nil), []byte(wantA2AJSON), nil).
+			([]byte)(nil), ([]byte)(nil), []byte(wantA2AJSON), nil, ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Register(ag))
@@ -54,7 +54,7 @@ func TestPostgresStoreUnit_Register_NilA2AWritesNull(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO agents`).
 		WithArgs(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(StatusOnline), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			([]byte)(nil), ([]byte)(nil), ([]byte)(nil), nil).
+			([]byte)(nil), ([]byte)(nil), ([]byte)(nil), nil, ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Register(ag))
@@ -69,15 +69,15 @@ func TestPostgresStoreUnit_Update_WritesAndClearsA2A(t *testing.T) {
 	ag := testAgent(t)
 	ag.A2A = testA2AConfig()
 
-	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, a2a = \$5::jsonb, last_seen = \$6`).
-		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), []byte(wantA2AJSON), pgxmock.AnyArg()).
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, a2a = \$5::jsonb`).
+		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), []byte(wantA2AJSON), pgxmock.AnyArg(), ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	require.NoError(t, s.Update(ag))
 
 	// Opting back out: nil must be written as NULL, not dropped from the SET.
 	ag.A2A = nil
-	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, a2a = \$5::jsonb, last_seen = \$6`).
-		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg()).
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, a2a = \$5::jsonb`).
+		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg(), ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	require.NoError(t, s.Update(ag))
 
@@ -94,8 +94,8 @@ func TestPostgresStoreUnit_Get_DecodesA2A(t *testing.T) {
 	t.Run("stored block", func(t *testing.T) {
 		s, mock := newMockStore(t)
 		rows := pgxmock.NewRows(agentRowColumns()).
-			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(wantA2AJSON), "")
-		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(wantA2AJSON), "", nil)
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\), consumer FROM agents`).
 			WithArgs("a1").
 			WillReturnRows(rows)
 
@@ -109,8 +109,8 @@ func TestPostgresStoreUnit_Get_DecodesA2A(t *testing.T) {
 	t.Run("null column", func(t *testing.T) {
 		s, mock := newMockStore(t)
 		rows := pgxmock.NewRows(agentRowColumns()).
-			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, nil, "")
-		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, nil, "", nil)
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\), consumer FROM agents`).
 			WithArgs("a1").
 			WillReturnRows(rows)
 
@@ -130,8 +130,8 @@ func TestPostgresStoreUnit_Get_InvalidA2AJSON(t *testing.T) {
 	pub := make([]byte, 32)
 
 	rows := pgxmock.NewRows(agentRowColumns()).
-		AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(`{"enabled":`), "")
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
+		AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(`{"enabled":`), "", nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\), consumer FROM agents`).
 		WithArgs("a1").
 		WillReturnRows(rows)
 

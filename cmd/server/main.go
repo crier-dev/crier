@@ -597,6 +597,10 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// idempotency_key deduplicates a delivery. Resolved from the registry
 	// package's own default when the environment sets none.
 	registryHandler.SetIdempotencyWindow(cfg.IdempotencyWindow)
+	// INBOX-CRIER-001: the deployment default an agent's inbox consumer
+	// contract inherits. Always set explicitly, including the 0 opt-out, so a
+	// configured "no default bound" is not mistaken for "unconfigured".
+	registryHandler.SetConsumerContractTTL(cfg.InboxContractTTL)
 	// The evidence that feeds it: mesh sockets accepted for an agent and the
 	// KEEPALIVE heartbeats on them (the sink is nil when the store cannot
 	// touch — a remote proxy — in which case the mesh records nothing and this
@@ -1822,6 +1826,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_LOG_FORMAT               text|json (default text)")
 	fmt.Fprintln(out, "  CR_RATE_LIMIT_PER_MINUTE    relay publish rate limit (default 100)")
 	fmt.Fprintln(out, "  CR_INBOX_MAX_BODY_BYTES     maximum raw body for inbox deliveries (default 1048576; invalid values fail startup; over-cap requests return 413 REQUEST_BODY_TOO_LARGE)")
+	_, _ = fmt.Fprintln(out, "  CR_INBOX_CONTRACT_TTL_S     default inbox consumer-contract TTL in seconds (default 86400; 0 = no default bound, only each message's own TTL expires it; negative fails startup)")
 	fmt.Fprintln(out, "  CR_WS_ALLOWED_ORIGINS       comma-separated WebSocket origins, \"*\" = allow all")
 	fmt.Fprintln(out, "  CR_FED_LINKS                comma-separated base URLs of linked relays (relay federation)")
 	_, _ = fmt.Fprintln(out, "  CR_FED_RECORDS_FILE         operator peer records (auto = beside hold queue/self key; unset = legacy)")

@@ -89,19 +89,41 @@ func (h *Handler) SetArchiveHook(fn func(*DeadLetter) bool) { h.archiveDeadLette
 // suppresses the receipt for it — so a store that reports the same removal
 // twice (or a sweep racing another sweep) cannot produce two receipts.
 func (h *Handler) PurgeExpired() int {
-	rep, ok := h.store.(PurgeReporter)
-	if !ok {
+	removed := 0
+	if rep, ok := h.store.(PurgeReporter); ok {
+		removed = rep.PurgeExpiredReport(h.expireMessage)
+		if hook, ok := h.store.(ArchiveHook); ok {
+			hook.PurgeExpiredDeadLetters(h.archiveDeadLetter)
+		}
+	} else {
 		// A store that cannot report what it removed: the count is all anyone
 		// gets, and the messages leave with no dead letter and no receipt.
 		// Both shipped backends implement PurgeReporter, so this is the
 		// contract for an embedding store, stated rather than hidden.
-		return h.store.PurgeExpired()
+		removed = h.store.PurgeExpired()
 	}
-	removed := rep.PurgeExpiredReport(h.expireMessage)
-	if hook, ok := h.store.(ArchiveHook); ok {
-		hook.PurgeExpiredDeadLetters(h.archiveDeadLetter)
-	}
+	// INBOX-CRIER-001: the SAME sweep pass also enforces each agent's consumer
+	// contract. It is not a second loop — it is the expiry worker the server
+	// already runs, extended — and it reuses the same dead-letter + receipt
+	// sink, so a contract expiry is exactly as reportable as a message-TTL
+	// expiry.
+	removed += h.SweepConsumerContracts(time.Now().UTC())
 	return removed
+}
+
+// expireContractMessage is the consumer-contract arm of the sweep's report
+// sink: the record is built exactly like a message-TTL expiry, but its reason
+// names the contract and its ExpiredAt is the contract deadline that elapsed
+// (which is what the receipt should quote, even when the message itself never
+// expires).
+func (h *Handler) expireContractMessage(agentID string, entry *InboxEntry) {
+	if entry == nil {
+		return
+	}
+	dl := newDeadLetter(agentID, entry, time.Now().UTC())
+	dl.Reason = DeadLetterReasonContractExpired
+	expiredMessagesTotal.Inc()
+	h.deliverExpiryRecord(dl)
 }
 
 // expireMessage is the sweep's report sink: one removed message becomes a dead
@@ -111,8 +133,14 @@ func (h *Handler) expireMessage(agentID string, entry *InboxEntry) {
 		return
 	}
 	expiredMessagesTotal.Inc()
-	dl := newDeadLetter(agentID, entry, time.Now().UTC())
+	h.deliverExpiryRecord(newDeadLetter(agentID, entry, time.Now().UTC()))
+}
 
+// deliverExpiryRecord records dl (when the backend keeps dead letters) and
+// writes the sender's receipt at most once. Both expiry arms — the message TTL
+// and the consumer contract — go through here, so the exactly-once rule has a
+// single implementation.
+func (h *Handler) deliverExpiryRecord(dl *DeadLetter) {
 	recorded, archive := h.recordDeadLetter(dl)
 	switch {
 	case archive && !recorded:

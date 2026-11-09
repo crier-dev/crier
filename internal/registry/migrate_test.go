@@ -69,7 +69,16 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 19, version, "should reflect migration 019 for the message tags on the route record")
+	assert.Equal(t, 20, version, "should reflect migration 020 for the inbox consumer contract")
+
+	// INBOX-CRIER-001: the contract column is the migration's whole point.
+	var consumerExists bool
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT FROM information_schema.columns
+			WHERE table_name = 'agents' AND column_name = 'consumer'
+		)`).Scan(&consumerExists))
+	assert.True(t, consumerExists, "agents.consumer should exist after migration 020")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 

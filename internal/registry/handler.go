@@ -59,6 +59,12 @@ type registerRequest struct {
 	Hermes   *hermesession.Config    `json:"hermes_session,omitempty"`
 	Boardctl *boardbridge.Config     `json:"boardctl,omitempty"`
 	Guard    *guard.AgentGuardConfig `json:"guard,omitempty"`
+	// Consumer is the optional inbox consumer contract (INBOX-CRIER-001):
+	// who reads the inbox, on what cadence, and the per-agent TTL override
+	// that bounds how long an unacknowledged message may sit. Absent leaves
+	// the deployment default in force, so a pre-existing registration is
+	// byte-identical and behaves exactly as before.
+	Consumer *ConsumerContract `json:"consumer,omitempty"`
 	// A2A is the optional per-agent half of the A2A gate (INT-A2A-001).
 	// Absent is the default and keeps every existing registration byte-
 	// identical; present is strictly decoded by strictA2AMember.
@@ -337,6 +343,11 @@ type patchRequest struct {
 	Hermes   *hermesession.Config `json:"hermes_session,omitempty"`
 	Boardctl json.RawMessage      `json:"boardctl,omitempty"`
 	Guard    json.RawMessage      `json:"guard,omitempty"`
+	// Consumer mirrors the registration field (INBOX-CRIER-001) with the
+	// same three-state rule the guard object uses: present replaces the whole
+	// contract, explicit null clears it (back to the deployment default), and
+	// absent (RawMessage nil) leaves it untouched.
+	Consumer json.RawMessage `json:"consumer,omitempty"`
 	// A2A mirrors the registration field (INT-A2A-001): present replaces the
 	// block, explicit null clears it, absent leaves it unchanged — the same
 	// three-state contract the webhook object uses, so an agent that opted in
@@ -509,6 +520,25 @@ type statsResponse struct {
 	QueueDepth  int   `json:"queue_depth"`
 	LeasedCount int   `json:"leased_count"`
 	OldestAgeMs int64 `json:"oldest_age_ms"`
+	// INBOX-CRIER-001 — the queue numbers above say how much is waiting; these
+	// say whether the CONSUMER is honoring its side.
+	//
+	// OldestUnacked is the creation instant of the oldest unacknowledged
+	// message still in the inbox, RFC 3339. JSON null when the inbox has no
+	// unacknowledged message — never the zero time (the DF-CRIER-182 rule).
+	OldestUnacked *time.Time `json:"oldest_unacked"`
+	// ContractTTLSecs is the resolved consumer contract bound for this
+	// agent, in seconds. 0 means NO contract bound (the explicit
+	// ttl_seconds=0 opt-out), never "unset".
+	ContractTTLSecs int64 `json:"contract_ttl_secs"`
+	// Stale is true when the oldest unacknowledged message is older than the
+	// contract — the consumer has already broken its promise, whether or not
+	// the next sweep has run. Always false when there is no bound (0).
+	Stale bool `json:"stale"`
+	// UnackedCount is the number of unacknowledged messages still in the
+	// inbox (not past their own message expiry), including never-expiring
+	// ones. It is the population the contract is judged against.
+	UnackedCount int `json:"unacked_count"`
 }
 
 // strictWebhookMember strict-decodes the top-level `webhook` member of an
@@ -741,6 +771,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 		Boardctl:     req.Boardctl,
 		Guard:        req.Guard,
 		A2A:          req.A2A,
+		Consumer:     req.Consumer,
 		Namespace:    namespaceName,
 	}
 	if agent.Capabilities == nil {
@@ -774,6 +805,12 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+	}
+	// INBOX-CRIER-001: a contract that cannot be honored is refused at the
+	// boundary, never silently replaced by the default.
+	if err := agent.Consumer.Validate(); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	if err := h.store.Register(agent); err != nil {
@@ -1009,6 +1046,29 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			agent.Guard = &gc
+		}
+	}
+
+	if req.Consumer != nil {
+		// INBOX-CRIER-001: same three-state rule as guard — present replaces
+		// the whole contract, explicit null returns the agent to the
+		// deployment default, absent leaves it untouched.
+		trimmed := bytes.TrimSpace(req.Consumer)
+		if string(trimmed) == "null" {
+			agent.Consumer = nil
+		} else {
+			var cc ConsumerContract
+			dec := json.NewDecoder(bytes.NewReader(trimmed))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&cc); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid consumer contract: " + err.Error()})
+				return
+			}
+			if err := cc.Validate(); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			agent.Consumer = &cc
 		}
 	}
 
@@ -1935,10 +1995,51 @@ func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// INBOX-CRIER-001: the contract is read from the SAME row the rest of the
+	// stats describe, and the aging numbers come from a direct read when the
+	// backend can answer (never inferred from oldest_age_ms, which is a
+	// duration, not an instant).
+	agent, err := h.store.Get(id)
+	if err != nil {
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
+		return
+	}
+	unacked := depth
+	var oldest time.Time
+	if rep, ok := h.store.(InboxAgingReporter); ok {
+		unacked, oldest, err = rep.OldestUnacked(id)
+		if err != nil {
+			if errors.Is(err, ErrAgentNotFound) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			} else {
+				writeStoreError(w, err)
+			}
+			return
+		}
+	} else {
+		oldest = time.Now().Add(-age)
+	}
+
+	ttl := agent.Consumer.EffectiveTTL(h.resolvedConsumerContractTTL())
+	var oldestWire *time.Time
+	if !oldest.IsZero() {
+		utc := oldest.UTC()
+		oldestWire = &utc
+	}
+	stale := ttl > 0 && !oldest.IsZero() && !oldest.Add(ttl).After(time.Now())
+
 	writeJSON(w, http.StatusOK, statsResponse{
-		QueueDepth:  depth,
-		LeasedCount: leased,
-		OldestAgeMs: age.Milliseconds(),
+		QueueDepth:      depth,
+		LeasedCount:     leased,
+		OldestAgeMs:     age.Milliseconds(),
+		OldestUnacked:   oldestWire,
+		ContractTTLSecs: int64(ttl / time.Second),
+		Stale:           stale,
+		UnackedCount:    unacked,
 	})
 }
 
