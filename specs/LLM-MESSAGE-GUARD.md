@@ -60,11 +60,17 @@ The guard is a filter, not a gatekeeper. Availability of the bus is a first-clas
 
 - **Default: fail-open.** If the guard cannot produce a verdict (provider error, timeout,
   malformed LLM output, missing API key), the message is delivered with `risk_level: medium` and
-  `reason: guard_error: …` recorded in audit + headers. The bus never stops because the guard's
+  `reason: guard_error: …` recorded in audit + headers. The result and `crier.guard` metadata also
+  carry `errored: true` and `degraded: true`; webhook delivery emits
+  `X-Crier-Guard-Degraded: true`. The bus never stops because the guard's
   LLM provider is down. (One exception, DF-CRIER-158: a high-confidence deterministic pre-scan hit
   — §6.4 — blocks instead of delivering, because the pre-scan never depends on the provider. See §3.6.)
 - **Per-policy: fail-closed.** A policy with `fail_closed: true` blocks on guard error (action
   from `policy.action`, default `block`). Use for high-sensitivity channels.
+- `GET /status` exposes the live guard provider posture as `guard_provider_health` (`ok`,
+  `degraded`, or `down`) and `guard_provider_last_error`. These values are sourced from the same
+  guard instance used by delivery; they are not configuration constants. The guard remains
+  fail-open for delivery while provider health is `degraded`.
 - The guard LLM's output is **advisory and schema-validated**; the server applies a deterministic
   escalation table (§3.4) and a deterministic sanitize transformation (§3.5). No LLM output can
   make the server do anything outside `allow` / `block` / `sanitize` (rewrite or quarantine fallback).
@@ -386,7 +392,20 @@ surrounding ```json fences and surrounding whitespace; if the first non-whitespa
 `{`, scan forward to the first `{` and parse from there; then strict-validate per §3.1. Any
 remaining parse/validation failure = guard error.
 
-### 3.7 Result type (Go, exact)
+#### 3.6a Availability metadata
+
+Every provider error or timeout preserves the configured delivery fallback and marks the resulting
+`Result` and `Meta` with `errored: true` and `degraded: true`. This metadata is also emitted as
+`X-Crier-Guard-Degraded: true` on webhook delivery. The live `GET /status` response reports
+`guard_provider_health` (`ok`, `degraded`, or `down`) and `guard_provider_last_error` from the
+same guard instance used by delivery.
+
+ch:trace row=GUARD-CRIER-001 spec=specs/LLM-MESSAGE-GUARD.md wave=.coding-hermes/waves/crier-foreman-2026-11-09-07-40-21.json test=TestCheck_FailOpenAllProvidersDown doc=specs/LLM-MESSAGE-GUARD.md evidence=specs/LLM-MESSAGE-GUARD.md witness=none:worker-local verdict=none:foreman-judge commit=none:worker-commit memory=none:foreman-closeout
+STATUS: complete | partial | blocked
+TIER: T1
+EVIDENCE: gofmt; go test ./internal/guard ./internal/registry ./internal/webhook ./cmd/server -count=1; go build ./...; go vet ./...; git diff --check
+
+## 3.7 Result type (Go, exact)
 
 ```go
 package guard

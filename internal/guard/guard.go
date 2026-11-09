@@ -42,6 +42,7 @@ type Guard struct {
 	llmCallsTotal   map[string]int64 // "provider/model"
 	sanitizeTotal   int64
 	blockTotal      int64
+	providerHealth  ProviderHealth
 }
 
 // Options wires a Guard (spec §9.1 env → guard.New in cmd/server).
@@ -124,6 +125,7 @@ func New(opts Options) (*Guard, error) {
 		logfWarn:        logfWarn,
 		checksTotal:     make(map[string]int64),
 		llmCallsTotal:   make(map[string]int64),
+		providerHealth:  ProviderHealth{Health: "ok"},
 	}
 	if opts.KanbanWriter != nil {
 		// CR-FEAT-014 (spec §8.2): the kanban worker is a bounded
@@ -243,8 +245,10 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 
 	provider, model, content, err := g.router.Check(ctx, policy, sys, user)
 	if err != nil {
+		g.setProviderHealth("degraded", err.Error())
 		return g.errorResult(ctx, agentID, in, policy, prematch, start, len(in.Payload), err), nil
 	}
+	g.setProviderHealth("ok", "")
 	g.llmCall(provider, model)
 
 	verdict, err := ParseVerdict(content)
@@ -315,6 +319,23 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 	return res, nil
 }
 
+// ProviderHealth reports the latest provider availability posture observed by
+// the guard. It is live state shared with the status surface.
+func (g *Guard) ProviderHealth() ProviderHealth {
+	if g == nil {
+		return ProviderHealth{Health: "down", LastError: "guard disabled"}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.providerHealth
+}
+
+func (g *Guard) setProviderHealth(health, lastError string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.providerHealth = ProviderHealth{Health: health, LastError: lastError}
+}
+
 // errorResult resolves a guard error per §3.6: fail-open default
 // (deliver, decision allow, risk medium), fail-closed per policy (apply
 // policy.action — default block — with risk high). Errored is always set
@@ -337,6 +358,7 @@ func (g *Guard) errorResult(ctx context.Context, agentID string, in Input, polic
 		Reason:     reason,
 		Patterns:   prematch,
 		Errored:    true,
+		Degraded:   true,
 		PolicyID:   policy.ID,
 		MessageID:  in.MessageID,
 		DurationMs: time.Since(start).Milliseconds(),

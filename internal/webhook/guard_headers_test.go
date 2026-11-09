@@ -49,6 +49,7 @@ func TestPost_EmitsGuardHeaders(t *testing.T) {
 		Provider:  "custom",
 		Model:     "mock-model",
 		Errored:   true,
+		Degraded:  true,
 	}
 	env := &Envelope{
 		Crier:   EnvelopeMeta{Version: 1, MessageID: "m1", Guard: &meta},
@@ -84,6 +85,9 @@ func TestPost_EmitsGuardHeaders(t *testing.T) {
 	if got := h.Get("X-Crier-Guard-Error"); got != "true" {
 		t.Errorf("Error = %q", got)
 	}
+	if got := h.Get("X-Crier-Guard-Degraded"); got != "true" {
+		t.Errorf("Degraded = %q", got)
+	}
 }
 
 func TestPost_NoGuardMetaNoHeaders(t *testing.T) {
@@ -98,7 +102,7 @@ func TestPost_NoGuardMetaNoHeaders(t *testing.T) {
 	for _, k := range []string{
 		"X-Crier-Guard-Decision", "X-Crier-Guard-Risk", "X-Crier-Guard-Reason",
 		"X-Crier-Guard-Patterns", "X-Crier-Guard-Policy", "X-Crier-Guard-Provider",
-		"X-Crier-Guard-Model", "X-Crier-Guard-Error",
+		"X-Crier-Guard-Model", "X-Crier-Guard-Error", "X-Crier-Guard-Degraded",
 	} {
 		if v := h.Get(k); v != "" {
 			t.Errorf("%s = %q, want absent", k, v)
@@ -112,7 +116,7 @@ func TestPostBatch_WorstCaseHeaders(t *testing.T) {
 	cfg := &Config{URL: srv.URL, DeliveryMode: "batch"}
 
 	allowLow := &guard.Meta{Decision: guard.DecisionAllow, RiskLevel: guard.RiskLow, Reason: "a", Policy: "p1"}
-	sanitizeHigh := &guard.Meta{Decision: guard.DecisionSanitize, RiskLevel: guard.RiskHigh, Reason: "s", Patterns: []string{"b64_blob"}, Policy: "p2", Errored: true}
+	sanitizeHigh := &guard.Meta{Decision: guard.DecisionSanitize, RiskLevel: guard.RiskHigh, Reason: "s", Patterns: []string{"b64_blob"}, Policy: "p2", Errored: true, Degraded: true}
 	allowMedium := &guard.Meta{Decision: guard.DecisionAllow, RiskLevel: guard.RiskMedium, Reason: "b", Patterns: []string{"control_keys"}}
 
 	envs := []*Envelope{
@@ -138,6 +142,9 @@ func TestPostBatch_WorstCaseHeaders(t *testing.T) {
 	}
 	if got := h.Get("X-Crier-Guard-Error"); got != "true" {
 		t.Errorf("Error = %q, want true (any inner errored)", got)
+	}
+	if got := h.Get("X-Crier-Guard-Degraded"); got != "true" {
+		t.Errorf("Degraded = %q, want true (any inner degraded)", got)
 	}
 	// Per-message verdicts stay in the batch body's inner envelopes.
 	var batch batchEnvelopeBody

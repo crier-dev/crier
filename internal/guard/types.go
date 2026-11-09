@@ -48,6 +48,7 @@ type Result struct {
 	Provider    string    `json:"provider,omitempty"`
 	Model       string    `json:"model,omitempty"`
 	Errored     bool      `json:"errored,omitempty"`
+	Degraded    bool      `json:"degraded,omitempty"`
 	Quarantined bool      `json:"quarantined,omitempty"`
 	Sanitized   bool      `json:"sanitized,omitempty"`
 	DurationMs  int64     `json:"duration_ms,omitempty"`
@@ -80,6 +81,7 @@ type Meta struct {
 	Provider    string    `json:"provider,omitempty"`
 	Model       string    `json:"model,omitempty"`
 	Errored     bool      `json:"errored,omitempty"`
+	Degraded    bool      `json:"degraded,omitempty"`
 	Quarantined bool      `json:"quarantined,omitempty"`
 	Sanitized   bool      `json:"sanitized,omitempty"`
 	// QuarantinedPayload is base64(std) of the original payload when the
@@ -99,6 +101,7 @@ func (r Result) Meta() Meta {
 		Provider:           r.Provider,
 		Model:              r.Model,
 		Errored:            r.Errored,
+		Degraded:           r.Degraded,
 		Quarantined:        r.Quarantined,
 		Sanitized:          r.Sanitized,
 		QuarantinedPayload: r.QuarantinedPayload,
@@ -118,10 +121,19 @@ func (m Meta) Result() Result {
 		Provider:           m.Provider,
 		Model:              m.Model,
 		Errored:            m.Errored,
+		Degraded:           m.Degraded,
 		Quarantined:        m.Quarantined,
 		Sanitized:          m.Sanitized,
 		QuarantinedPayload: m.QuarantinedPayload,
 	}
+}
+
+// ProviderHealth is the live availability posture of the guard provider lane.
+// Health is one of ok, degraded, or down; LastError is the most recent
+// provider-side failure and is safe for operational diagnostics.
+type ProviderHealth struct {
+	Health    string
+	LastError string
 }
 
 // Input is the per-message context the choke point needs (spec §2). It is

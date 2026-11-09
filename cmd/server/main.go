@@ -654,6 +654,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// are registered (spec §2.2). CR_GUARD_ENABLED=false skips the guard
 	// entirely (nil filter = disabled).
 	var guardFilter guard.Filter
+	var guardHealth func() guard.ProviderHealth
 	// MON-CRIER-003: the observability gauges read the same guard instance;
 	// nil while disabled, which the gauge callbacks render as 0.
 	var guardStats guardMetricsReader
@@ -703,6 +704,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		}
 		defer gf.Close()
 		guardFilter = gf
+		guardHealth = gf.ProviderHealth
 		guardStats = gf
 		slog.Info("message guard", "enabled", true, "model", cfg.Guard.Model,
 			"timeout", cfg.Guard.Timeout, "max_concurrent", cfg.Guard.MaxConcurrent,
@@ -1261,7 +1263,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		return false, false
 	}
 	r.HandleFunc("/status", newStatusHandlerFull(cfg, regBackend,
-		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler, readFedPosture)).Methods("GET")
+		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler, readFedPosture, guardHealth)).Methods("GET")
 
 	// The A2A surfaces (Agent Card discovery, INT-A2A-002 + JSON-RPC binding,
 	// INT-A2A-003..005) are mounted by the a2a protocol adapter inside the

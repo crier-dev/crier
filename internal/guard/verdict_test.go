@@ -152,15 +152,15 @@ func TestMetaResultRoundTrip(t *testing.T) {
 	m := Meta{
 		Decision: DecisionSanitize, RiskLevel: RiskMedium, Reason: "r",
 		Patterns: []string{"p1"}, Policy: "pol", Provider: "deepseek",
-		Model: "m", Errored: false, Quarantined: true,
+		Model: "m", Errored: false, Degraded: true, Quarantined: true,
 		QuarantinedPayload: "b64",
 	}
 	r := m.Result()
-	if r.Decision != DecisionSanitize || r.PolicyID != "pol" || r.QuarantinedPayload != "b64" {
+	if r.Decision != DecisionSanitize || r.PolicyID != "pol" || r.QuarantinedPayload != "b64" || !r.Degraded {
 		t.Fatalf("Result projection wrong: %+v", r)
 	}
 	back := r.Meta()
-	if back.Policy != "pol" || back.QuarantinedPayload != "b64" {
+	if back.Policy != "pol" || back.QuarantinedPayload != "b64" || !back.Degraded {
 		t.Fatalf("Meta round-trip wrong: %+v", back)
 	}
 }

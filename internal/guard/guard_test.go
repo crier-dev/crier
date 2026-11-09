@@ -424,6 +424,9 @@ func TestCheck_FailOpenAllProvidersDown(t *testing.T) {
 	if res.RiskLevel != RiskMedium {
 		t.Errorf("risk = %s, want medium on fail-open", res.RiskLevel)
 	}
+	if !res.Degraded {
+		t.Errorf("res = %+v, want degraded:true for provider failure", res)
+	}
 	if !strings.HasPrefix(res.Reason, "guard_error:") {
 		t.Errorf("reason = %q, want guard_error prefix", res.Reason)
 	}

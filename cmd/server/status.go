@@ -10,6 +10,7 @@ import (
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/federation"
+	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -305,6 +306,10 @@ type statusResponse struct {
 	// GuardEnabled reports the LLM message guard master switch
 	// (CR_GUARD_ENABLED, default true).
 	GuardEnabled bool `json:"guard_enabled"`
+	// GuardProviderHealth is the live provider posture: ok after a successful
+	// check, degraded after a provider error, and down when the guard is off.
+	GuardProviderHealth    string `json:"guard_provider_health"`
+	GuardProviderLastError string `json:"guard_provider_last_error"`
 	// PresenceStaleAfterS is the EFFECTIVE staleness window the registry
 	// derives a row's status with, in seconds (CR_PRESENCE_STALE_AFTER_S,
 	// CR-FEAT-024). It is reported because it is the number a `stale` row was
@@ -462,6 +467,7 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		MeshAuthRequired:                       cfg.RequireMeshAuth,
 		MeshOriginPolicy:                       config.MeshOriginPolicy(cfg.MeshAllowedOrigins),
 		GuardEnabled:                           cfg.Guard.Enabled,
+		GuardProviderHealth:                    map[bool]string{true: "ok", false: "down"}[cfg.Guard.Enabled],
 		// The EFFECTIVE window, resolved exactly as the registry handler
 		// resolves it (registry.Presence.StaleAfter) — so an unset or
 		// malformed-shaped setting reports the window actually in force rather
@@ -534,7 +540,7 @@ func newQueueHistory() *queueHistory { return &queueHistory{} }
 // null history; no probe → "ok" (nothing known to be wrong); no aggregator →
 // agents_online 0 / agents_total 0 (a server that mounts no registry Handler
 // has no fleet to count — the zero figure is the true one, never a guess).
-func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueDepthReader, history *queueHistory, probe healthProbe, aggregator statusAggregator, federationPosture ...func() federation.InboundPosture) http.HandlerFunc {
+func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueDepthReader, history *queueHistory, probe healthProbe, aggregator statusAggregator, extras ...any) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		resp := buildStatusResponse(cfg, registryBackend)
 		if cfg.Permissions.Enabled {
@@ -549,12 +555,21 @@ func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueD
 		// This field is viewer-specific; never share an authorized snapshot.
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Add("Vary", "Authorization")
-		if len(federationPosture) > 0 && federationPosture[0] != nil {
-			p := federationPosture[0]()
-			resp.FederationRequirePeerConfigured = p.RequirePeerConfigured
-			resp.FederationRequirePeerEffective = p.RequirePeerEffective
-			resp.FederationPeerCount = p.Peers
-			resp.FederationTokenOnlyAccepted = p.TokenOnlyAccepted
+		for _, extra := range extras {
+			switch value := extra.(type) {
+			case func() federation.InboundPosture:
+				p := value()
+				resp.FederationRequirePeerConfigured = p.RequirePeerConfigured
+				resp.FederationRequirePeerEffective = p.RequirePeerEffective
+				resp.FederationPeerCount = p.Peers
+				resp.FederationTokenOnlyAccepted = p.TokenOnlyAccepted
+			case func() guard.ProviderHealth:
+				if value != nil {
+					h := value()
+					resp.GuardProviderHealth = h.Health
+					resp.GuardProviderLastError = h.LastError
+				}
+			}
 		}
 		if depth, ok := statusQueueDepthValue(read); ok {
 			resp.QueueDepth = depth

@@ -303,7 +303,8 @@ func batchGuardMeta(envs []*Envelope) *guard.Meta {
 	if worst == nil {
 		return nil
 	}
-	// Union of patterns across inner messages, and errored if any errored.
+	// Union of patterns across inner messages, and errored/degraded if any
+	// inner verdict carries that posture.
 	seen := make(map[string]bool)
 	union := make([]string, 0)
 	for _, env := range envs {
@@ -312,6 +313,9 @@ func batchGuardMeta(envs []*Envelope) *guard.Meta {
 		}
 		if env.Crier.Guard.Errored {
 			worst.Errored = true
+		}
+		if env.Crier.Guard.Degraded {
+			worst.Degraded = true
 		}
 		for _, p := range env.Crier.Guard.Patterns {
 			if !seen[p] {
@@ -381,6 +385,9 @@ func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, 
 		}
 		if gm.Errored {
 			req.Header.Set("X-Crier-Guard-Error", "true")
+		}
+		if gm.Degraded {
+			req.Header.Set("X-Crier-Guard-Degraded", "true")
 		}
 	}
 	for k, v := range ResolveTemplate(cfg).RequestShape.Headers {

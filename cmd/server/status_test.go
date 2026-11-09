@@ -95,6 +95,8 @@ var statusTopLevelKeys = []string{
 	"ingest_sweep_enabled",
 	"ingest_sweep_interval_secs",
 	"guard_enabled",
+	"guard_provider_health",
+	"guard_provider_last_error",
 	// CR-CHAT-020: the graded health word, and the fleet presence aggregate
 	// counted with the same Presence rule GET /agents reports with.
 	"health",
@@ -449,6 +451,8 @@ func TestStatusDefaultsFromConfigLoad(t *testing.T) {
 		{"mesh_auth_required", false},
 		{"mesh_origin_policy", config.MeshOriginPolicyAllowAll},
 		{"guard_enabled", true},
+		{"guard_provider_health", "ok"},
+		{"guard_provider_last_error", ""},
 		{"registry_backend", registryBackendMemory},
 		{"rate_limit_per_minute", float64(100)},
 		{"log_level", "info"},
