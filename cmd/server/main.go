@@ -54,11 +54,27 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
-func registerWebhookIngestRoutes(r *mux.Router, handler http.Handler) {
-	if handler == nil {
-		return
+func registerWebhookIngestRoutes(r *mux.Router, handler http.Handler, authToken string) {
+	enabled := handler != nil
+	if !enabled {
+		// Keep the route visible enough to explain the opt-in posture. The
+		// deployment auth middleware deliberately bypasses this family so a
+		// disabled deployment returns the named gate rather than a misleading
+		// bearer or handler failure.
+		handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"ingest disabled","gate":"CR_INGEST_WEBHOOK_ENABLED"}`))
+		})
 	}
-	r.Handle("/ingress/sources", handler).Methods(http.MethodGet, http.MethodPost)
+	// Source registration is an operator API and keeps the deployment Bearer
+	// gate. When ingest is disabled, the named-gate handler must remain visible
+	// through the same authenticated router without being intercepted first.
+	sourceHandler := handler
+	if enabled {
+		sourceHandler = middleware.AuthTokens(authToken, "")(handler)
+	}
+	r.Handle("/ingress/sources", sourceHandler).Methods(http.MethodGet, http.MethodPost)
 	r.Handle("/ingress/webhooks/{source_id}", handler).Methods(http.MethodPost)
 }
 
@@ -1128,7 +1144,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// part of the public path list. Its writes go through the same session
 	// repository and the same inbox delivery path the routes above use.
 	r.HandleFunc("/ingress/messages", ingressHandler.ServeHTTP).Methods("POST")
-	registerWebhookIngestRoutes(r, webhookIngest)
+	registerWebhookIngestRoutes(r, webhookIngest, cfg.AuthToken)
 	// Read cursors (CRIER-READS-1, specs/CRIER-READS.md §3.1): who has read
 	// what, and what is unread for a member. A cursor is per (session, member)
 	// and monotonic; `reads` is a read receipt, never a delivery guarantee and

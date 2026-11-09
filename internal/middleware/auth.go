@@ -31,7 +31,7 @@ import (
 // wrong scheme and a wrong token keep their exact JSON bodies, and a nil page
 // (the default everywhere) reproduces the pre-DF-CRIER-444 bytes exactly.
 func Auth(authToken string) func(http.Handler) http.Handler {
-	return AuthTokens(authToken, "")
+	return authTokens(authToken, "", false)
 }
 
 // browserRefusalPage holds the human-readable 401 page cmd/server installs at
@@ -119,6 +119,16 @@ func wantsHTMLRefusal(r *http.Request) bool {
 // An empty managementToken reproduces the pre-DF-CRIER-297 single-secret
 // behaviour exactly, so an unconfigured deployment is byte-identical.
 func AuthTokens(authToken, managementToken string) func(http.Handler) http.Handler {
+	return authTokens(authToken, managementToken, false)
+}
+
+// AuthTokensWithWebhookBypass preserves the deployment bearer gate while
+// allowing source-scoped webhook authentication to run at the handler.
+func AuthTokensWithWebhookBypass(authToken, managementToken string) func(http.Handler) http.Handler {
+	return authTokens(authToken, managementToken, true)
+}
+
+func authTokens(authToken, managementToken string, bypassIngest bool) func(http.Handler) http.Handler {
 	if authToken == "" {
 		// No auth configured — pass through all requests. Development mode is
 		// unchanged by DF-CRIER-297: the management writes still need the
@@ -137,6 +147,13 @@ func AuthTokens(authToken, managementToken string) func(http.Handler) http.Handl
 			// build it is (DF-CRIER-101).
 			switch r.URL.Path {
 			case "/health", "/version", "/openapi.json", "/openapi.yaml", "/docs":
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Webhook delivery has its own source-scoped HMAC contract. It
+			// must reach that handler before deployment Bearer auth, otherwise
+			// boardctl hooks spool on a 401 and the ingest auth is never tested.
+			if bypassIngest && (r.URL.Path == "/ingress/sources" || strings.HasPrefix(r.URL.Path, "/ingress/webhooks/")) {
 				next.ServeHTTP(w, r)
 				return
 			}

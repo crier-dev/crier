@@ -141,6 +141,14 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": "unknown source"})
 		return
 	}
+	// Authenticate the request before looking up the source. A hook with no
+	// source credential must receive the named HMAC refusal, not a source-store
+	// 404 (or a deployment Bearer refusal from outer middleware).
+	sourceHeader := r.Header.Get("X-Crier-Source-ID")
+	if sourceHeader == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "source authentication required"})
+		return
+	}
 	source, err := h.Store.Source(r.Context(), id)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -191,8 +199,7 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid nonce"})
 		return
 	}
-	sourceHeader := r.Header.Get("X-Crier-Source-ID")
-	if sourceHeader == "" || sourceHeader != id {
+	if sourceHeader != id {
 		writeJSON(w, 401, map[string]string{"error": "signature verification failed"})
 		return
 	}
