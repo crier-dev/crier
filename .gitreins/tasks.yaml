@@ -3938,18 +3938,18 @@ tasks:
 - id: UI-CRIER-001
   title: UI auth posture
   criteria:
-  - 'PROOF: the chosen auth posture is recorded in the spec, docs and tests agree,
-    and unauthenticated transcript data is not exposed'
-  - 'FAILIF: /chat/docs posture diverge, the agreement test is absent, or an unauthenticated
-    read exposes transcript data'
+  - 'Implement one explicit browser UI/auth posture from the board, record it in the
+    spec/docs, and add an acceptance test proving /chat and docs agree plus no unauthenticated
+    transcript leak. FAILIF: missing posture decision, missing test, or unauthenticated
+    data exposure. PROOF: named test output and docs/spec path.'
   status: in_progress
-  created_at: '2026-11-09T16:11:24.317483+00:00'
+  created_at: '2026-11-09T16:57:45.139094+00:00'
 - id: RSS-CRIER-001
   title: RSS poller configuration and deduplication
   criteria:
-  - 'PROOF: feed polling configuration, conditional requests, GUID deduplication,
-    status fields, docs and named tests are implemented'
-  - 'FAILIF: feeds are not configured, duplicate items are delivered, malformed feeds
-    are silent, or the acceptance tests do not cover disabled polling'
+  - 'Implement durable RSS/Atom feed configuration and conditional GET/guid deduplication,
+    status evidence, docs, and tests per the board. FAILIF: disabled/default or duplicate
+    delivery behavior is wrong, or required tests/docs are absent. PROOF: named test
+    output and config/docs paths.'
   status: in_progress
-  created_at: '2026-11-09T16:11:25.502377+00:00'
+  created_at: '2026-11-09T16:57:46.453829+00:00'
