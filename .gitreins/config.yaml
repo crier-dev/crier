@@ -40,7 +40,13 @@ guards:
     # upstream gitreins change, not a repo config change.
     lint: true
     tests: true
-  test_timeout: 300
+  # INT-015: the tests arm timed out at 300s on a loaded box (concurrent
+  # foreman lanes) even with the suite green — go build + go lint + a cold
+  # full-repo `go test ./...` cannot be held to 300s while the machine is
+  # busy. The guard's own failure text names this remedy: 900 for large
+  # projects with slow integration suites. hook_timeout stays
+  # test_timeout + 120 (CR-GAP-073).
+  test_timeout: 900
   # hook_timeout (CR-GAP-073): the OVERALL guard budget must EXCEED the tests
   # arm's budget, never equal it. With only test_timeout set, guards.hook_timeout
   # fell back to its 300s default — hook_timeout == test_timeout — so the tests
@@ -53,9 +59,9 @@ guards:
   #   the source.
   # Setting it here fixes it at the source: the warning stops and the budget is
   # this repo's declared value rather than a number derived per run.
-  # 420 = test_timeout 300 + 120s of slack for go_build + go_lint, which run
+  # 1020 = test_timeout 900 + 120s of slack for go_build + go_lint, which run
   # BEFORE the tests arm and are charged to the same overall budget.
-  hook_timeout: 420
+  hook_timeout: 1020
 pipeline:
   stages:
   - id: tier1
