@@ -54,8 +54,9 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
-func registerWebhookIngestRoutes(r *mux.Router, handler http.Handler, authToken string) {
-	enabled := handler != nil
+func registerWebhookIngestRoutes(r *mux.Router, webhookHandler *ingest.Handler, authToken string) {
+	enabled := webhookHandler != nil
+	var handler http.Handler = webhookHandler
 	if !enabled {
 		// Keep the route visible enough to explain the opt-in posture. The
 		// deployment auth middleware deliberately bypasses this family so a
@@ -382,7 +383,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// 403, except GET /status (read-only, viewer-specific management posture).
 	// middleware.AuthTokens' own predicate names the exempt routes.
 	var fedRecordGate *federation.PeerStore
-	r.Use(federation.DeliveryAuth(middleware.AuthTokens(cfg.AuthToken, cfg.Permissions.AdminToken), func() *federation.PeerStore { return fedRecordGate }))
+	r.Use(federation.DeliveryAuth(middleware.AuthTokensWithWebhookBypass(cfg.AuthToken, cfg.Permissions.AdminToken), func() *federation.PeerStore { return fedRecordGate }))
 	// DF-CRIER-444: arm the human-readable 401 page for browser navigations.
 	// The page is authored inside the embedded chat.html (inert template,
 	// extracted once in chatclient.go) and the middleware decides when it is
