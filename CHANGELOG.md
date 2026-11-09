@@ -11,6 +11,117 @@ contains them — a tag cut first can never contain its own changelog entry. The
 procedure, the gate requirements and the publish step are in
 [docs/releases.md](docs/releases.md).
 
+## [0.6.0] - 2026-11-09
+
+Range: `v0.5.0`..`v0.6.0` — 63 commits (2 merges, 61 non-merge: 5 `feat`,
+3 `fix`, 3 `test`, 2 `docs`, 2 `chore`, 1 `ingest`, 1 `guards`, 1 `qa`,
+22 board, 21 foreman). No `BREAKING CHANGE` footer and no `!` type token were
+found in the range, so this is a minor release. Every item below is additive,
+and every one that can change behaviour is default-OFF: the registry migration
+is a nullable column, the new tables are new, and the ingest sweep refuses to
+start unless webhooks are already enabled.
+
+The range is the 2026-11-09 delivery-model wave: an inbox now carries a consumer
+contract — so "delivered" stops being "read" — ingest gains a reconciliation
+sweep with a durable dead-letter store, the guard publishes its provider
+posture, and the release path grows two gates that make a cut self-verifying: a
+live verifier that ties the running binary to the tag, and a README pin lock
+that refuses a cut whose own Quick Start names another version.
+
+### Added
+
+- **A consumer delivery contract on the registry — per-agent TTL, expiry
+  receipts and a stale-consumer detector** (INBOX-CRIER-001, `46c129e7`,
+  migration `020`). `POST /agents`, `POST /agents/{id}` and `PATCH /agents/{id}`
+  accept a `consumer` block (`reader` from the closed `agent|harness`
+  vocabulary, descriptive `read_cadence_secs`, and `ttl_seconds` with the guard
+  object's three-state PATCH rule); `CR_INBOX_CONTRACT_TTL_S` seeds the
+  deployment default `86400` — the lifetime messages already had — so no
+  existing agent changes behaviour until it declares a contract, and an explicit
+  `0` is the documented opt-out. The existing 30s expiry worker now runs one
+  bounded (500/pass) contract pass: an unacknowledged entry past
+  `created_at + TTL` is promoted into the existing dead-letter destination
+  (`reason=consumer_contract_expired`) and produces exactly one
+  `MESSAGE_EXPIRED` receipt in the sender's inbox, with the delivery record
+  surviving under the original message id. `StaleConsumers` reports every agent
+  whose oldest unacked message outlived its contract, and
+  `GET /agents/{id}/inbox/stats` gains the exact fields `oldest_unacked`,
+  `contract_ttl_secs`, `stale` and `unacked_count`.
+
+- **Ingest reconciliation sweep and a durable dead-letter store**
+  (INT-015, `7f1b64e2`). `internal/ingest/sweep.go` reads the registered board's
+  `tasks.jsonl` on a cadence and diffs it against the delivery ledger, enqueuing
+  any pending row whose logical event key `boardctl:<row-id>:<content-hash>` was
+  never seen; a rebase that rewrites a row id dedupes on the content hash, while
+  a same-id content edit is a new logical event. Failed deliveries now upsert
+  `ingest_deadletter` instead of drop-with-log (accumulating count, last
+  failure, row ids, per source + event key): past the budget of 3 the batch is
+  parked rather than dropped, `RequeueDeadLetter` is the operator re-drive, and
+  a later success clears the entry. Default-OFF and fail-closed via
+  `CR_INGEST_SWEEP_ENABLED` (enabling it without `CR_INGEST_WEBHOOK_ENABLED`
+  refuses startup), `CR_INGEST_SWEEP_INTERVAL_SECS` (600) and
+  `CR_INGEST_SWEEP_BOARD_DIR` (`.`); `/status` names the posture in both
+  positions.
+
+- **Guard provider posture on `/status`** (GUARD-CRIER-001, `d986d106`).
+  `guard_provider_health` (`ok|degraded|down`) and `guard_provider_last_error`
+  are required status keys sourced from the live guard instance, so a degraded
+  guard provider is observable instead of inferred from delivery failures.
+
+- **A live release verifier that ties the running binary to the tag**
+  (REVIEW-001, `ada48a72` + `46195bee`, `fd70f4b5`, `15b8eb21`).
+  `scripts/verify-live-release.sh` checks that the commit `/version` serves
+  descends from the newest tag and that the running process's executable matches
+  a recorded SHA-256 sidecar; missing, empty and `dev` version evidence are
+  refusals, not passes. `make verify-live-release-selftest` drives it offline,
+  and `15b8eb21` closed the gap the review found — the selftest now constructs a
+  non-descendant commit, so a neutered ancestry arm fails instead of passing
+  vacuously.
+
+- **A README release-pin lock gated into the cut and the publish**
+  (RELEASE-017, `d6c84b07`). `scripts/check-release-pin.sh` (with `--selftest`,
+  wired as `make release-pin-selftest`) refuses `make release` and
+  `make release-upload` while any of the Quick Start's three hand-edited pins —
+  the "Install prebuilt binaries (vX.Y.Z release assets)" heading, the
+  "Release vX.Y.Z publishes N assets" sentence, and the
+  `sh -s -- --version vX.Y.Z` example — names another version; a pin
+  shape with zero occurrences is a refusal (exit 2) rather than a vacuous green,
+  and the tracked README is only ever read.
+
+### Fixed
+
+- **Ingest auth is split into source-scoped and deployment gates**
+  (INGRESS-CRIER-001, `756a1bab`, `04e64dcf`). Disabled ingest routes now expose
+  the named opt-in gate instead of a bare 500, source registration keeps the
+  deployment bearer boundary, and webhook delivery reaches source-scoped
+  authentication; the production router uses the webhook-aware deployment
+  middleware. The route-posture tests were replaced with real-server coverage
+  for the disabled gate, source auth, signed acceptance and fresh-store
+  migration — the shape of coverage that let this class through before.
+
+### Changed
+
+- **The gitreins pre-commit budget is sized for a cold, loaded host**
+  (`32fe5384`): `test_timeout` 300s → 900s and `hook_timeout` 420s → 1020s,
+  preserving the `test_timeout + 120` invariant. No test, build or lint
+  behaviour changes — a green suite measured on a box running concurrent lanes
+  is no longer reported as a guard failure.
+
+### Tests
+
+- **A federation forward hold/drain cell** (INT-004B, `779329ca`, `144521cc`)
+  drives a forward held at the peer boundary and then drained, pinning the
+  federation queue's hold and drain receipts end to end.
+
+### Notes
+
+- The upgrade is additive: migration `020` adds a nullable JSONB `consumer`
+  column, `ingest_deadletter` and its ledger tables are new, and every new
+  capability that changes behaviour is default-OFF. The inbox contract's default
+  TTL equals the lifetime already in force, so a restart alone changes nothing.
+- Gates measured at the tag point and the cut's CI evidence are recorded on the
+  `RELEASE-*` board rows, not in this file.
+
 ## [0.5.0] - 2026-11-08
 
 Range: `v0.4.1`..`v0.5.0` — 56 commits (1 merge, 55 non-merge: 7 `feat`,
@@ -1039,7 +1150,11 @@ First release candidate — the feature-complete core carried by tag
 - v0.1.0-rc1 was cut by hand; `make release` (see [Unreleased](#unreleased))
   encodes that sequence as of the next cut.
 
-[Unreleased]: https://github.com/crier-dev/crier/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/crier-dev/crier/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/crier-dev/crier/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/crier-dev/crier/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/crier-dev/crier/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/crier-dev/crier/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/crier-dev/crier/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/crier-dev/crier/compare/v0.1.0-rc2...v0.2.0
 [0.1.0-rc2]: https://github.com/crier-dev/crier/compare/v0.1.0-rc1...v0.1.0-rc2
