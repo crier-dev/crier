@@ -3962,6 +3962,6 @@ tasks:
     are missing, or exact-head CI remains red without a named infrastructure blocker.
     PROOF: run/job evidence plus local reproduction or explicit infrastructure classification
     and a terminal green exact-head CI run.'
-  status: complete
+  status: in_progress
   created_at: '2026-11-09T18:53:48.222657+00:00'
   completed_at: '2026-11-09T19:10:30.872045+00:00'
