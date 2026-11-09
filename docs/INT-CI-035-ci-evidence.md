@@ -29,25 +29,26 @@ The live failed log reports that `v0.6.0` already carried assets with different 
 
 ## Current exact-head CI
 
-The current canonical main at evidence collection is
-`7a135dae715018e4fb0cfc44ad5c29bf867f7e1a`. The exact-head CI workflow for
-this commit was still in progress at closeout; pages was success and bunker-e2e
-was in progress. Therefore this record does not claim terminal green CI for
-`7a135dae`. The preceding exact-head CI run `42681838192` on
-`b0b5ee89442a4df160d16179a8c3144df0ba6fa7` is terminal success with all six
-jobs, but it certifies `b0b5ee89`, not the later bookkeeping tip.
+The current canonical refs are `origin/main` and `gitlab/main`, both at
+`a656956b61a2b0de9997ecd8dd10ee87220cea30`. The exact-head GitHub runs are
+`42690155956` (CI), `42690155584` (bunker-e2e), and `42690156060` (pages).
+A fresh readback still shows CI run `42690155956` in progress: its completed
+jobs are successful, but `Coverage (Go 1.26.10)` remains in progress at
+`Check coverage threshold`. The companion bunker-e2e and pages runs are
+terminal success. This record remains explicitly pending and does not claim
+terminal green exact-head CI for `a656956b`.
 
 ## Local verification
 
 The isolated worker and the hosted CI evidence verified the following:
 
 - `make shell-yaml-check` — PASS; actionlint 1.7.12; 78 files checked, 0 rejected.
-- `GOMODCACHE=<writable scratch> GOCACHE=<writable scratch> go build ./...` — PASS.
-- The same writable-cache environment with `go vet ./...` — PASS.
-- The same writable-cache environment with `go test ./... -count=1` — PASS.
+- `GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go build ./...` — PASS.
+- `GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go vet ./...` — PASS.
+- `GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go test ./... -count=1` — PASS.
 
 The bare host Go cache paths are broken symlinks into unavailable storage; the first canonical bare-cache attempt failed before Go executed. That is host environment evidence, not a product failure.
 
 The workflow source was also validated: `.github/workflows/bunker-e2e.yml` gates `docker-image` on push events and `bunker-matrix` on `needs: docker-image`; the relevant workflow syntax check passed. No workflow source edit was necessary.
 
-ch:trace row=INT-CI-035 spec=none:ci-investigation wave=.coding-hermes/waves/crier-foreman-2026-11-09-18-46-25.json test=make shell-yaml-check && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go build ./... && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go vet ./... && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go test ./... -count=1 evidence=docs/INT-CI-035-ci-evidence.md witness=none:current-exact-head-ci-pending verdict=none:foreman-pending commit=none memory=none:foreman-pending
+ch:trace row=INT-CI-035 spec=none:ci-investigation wave=.coding-hermes/waves/crier-foreman-2026-11-09-20-07-49.json test=make shell-yaml-check && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go build ./... && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go vet ./... && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go test ./... -count=1 evidence=docs/INT-CI-035-ci-evidence.md witness=none:42690155956-in-progress verdict=none:foreman-pending commit=<worker-sha> memory=none:final-ci-pending
