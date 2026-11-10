@@ -1,0 +1,21 @@
+{
+  "tick_id": "crier-foreman-2026-11-10-11-56-31",
+  "block": "QA-CRIER-53-R2",
+  "mode": "wave-recovery",
+  "wave_size": 1,
+  "rows": [
+    {
+      "id": "UI-CRIER-001",
+      "worktree": "/home/kara/worktrees/crier-UI-CRIER-001",
+      "branch": "wt/UI-CRIER-001",
+      "base_sha": "8b24a11b6fac27ac367ed54f9f897d4da402b14d",
+      "brief": ".hermes/cache/scratch/crier-foreman-2026-11-10-11-56-31/brief-worker-real.txt",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "dispatch": "recovery verification; prior worker commit 67673764 already exists"
+    }
+  ],
+  "excluded_rows": [
+    {"id": "QA-CRIER-53-R2", "reason": "selected block row already implemented; external clean-machine battery remains open"}
+  ]
+}
