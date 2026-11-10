@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import socket
@@ -744,6 +745,19 @@ def _read_http_response(sock: socket.socket) -> str:
 _DEFAULT_SERVER = "http://localhost:8767"
 
 
+def _is_loopback_url(url: str) -> bool:
+    """Whether url addresses a loopback host whose traffic must stay local."""
+    hostname = urllib.parse.urlsplit(url).hostname
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
 class Crier:
     """A crier server, addressed by one agent identity.
 
@@ -886,8 +900,13 @@ class Crier:
         request = urllib.request.Request(
             url, data=encoded if encoded else None, headers=headers, method=method.upper()
         )
+        opener = (
+            urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            if _is_loopback_url(url)
+            else urllib.request
+        )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with opener.open(request, timeout=self.timeout) as response:
                 return response.status, _parse_body(response.read())
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", "replace")

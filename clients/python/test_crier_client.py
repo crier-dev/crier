@@ -40,7 +40,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -407,6 +409,43 @@ class TestClientSurface(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             Crier("http://localhost:1", agent_id="alice")
         self.assertIn("crier keygen", str(ctx.exception))
+
+    # ch:trace row=QA-CRIER-53-R2 spec=none:qa-recurrence wave=.coding-hermes/waves/crier-foreman-2026-11-10-10-23-57.json test=clients/python/test_crier_client.py::TestClientSurface::test_loopback_request_bypasses_ambient_proxies evidence=none:focused-output-not-committed witness=python3 -m unittest discover -s clients/python -p 'test_crier_client.py' -k loopback_request_bypasses_ambient_proxies verdict=none:foreman-binds-after-merge commit=none:worker-sha memory=none:foreman-closeout
+    # STATUS: complete
+    # TIER: T1
+    # EVIDENCE: python3 -m unittest discover -s clients/python -p 'test_crier_client.py' -k loopback_request_bypasses_ambient_proxies
+    def test_loopback_request_bypasses_ambient_proxies(self) -> None:
+        class Capture(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+
+            def log_message(self, *_args: object) -> None:
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Capture)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "no_proxy"):
+            os.environ.pop(variable, None)
+            self.addCleanup(os.environ.pop, variable, None)
+        dead_proxy = "http://127.0.0.1:1"
+        os.environ.update({
+            "HTTP_PROXY": dead_proxy,
+            "HTTPS_PROXY": dead_proxy,
+            "ALL_PROXY": dead_proxy,
+        })
+        client = Crier(
+            "http://127.0.0.1:%d" % server.server_port,
+            agent_id="alice",
+            key=self.key,
+        )
+        self.assertEqual(client.request("GET", "/health"), {"ok": True})
 
     def test_rejects_a_non_http_url(self) -> None:
         with self.assertRaises(ValueError):
