@@ -1,0 +1,15 @@
+--- a/patches/base/root-operation-gate.sh.orig
++++ b/patches/base/root-operation-gate.sh.orig
+@@ -15,6 +15,12 @@
+   exit 2
+ fi
+ case "$repo" in /*) :;; *) echo "repo must be absolute" >&2; exit 2;; esac
++# A URL passed where the scratch directory belongs used to become a literal
++# https:/github.com/... tree inside the caller's CWD (mkdir -p below), which
++# dirtied the checkout and refused make release. Refuse it explicitly.
++case "$scratch" in
++  *://*) echo "scratch dir must be a filesystem path, not a URL: $scratch" >&2; exit 2;;
++esac
+ mkdir -p "$scratch"
+ exec > >(tee "$scratch/root-gate.txt") 2>&1
+ violations=0

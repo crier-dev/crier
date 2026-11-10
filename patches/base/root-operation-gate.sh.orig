@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# root-operation-gate.sh — staged identity + operation-state gate for a foreman
+# tick's first post-skill stateful call, plus rebase lifecycle forensics when a
+# common-dir rebase marker fires. Metadata-only: never runs porcelain, board,
+# or lifecycle reads. Exit code = violation count (0 = clean).
+#
+# Usage: bash root-operation-gate.sh <repo-abs> <scratch-dir> [expected-remote-url]
+#   expected-remote-url  optional; compared after canonicalizing ssh/https forms
+#                        (git@host:org/repo.git and https://host/org/repo.git are equal)
+# Output: tees everything to <scratch-dir>/root-gate.txt
+set -u
+repo=${1:-}; scratch=${2:-}; expected_remote=${3:-}
+if [ -z "$repo" ] || [ -z "$scratch" ]; then
+  echo "usage: $0 <repo-abs> <scratch-dir> [expected-remote-url]" >&2
+  exit 2
+fi
+case "$repo" in /*) :;; *) echo "repo must be absolute" >&2; exit 2;; esac
+mkdir -p "$scratch"
+exec > >(tee "$scratch/root-gate.txt") 2>&1
+violations=0
+fail() { printf 'GATE_VIOLATION: %s\n' "$1"; violations=$((violations+1)); }
+
+canon() {
+  local u=$1
+  u=${u#git@}; u=${u#ssh://}; u=${u#https://}; u=${u#http://}
+  u=${u%.git}; u=${u/:/\/}
+  printf '%s\n' "$u"
+}
+
+printf 'candidate=%s\nnow=%s\n' "$repo" "$(date -Iseconds)"
+if [ ! -d "$repo" ]; then fail 'root_missing'; printf 'gate_violations=%s\n' "$violations"; exit "$violations"; fi
+
+candidate_real=$(realpath "$repo")
+top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)
+top_real=$(realpath "$top" 2>/dev/null || true)
+printf 'candidate_real=%s\ngit_toplevel=%s\n' "$candidate_real" "$top"
+if [ -z "$top" ] || [ "$candidate_real" != "$top_real" ]; then
+  fail 'root_mismatch_locator_not_canonical_checkout'
+fi
+
+remote=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
+branch=$(git -C "$repo" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+head=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
+printf 'origin_raw=%s\norigin_canonical=%s\nbranch=%s\nhead=%s\n' \
+  "$remote" "$(canon "${remote:-none}")" "${branch:-DETACHED}" "${head:-none}"
+[ -n "$remote" ] || fail 'no_origin_remote'
+if [ -n "$expected_remote" ]; then
+  if [ "$(canon "$remote")" != "$(canon "$expected_remote")" ]; then
+    fail 'remote_mismatch'
+  fi
+fi
+[ -n "$branch" ] || fail 'detached_head'
+[ -n "$head" ] || fail 'no_head'
+
+gitdir=$(git -C "$repo" rev-parse --git-dir 2>/dev/null || true)
+common=$(git -C "$repo" rev-parse --git-common-dir 2>/dev/null || true)
+case "$gitdir" in /*) :;; *) gitdir="$repo/$gitdir";; esac
+case "$common" in /*) :;; *) common="$repo/$common";; esac
+printf 'git_dir=%s\ngit_common_dir=%s\n' "$gitdir" "$common"
+
+for base in "$gitdir" "$common"; do
+  [ -n "$base" ] || continue
+  for m in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG index.lock HEAD.lock; do
+    [ -e "$base/$m" ] && fail "active_marker=$base/$m"
+  done
+  for op in rebase-merge rebase-apply; do
+    d="$base/$op"
+    if [ -d "$d" ]; then
+      fail "active_operation=$d"
+      echo "== operation forensics: $d (metadata only) =="
+      find "$d" -maxdepth 1 -mindepth 1 -printf 'op_entry=%f\n' | sort
+      for f in head-name onto orig-head stopped-sha msgnum end; do
+        if [ -f "$d/$f" ]; then
+          printf 'op_ctx_%s=%s\n' "$f" "$(tr '\n' ' ' <"$d/$f" | cut -c1-120)"
+        fi
+      done
+      for f in done git-rebase-todo; do
+        [ -f "$d/$f" ] && printf 'op_%s_lines=%s\n' "$f" "$(wc -l <"$d/$f")"
+      done
+      stat -c 'op_mtime=%n %y' "$d" 2>/dev/null
+      for f in head-name stopped-sha done git-rebase-todo msgnum; do
+        [ -f "$d/$f" ] && stat -c 'op_mtime=%n %y' "$d/$f" 2>/dev/null
+      done
+    fi
+  done
+done
+
+printf 'gate_violations=%s\n' "$violations"
+exit "$violations"
