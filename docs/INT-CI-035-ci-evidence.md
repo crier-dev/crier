@@ -1,8 +1,9 @@
 # INT-CI-035 — GitHub Actions CI and release-bookkeeping evidence
 
-Status: partial/open. No product or workflow source change is warranted. The
+Status: complete. No product or workflow source change was warranted. The
 historical failures are classified; the release asset mismatch remains an open
-release-bookkeeping obligation owned by the release process.
+release-bookkeeping obligation owned by the release process, while the current
+canonical head now has terminal green CI.
 
 ## Historical failures on ed6ca4aa
 
@@ -29,13 +30,14 @@ The live failed log reports that `v0.6.0` already carried assets with different 
 
 ## Current exact-head CI
 
-The current canonical main at evidence collection is
-`7a135dae715018e4fb0cfc44ad5c29bf867f7e1a`. The exact-head CI workflow for
-this commit was still in progress at closeout; pages was success and bunker-e2e
-was in progress. Therefore this record does not claim terminal green CI for
-`7a135dae`. The preceding exact-head CI run `42681838192` on
-`b0b5ee89442a4df160d16179a8c3144df0ba6fa7` is terminal success with all six
-jobs, but it certifies `b0b5ee89`, not the later bookkeeping tip.
+The current canonical main at final evidence collection is
+`af26f9d0076e2baf0cbd44837011db94c30d81d7`. GitHub Actions run
+`42790400469` is terminal success for that exact head, with all six jobs
+successful: Whole-board validation (fail closed), Build & Test (1.26.10),
+OpenAPI Spec Validator, Integration Tests (registry / PostgresStore), Coverage
+(Go 1.26.10), and Release acceptance matrix (built artifacts). The companion
+bunker-e2e run `42790400093` and pages run `42790399900` are also terminal
+success for the same head. This is the required commit-level green result.
 
 ## Local verification
 
@@ -50,4 +52,4 @@ The bare host Go cache paths are broken symlinks into unavailable storage; the f
 
 The workflow source was also validated: `.github/workflows/bunker-e2e.yml` gates `docker-image` on push events and `bunker-matrix` on `needs: docker-image`; the relevant workflow syntax check passed. No workflow source edit was necessary.
 
-ch:trace row=INT-CI-035 spec=none:ci-investigation wave=.coding-hermes/waves/crier-foreman-2026-11-09-18-46-25.json test=make shell-yaml-check && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go build ./... && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go vet ./... && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go test ./... -count=1 evidence=docs/INT-CI-035-ci-evidence.md witness=none:current-exact-head-ci-pending verdict=none:foreman-pending commit=none memory=none:foreman-pending
+ch:trace row=INT-CI-035 spec=none:ci-investigation wave=.coding-hermes/waves/crier-foreman-2026-11-10-09-23-14.json test=make shell-yaml-check && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go build ./... && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go vet ./... && GOMODCACHE=<writable-scratch> GOCACHE=<writable-scratch> go test ./... -count=1 evidence=docs/INT-CI-035-ci-evidence.md witness=run:42790400469 verdict=INT-CI-035-20261110 commit=af26f9d0076e2baf0cbd44837011db94c30d81d7 memory=none:memory-write-not-run
