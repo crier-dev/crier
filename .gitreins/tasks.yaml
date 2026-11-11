@@ -4015,8 +4015,9 @@ tasks:
     the release workflow run 43104541274 concluded success. FAILIF: the tag resolves
     to any other commit, the Release is a draft or has fewer than 8 assets, or the
     publisher run is not success.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-11T21:58:43.378494+00:00'
+  completed_at: '2026-11-11T22:16:25.933968+00:00'
 - id: REL-SCHED-024
   title: Confirm the GitHub Actions scheduling stall recovered for crier
   criteria:
@@ -4024,5 +4025,6 @@ tasks:
     all completed/success, and runs 43101652880 (bunker-e2e) and 43101652861 (pages)
     on the same head SHA completed/success. FAILIF: any of those runs has zero jobs,
     is still queued, or has a non-success conclusion.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-11T22:11:36.984873+00:00'
+  completed_at: '2026-11-11T22:17:01.053971+00:00'
