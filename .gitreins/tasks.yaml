@@ -4007,3 +4007,22 @@ tasks:
   status: complete
   created_at: '2026-11-11T17:27:32.150313+00:00'
   completed_at: '2026-11-11T17:49:21.399236+00:00'
+- id: REL-CUT-061
+  title: Cut and publish crier v0.6.1 from an exact-SHA green tree
+  criteria:
+  - 'PROOF: git rev-parse v0.6.1^{commit} returns d7a68d01e85e86aa947b9a7c7a3fa2ad3c04e8f9,
+    gh release view v0.6.1 -R crier-dev/crier reports draft=false with 8 assets, and
+    the release workflow run 43104541274 concluded success. FAILIF: the tag resolves
+    to any other commit, the Release is a draft or has fewer than 8 assets, or the
+    publisher run is not success.'
+  status: in_progress
+  created_at: '2026-11-11T21:58:43.378494+00:00'
+- id: REL-SCHED-024
+  title: Confirm the GitHub Actions scheduling stall recovered for crier
+  criteria:
+  - 'PROOF: gh run view 43101653172 -R crier-dev/crier --json jobs lists six jobs
+    all completed/success, and runs 43101652880 (bunker-e2e) and 43101652861 (pages)
+    on the same head SHA completed/success. FAILIF: any of those runs has zero jobs,
+    is still queued, or has a non-success conclusion.'
+  status: in_progress
+  created_at: '2026-11-11T22:11:36.984873+00:00'
