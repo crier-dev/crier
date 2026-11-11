@@ -308,7 +308,7 @@ writes, a send to a three-member roster with one unregistered agent answers
 {"accepted":2,"outcome_counts":{"accepted":2,"refused":1},"skipped":1,"skipped_agents":["ghost"]}
 ```
 
-The single [delivery outcome vocabulary](specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary)
+The single [delivery outcome vocabulary](specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary-df-crier-402-df-crier-404-df-crier-409-df-crier-424)
 defines the evidence required for each wire name. Receipt claims alone are not
 answers; the chat summary keeps each exact outcome name separate.
 
@@ -2540,6 +2540,7 @@ grep -c '^  /' docs/openapi.yaml                                    # 70 paths
 grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 89 operations
 grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 53 core router paths (the five protocol surfaces mount through registerProtocols)
 grep -oE 'HandleFunc\("[^"]+"' cmd/server/protocols.go | sort -u | wc -l # 15 protocol paths (relay 3 + mesh 2 + federation 1 + dagger 9, INT-007)
+```
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
