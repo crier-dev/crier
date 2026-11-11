@@ -3985,3 +3985,13 @@ tasks:
     evidence, then quote the wired/archived census.'
   status: in_progress
   created_at: '2026-11-10T13:39:11.564872+00:00'
+- id: README-015
+  title: Fix crier README anchor drift
+  criteria:
+  - 'Run the exact README anchor checker and make anchors_checked=29 broken=0 by resolving
+    README.md:23 #uses, README.md:311 specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary,
+    and README.md:2053-2054 #observability-metrics--profiling without changing documented
+    API semantics.'
+  status: complete
+  created_at: '2026-11-11T12:59:08.006094+00:00'
+  completed_at: '2026-11-11T12:59:13.819722+00:00'
