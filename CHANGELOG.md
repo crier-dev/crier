@@ -11,6 +11,52 @@ contains them — a tag cut first can never contain its own changelog entry. The
 procedure, the gate requirements and the publish step are in
 [docs/releases.md](docs/releases.md).
 
+## [Unreleased]
+
+## [0.6.1] - 2026-11-11
+
+Range: `v0.6.0`..`v0.6.1` — 69 commits including this release commit (4 merges,
+65 non-merge: 2 `fix`, 20 `docs`, 13 `foreman`, 10 `chore`, 7 `board`, 5 `ops`,
+4 `qa`, 4 `QA`). No `feat` commit, no `BREAKING CHANGE` footer and no `!` type
+token appear in the range, so this is a patch release: the two `fix` commits are
+the only ones that change behaviour, and both make something MORE restrictive
+rather than adding surface. Everything else in the range is board, foreman, QA
+and documentation bookkeeping, and is not user-visible.
+
+### Fixed
+
+- **Unauthenticated transcript disclosure (UI-CRIER-001, `180e02be`).** The
+  browser auth posture is now API-only, and stated as such everywhere it is
+  read: browser navigation to `/chat` and every transcript read stay behind
+  auth, and the README, `docs/fronting-auth.md`, the governing spec decision
+  (`specs/CHAT-INTERFACE.md`) and the refusal page no longer promise a login
+  form, a cookie exchange, a bearer-to-cookie viewer or a transcript exemption.
+  `crier-front` is documented as an optional operator-controlled Bearer
+  transport, not as browser authentication. A live test over the real server
+  (`TestUIAuthPostureAgreementAndUnauthenticatedTranscriptNoLeak`) fails if the
+  documented promise and the served behaviour drift apart.
+- **Loopback requests escaped into an ambient proxy (QA-CRIER-53-R2,
+  `3c2fef9b`).** The Python client now builds a proxy-free opener for host-local
+  targets — `localhost` and any loopback IP literal — so a machine that has
+  `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` exported reaches a local crier instead
+  of handing the request to the proxy.
+
+### Notes
+
+- This is the first cut under the README release-pin lock (RELEASE-017): the
+  three Quick Start pins move in the same commit as this entry, and
+  `make release` / `make release-upload` refuse the cut while any of them names
+  another version.
+- The tag point is the commit that contains this entry, and it must be a commit
+  of `main` with green hosted CI before its tag is published; `make release`
+  additionally runs `make build && make lint && make test-short` and the
+  artifact build before it creates the tag.
+- **Known issue carried forward (INT-CI-035).** The `v0.6.0` Release object's
+  attached binaries carry a build identity that does not reconcile with the tag,
+  so the tag-triggered publish refused them instead of replacing them silently.
+  This release does not repair that object — it supersedes it for the current
+  line. Details: `docs/INT-CI-035-ci-evidence.md`.
+
 ## [0.6.0] - 2026-11-09
 
 Range: `v0.5.0`..`v0.6.0` — 68 commits including this release commit (3 merges,
@@ -1159,7 +1205,8 @@ First release candidate — the feature-complete core carried by tag
 - v0.1.0-rc1 was cut by hand; `make release` (see [Unreleased](#unreleased))
   encodes that sequence as of the next cut.
 
-[Unreleased]: https://github.com/crier-dev/crier/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/crier-dev/crier/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/crier-dev/crier/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/crier-dev/crier/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/crier-dev/crier/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/crier-dev/crier/compare/v0.4.0...v0.4.1

@@ -331,9 +331,9 @@ WARN fan-out: skipping target (delivery refused) — other targets retain their 
 
 ## Quick Start
 
-### Install prebuilt binaries (v0.6.0 release assets)
+### Install prebuilt binaries (v0.6.1 release assets)
 
-Release `v0.6.0` publishes 8 assets, the complete set: cross-compiled `crier`
+Release `v0.6.1` publishes 8 assets, the complete set: cross-compiled `crier`
 and `crier-mcp` executables for linux/amd64, linux/arm64 and darwin/arm64,
 plus the installer and a `SHA256SUMS` manifest. They are bare static
 executables, not archives — nothing is tarred or zipped. The installer has
@@ -357,7 +357,7 @@ To pin the published release or install somewhere else (`sh -s --` passes the
 flags through the pipe):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.6.0 --dir "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.6.1 --dir "$HOME/bin"
 ```
 
 The `--version` in that example names the current release and is bumped at cut
