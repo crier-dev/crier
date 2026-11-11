@@ -3995,3 +3995,12 @@ tasks:
   status: complete
   created_at: '2026-11-11T12:59:08.006094+00:00'
   completed_at: '2026-11-11T12:59:13.819722+00:00'
+- id: README-016
+  title: Document v0.6.0 runtime surfaces
+  criteria:
+  - 'FAILIF: README.md does not document CR_INGEST_SWEEP_ENABLED, rss_poll_status,
+    guard_provider_health, and guard_provider_last_error with defaults and operator
+    meaning, or make docs-check fails. PROOF: grep -nE ''CR_INGEST_SWEEP_ENABLED|rss_poll_status|guard_provider_health|guard_provider_last_error''
+    README.md and make docs-check both pass.'
+  status: pending
+  created_at: '2026-11-11T14:21:03.623717+00:00'
