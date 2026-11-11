@@ -3998,10 +3998,12 @@ tasks:
 - id: README-016
   title: Document v0.6.0 README runtime surfaces
   criteria:
-  - 'README.md documents CR_INGEST_SWEEP_ENABLED, rss_poll_status, guard_provider_health,
-    and guard_provider_last_error with defaults and operator meaning; make docs-check
-    passes; FAILIF: any named surface is absent or docs-check fails; PROOF: grep -inE
-    ''CR_INGEST_SWEEP_ENABLED|rss_poll_status|guard_provider_health|guard_provider_last_error''
-    README.md && make docs-check'
-  status: in_progress
-  created_at: '2026-11-11T15:22:15.929606+00:00'
+  - 'Update README.md configuration/runtime-status prose to expose CR_INGEST_SWEEP_ENABLED,
+    rss_poll_status, guard_provider_health, and guard_provider_last_error with defaults
+    and operator meaning; run make docs-check and verify all named surfaces are findable.
+    FAILIF: any named surface remains undocumented or make docs-check fails. PROOF:
+    make docs-check; grep -nE ''CR_INGEST_SWEEP_ENABLED|rss_poll_status|guard_provider_health|guard_provider_last_error''
+    README.md'
+  status: complete
+  created_at: '2026-11-11T17:27:32.150313+00:00'
+  completed_at: '2026-11-11T17:49:21.399236+00:00'
