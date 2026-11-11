@@ -308,7 +308,7 @@ writes, a send to a three-member roster with one unregistered agent answers
 {"accepted":2,"outcome_counts":{"accepted":2,"refused":1},"skipped":1,"skipped_agents":["ghost"]}
 ```
 
-The single [delivery outcome vocabulary](specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary-df-crier-402-df-crier-404-df-crier-409-df-crier-424)
+The single [delivery outcome vocabulary](specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary)
 defines the evidence required for each wire name. Receipt claims alone are not
 answers; the chat summary keeps each exact outcome name separate.
 
