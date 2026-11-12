@@ -155,10 +155,7 @@ func (s *SQLiteStore) Register(a *Agent) error {
 	return s.transaction(func(ctx context.Context, q *sqliteQueries) error {
 		old, err := sqliteGet(ctx, q, a.ID)
 		if err == nil {
-			if registrationKeyDiffers(old, a) {
-				return fmt.Errorf("%w: %q", ErrPublicKeyMismatch, a.ID)
-			}
-			return fmt.Errorf("%w: %q", ErrAgentExists, a.ID)
+			return registrationConflict(old, a)
 		}
 		if !errors.Is(err, ErrAgentNotFound) {
 			return err

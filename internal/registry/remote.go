@@ -390,10 +390,20 @@ func (s *RemoteStore) doRegister(body any) error {
 // relay older than CodePublicKeyMismatch keeps its meaning.
 func classifyRegistrationConflict(raw []byte) error {
 	var body struct {
-		Error string `json:"error"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(raw, &body); err == nil && body.Error == CodePublicKeyMismatch {
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return ErrAgentExists
+	}
+	if body.Error == CodePublicKeyMismatch {
+		if body.Message != "" {
+			return fmt.Errorf("%w: %s", ErrPublicKeyMismatch, body.Message)
+		}
 		return ErrPublicKeyMismatch
+	}
+	if body.Error != "" {
+		return fmt.Errorf("%w: %s", ErrAgentExists, body.Error)
 	}
 	return ErrAgentExists
 }

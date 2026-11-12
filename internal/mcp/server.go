@@ -551,7 +551,10 @@ func mcpError(err error) (code int, message string) {
 	case errors.Is(err, registry.ErrAgentNotFound):
 		return -32602, "agent not found"
 	case errors.Is(err, registry.ErrAgentExists):
-		return -32602, "agent already registered"
+		// Preserve registrationConflict's actionable keyless detail. The
+		// duplicate sentinel is still used for classification, but its wrapped
+		// message is the user-facing contract for register_agent.
+		return -32602, msg
 	case errors.Is(err, registry.ErrLeaseConflict):
 		return -32602, "message is not leased under the supplied lease"
 	case errors.Is(err, registry.ErrInvalidStoreInput):

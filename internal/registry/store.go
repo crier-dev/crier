@@ -489,17 +489,26 @@ var (
 // so a caller may present the same key in any hex case — the wire contract
 // already round-trips through hex, and comparing bytes keeps uppercase and
 // lowercase spellings of one key from reading as a rotation.
-//
-// Keyless is a key like any other for this purpose: an empty key re-registered
-// over a keyed row differs (it would strip the key the agent signs with), and
-// two keyless rows are the same registration. A nil agent on either side is
-// not a comparison this rule can make, so it reports "no difference" and the
-// caller falls back to the plain duplicate class.
 func registrationKeyDiffers(existing, incoming *Agent) bool {
 	if existing == nil || incoming == nil {
 		return false
 	}
 	return !bytes.Equal(existing.PublicKey, incoming.PublicKey)
+}
+
+// registrationConflict is the shared duplicate classification used by every
+// local registration backend. A keyless re-registration is still a duplicate,
+// not a public-key mismatch: the stored and incoming identities are both
+// explicitly keyless. The extra detail is intentional because an operator
+// needs to know why an empty registration was refused.
+func registrationConflict(existing, incoming *Agent) error {
+	if registrationKeyDiffers(existing, incoming) {
+		return fmt.Errorf("%w: %q", ErrPublicKeyMismatch, incoming.ID)
+	}
+	if existing != nil && incoming != nil && len(existing.PublicKey) == 0 && len(incoming.PublicKey) == 0 {
+		return fmt.Errorf("%w: keyless registration for %q already exists; use a different id or delete the existing agent", ErrAgentExists, incoming.ID)
+	}
+	return fmt.Errorf("%w: %q", ErrAgentExists, incoming.ID)
 }
 
 // DefaultMessageTTL is the lifetime a stored message gets when the delivery

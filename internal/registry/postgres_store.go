@@ -292,10 +292,7 @@ INSERT INTO agents (
 			// between the INSERT and the read — falls back to the plain
 			// duplicate class rather than inventing a class it could not
 			// observe.
-			if s.storedKeyDiffers(ctx, agent.ID, pubKeyArg) {
-				return fmt.Errorf("%w: %q", ErrPublicKeyMismatch, agent.ID)
-			}
-			return fmt.Errorf("%w: %q", ErrAgentExists, agent.ID)
+			return s.registrationConflict(ctx, agent.ID, pubKeyArg)
 		}
 		return fmt.Errorf("register agent: %w", err)
 	}
@@ -319,12 +316,12 @@ INSERT INTO agents (
 // read error — is reported as "no difference", i.e. the caller falls back to
 // ErrAgentExists. Only an OBSERVED different key earns the mismatch class: a
 // failed read must never be laundered into a claim about key rotation.
-func (s *PostgresStore) storedKeyDiffers(ctx context.Context, id string, incoming []byte) bool {
+func (s *PostgresStore) registrationConflict(ctx context.Context, id string, incoming []byte) error {
 	var stored []byte
 	if err := s.pool.QueryRow(ctx, `SELECT public_key FROM agents WHERE id = $1;`, id).Scan(&stored); err != nil {
-		return false
+		return fmt.Errorf("%w: %q", ErrAgentExists, id)
 	}
-	return !bytes.Equal(stored, incoming)
+	return registrationConflict(&Agent{ID: id, PublicKey: HexKey(stored)}, &Agent{ID: id, PublicKey: HexKey(incoming)})
 }
 
 // Get returns an agent by ID, mapping ErrNoRows to ErrAgentNotFound.
