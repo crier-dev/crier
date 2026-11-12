@@ -1,0 +1,29 @@
+{
+  "tick_id": "crier-foreman-2026-11-12-15-18-43",
+  "project": "crier",
+  "block": "DF-CRIER-504",
+  "wave_budget": 12,
+  "slots": 12,
+  "base": "276d05a984c3b10d52b677f359b5c51ee45ee2e6",
+  "selection": "DF-CRIER-503 and DF-CRIER-504 are pending, both have no dependencies, and their verified implementation seams are disjoint: MCP prereq/startup surface versus registry key-conflict classification.",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-503",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-503",
+      "branch": "wt/DF-CRIER-503",
+      "base_sha": "276d05a984c3b10d52b677f359b5c51ee45ee2e6",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-15-18-43/attempt-1/brief-DF-CRIER-503.txt",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro"
+    },
+    {
+      "task_id": "DF-CRIER-504",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-504",
+      "branch": "wt/DF-CRIER-504",
+      "base_sha": "276d05a984c3b10d52b677f359b5c51ee45ee2e6",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-15-18-43/attempt-1/brief-DF-CRIER-504.txt",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro"
+    }
+  ]
+}

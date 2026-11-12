@@ -4059,3 +4059,19 @@ tasks:
   status: complete
   created_at: '2026-11-12T10:13:33.185864+00:00'
   completed_at: '2026-11-12T10:34:57.668490+00:00'
+- id: DF-CRIER-503
+  title: qualify MCP tool surface on rejected identity
+  criteria:
+  - 'PROOF: merged-tree tests and startup report distinguish confirmed and rejected
+    identity; FAILIF: rejected identity retains an unqualified availability claim'
+  status: complete
+  created_at: '2026-11-12T16:20:18.821715+00:00'
+  completed_at: '2026-11-12T16:20:19.965170+00:00'
+- id: DF-CRIER-504
+  title: classify keyless registration conflicts
+  criteria:
+  - 'PROOF: merged-tree tests classify empty/empty keyless duplicate and preserve
+    genuine mismatch; FAILIF: empty/empty is reported as different public key'
+  status: complete
+  created_at: '2026-11-12T16:20:35.204407+00:00'
+  completed_at: '2026-11-12T16:20:36.358333+00:00'
