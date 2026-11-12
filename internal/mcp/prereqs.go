@@ -138,18 +138,44 @@ func CapabilityReportMarkdown(toolNames []string) string {
 	return b.String()
 }
 
+// ToolSurfaceReport renders the startup report without an identity verdict.
+// It is retained for library callers that do not perform remote registration.
 func ToolSurfaceReport(mode string, toolCount int, agentID, httpURL, meshURL string) (msg string, attrs []any) {
+	return ToolSurfaceReportWithIdentity(mode, toolCount, agentID, httpURL, meshURL, "")
+}
+
+// ToolSurfaceReportWithIdentity renders the startup report and, when supplied,
+// qualifies the all-available claim with the remote identity verdict. A remote
+// bridge can have all environment prerequisites while its signing key is
+// rejected by the server; emitting the unqualified claim in that state would
+// tell the operator that the advertised surface is usable when every signed
+// request will fail.
+//
+// identityState is empty when identity registration is not part of the caller's
+// mode. A non-empty value is emitted as the structured identity attribute. Only
+// "confirmed" permits the unqualified all-available wording.
+func ToolSurfaceReportWithIdentity(mode string, toolCount int, agentID, httpURL, meshURL, identityState string) (msg string, attrs []any) {
 	unavailable, missing := UnavailableTools(agentID, httpURL, meshURL)
 	if len(unavailable) == 0 {
-		return fmt.Sprintf("MCP tool surface: all %d advertised tools are available in this mode", toolCount),
-			[]any{"mode", mode, "tools", toolCount}
-	}
-	return "MCP tool surface: some advertised tools cannot work in this mode — set the missing environment variables to enable them",
-		[]any{
-			"mode", mode,
-			"tools", toolCount,
-			"available_tools", toolCount - len(unavailable),
-			"unavailable_tools", unavailable,
-			"missing_env", missing,
+		msg = fmt.Sprintf("MCP tool surface: all %d advertised tools are available in this mode", toolCount)
+		attrs = []any{"mode", mode, "tools", toolCount}
+		if identityState != "" {
+			attrs = append(attrs, "identity", identityState)
+			if identityState != "confirmed" {
+				msg += fmt.Sprintf(" (identity=%s)", identityState)
+			}
 		}
+		return msg, attrs
+	}
+	attrs = []any{
+		"mode", mode,
+		"tools", toolCount,
+		"available_tools", toolCount - len(unavailable),
+		"unavailable_tools", unavailable,
+		"missing_env", missing,
+	}
+	if identityState != "" {
+		attrs = append(attrs, "identity", identityState)
+	}
+	return "MCP tool surface: some advertised tools cannot work in this mode — set the missing environment variables to enable them", attrs
 }
