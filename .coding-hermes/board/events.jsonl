@@ -2462,3 +2462,4 @@
 {"id": 1794115926888324442, "event_type": "task_updated", "task_id": "QA-CRIER-61", "actor": "foreman", "tick_number": null, "timestamp": "2026-11-12T11:41:55Z", "detail": "{\"status\":\"pending\"}"}
 {"id": 1794115926888324443, "event_type": "task_updated", "task_id": "QA-CRIER-59", "actor": "foreman", "tick_number": null, "timestamp": "2026-11-12T11:41:59Z", "detail": "{\"status\":\"pending\"}"}
 {"id": 1794115926888324444, "event_type": "task_updated", "task_id": "QA-CRIER-8-R2", "actor": "foreman", "tick_number": null, "timestamp": "2026-11-12T11:41:59Z", "detail": "{\"status\":\"pending\"}"}
+{"id": 1794115926888324445, "event_type": "task_created", "task_id": "QA-CRIER-62", "actor": "foreman", "tick_number": null, "timestamp": "2026-11-12T12:58:31Z", "detail": "{\"id\":\"QA-CRIER-62\",\"status\":\"pending\"}"}
