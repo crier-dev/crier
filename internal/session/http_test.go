@@ -73,6 +73,7 @@ func localBackends() []localBackend {
 type apiHarness struct {
 	srv *httptest.Server
 	reg *registry.MemoryStore
+	h   *Handler
 }
 
 func newAPIHarness(t *testing.T, store Repository) *apiHarness {
@@ -86,7 +87,7 @@ func newAPIHarness(t *testing.T, store Repository) *apiHarness {
 	registerSessionRoutes(r, h)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
-	return &apiHarness{srv: srv, reg: reg}
+	return &apiHarness{srv: srv, reg: reg, h: h}
 }
 
 // newAPIHarnessWithGrants is newAPIHarness with the CR-CHAT-021 grant bridge
@@ -108,7 +109,7 @@ func newAPIHarnessWithGrants(t *testing.T, store Repository, grants []Permission
 	registerSessionRoutes(r, h)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
-	return &apiHarness{srv: srv, reg: reg}
+	return &apiHarness{srv: srv, reg: reg, h: h}
 }
 
 // registerSessionRoutes wires the session API surface on r: every route the

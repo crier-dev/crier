@@ -1,0 +1,14 @@
+PERF-002 benchmark evidence
+
+Command:
+  go test ./internal/session -run '^$' -bench '^BenchmarkSessionList$' -benchtime=20x -count=1
+
+Fixture: shipped benchSeedSessions=20 x benchSeedMessages=20.
+Observed loadavg: 0.85 2.76 7.13 at the foreman probe; benchmark host is shared.
+Observed result:
+  BenchmarkSessionList-16  20  12346695 ns/op  p50_ms_list=12.10  p95_ms_list=13.71  p99_ms_all=13.88  p99_ms_list=13.88
+  benchmark budget verdict=PASS, budget_ms=100
+
+This run proves the shipped fixture budget arm and provides the current fast-path timing. The 200-session scratch fixture and same-window control numbers remain the board's prior measured evidence and are not re-claimed as newly measured here. PostgreSQL performance is not claimed; the explicit non-SQL fast-path fallback remains the contract.
+
+ch:trace row=PERF-002 spec=none:board-acceptance wave=none:serial-fallback test=TestSQLSessionListSummaryMatchesStateView doc=docs/performance.md evidence=docs/perf-002-benchmark.txt witness=none:live-pg-not-required verdict=none:foreman-judge commit=none:worker-commit memory=none:foreman-write

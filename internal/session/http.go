@@ -555,6 +555,16 @@ func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if reader, ok := h.store.(SessionListReader); ok {
+		out, err := h.listSessionSummaries(r.Context(), reader, realm, stateFilter, kindFilter, minMessages, minParticipants)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
 	ids, err := h.store.Sessions(r.Context())
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())

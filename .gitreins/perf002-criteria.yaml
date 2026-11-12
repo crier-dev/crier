@@ -1,0 +1,16 @@
+tasks:
+  - id: PERF-002
+    title: PERF-002 bounded GET sessions summary
+    criteria:
+      - criterion: "AC1: GET /sessions uses bounded summary queries without per-message State loads"
+        proof: "go test ./internal/session -run 'TestSQLSessionListSummary' -count=1"
+        failure_condition: "The focused summary tests fail or the handler retains the State-loading path for SQLStore"
+      - criterion: "AC2: output, namespace, kind and count filters preserve existing semantics; JSONL fallback remains"
+        proof: "go test ./internal/session -run 'TestSQLSessionListSummary|TestJSONLStoreKeepsStateLoadingListFallback' -count=1"
+        failure_condition: "Any equivalence, filter, membership-clock, or JSONL fallback test fails"
+      - criterion: "AC3: shipped BenchmarkSessionList budget and docs evidence are present"
+        proof: "go test ./internal/session -run '^$' -bench '^BenchmarkSessionList$' -benchtime=20x -count=1"
+        failure_condition: "The benchmark does not emit a PASS budget verdict or docs/perf-002-benchmark.txt is absent"
+      - criterion: "AC4: the implementation builds and vets"
+        proof: "go build ./... && go vet ./... && go test ./internal/session/... -count=1"
+        failure_condition: "Any build, vet, or focused package test fails"
