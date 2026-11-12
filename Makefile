@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest release-pin-check release-pin-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest wait-for-command-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest verify-live-release-selftest
+.PHONY: help build build-mcp mcp-capabilities-check build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest release-pin-check release-pin-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest wait-for-command-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest verify-live-release-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -36,6 +36,7 @@ help:
 	@echo "  toolchain-selftest  Prove that check still rejects a simulated go1.26.5 against today's floor, accepts a toolchain at/above it, derives the floor from go.mod, and fails closed on unreadable input — PATH shims only, no network (DF-CRIER-496)"
 	@echo "  verify-live-release-selftest Verify offline release ancestry and process-executable hash checks, including altered-hash rejection (REVIEW-001)"
 	@echo "  build-mcp         Compile the MCP server binary into bin/crier-mcp"
+	@echo "  mcp-capabilities-check  Verify generated MCP capability report matches tools/list"
 	@echo "  build-front       Compile the authenticating front into bin/crier-front (DF-CRIER-333)"
 	@echo "  front-e2e         Prove the shipped front makes /chat usable: direct 401, fronted panel, real send, token absent from page source/storage (DF-CRIER-333)"
 	@echo "  mcp               Build and run the MCP bridge in one command (stdio; the documented launcher — its stdout carries only JSON-RPC frames)"
@@ -123,6 +124,7 @@ build:
 # `make mcp-stdout-check` gates this; do not drop the `@` or re-prefix the recipe.
 build-mcp:
 	@go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier-mcp ./cmd/crier-mcp
+
 # The shipped authenticating front (DF-CRIER-333). An auth-enabled relay demands
 # `Authorization: Bearer` on every non-exempt path, including a browser's GET
 # /chat; this process holds the credential and injects it on the wire so the token
@@ -1160,3 +1162,7 @@ chat-ui-browser-selftest:
 
 generate:
 	go generate ./...
+	go run ./cmd/mcp-capabilities
+
+mcp-capabilities-check:
+	@go run ./cmd/mcp-capabilities -check

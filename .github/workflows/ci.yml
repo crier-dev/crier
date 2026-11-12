@@ -131,6 +131,11 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # REV-CRIER-2: the checked-in MCP capability report is generated from the
+      # actual tools/list registration metadata and must not drift.
+      - name: MCP capability report drift check
+        run: make mcp-capabilities-check
+
       - name: Vet
         run: go vet ./...
 
