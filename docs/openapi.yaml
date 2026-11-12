@@ -8,7 +8,8 @@ info:
     Auth: every endpoint except /health and /version requires `Authorization: Bearer <CR_AUTH_TOKEN>` (middleware.Auth). /health and /version are exempt.
 
     Distributed tracing is opt-in with CR_TRACING_ENABLED. When enabled, Crier accepts and propagates W3C `traceparent` context and exports sampled spans to the configured OTLP HTTP endpoint (default) or the local-only stdout exporter. Trace export never includes message payloads, prompts, authentication data or query strings. Tracing is disabled by default; the Prometheus `/metrics` surface remains independent.
-  version: "0.1.0"
+  # Policy: info.version tracks the release tag, without its leading v.
+  version: "0.6.0"
 servers:
   - url: http://localhost:8767
     description: Local development
