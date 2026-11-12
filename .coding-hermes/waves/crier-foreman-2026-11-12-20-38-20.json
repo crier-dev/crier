@@ -1,0 +1,16 @@
+{
+  "tick_id": "crier-foreman-2026-11-12-20-38-20",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "wave_budget": 1,
+  "slots": 1,
+  "mode": "serial-fallback",
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first, but its acceptance explicitly depends on sibling-repo coding-hermes-boardctl work and an external INGRESS-CRIER-001 e2e leg; it is not executable in crier. REV-CRIER-2 is the next dispatchable row in the same ranked board and is selected as a single-row block because WAVE_BUDGET=1.",
+  "workers": [],
+  "status": "verification-only-pre-dispatch",
+  "notes": [
+    "REV-CRIER-2 is independently pending with no depends_on edges.",
+    "Its currently published tree already contains the advertised capability inventory and 23/11 prereq tests; implementation premise requires reconciliation before dispatch.",
+    "No worker or GitReins lifecycle was created because the canonical checkout ownership barrier was unresolved and the current published tree is not yet proven to require code changes."
+  ]
+}
