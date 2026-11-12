@@ -593,3 +593,33 @@ Reader rules this gate assumes, and you should keep:
 - Do not try to fake the binding by appending a record: `session.harness.bind`
   is written only after a delivery to a session that ALREADY names a harness
   (`cmd/server/harnesswiring.go`), so it needs the value it would produce.
+
+## MCP bridge: identity drift after a restart (live-verified 2026-11-12 @ 1774dcd7)
+
+- Real-use contract confirmed through the stdio bridge: `register_agent` →
+  `deliver_message` (repeat an `idempotency_key` and the SAME `message_id` comes
+  back, no extra row) → `inbox_stats` → `retrieve_inbox` (returns a `lease_id`)
+  → `ack_messages` → `queue_depth 0`. Payloads are base64 on the wire, as the
+  docs say; `?limit=100` pages correctly (100/175, 100/395).
+- Manual probes: unwrap `reply["result"]` before reading `content` / `isError`.
+  Reading them at the top level of the JSON-RPC reply makes every call look
+  empty — that is a probe bug, not a broken tool surface.
+- Trap: with an EPHEMERAL key (no `CRIER_AGENT_PRIVATE_KEY_FILE`), re-running the
+  bridge under the same `CRIER_AGENT_ID` prints `all 23 advertised tools are
+  available` in the same second that it warns every signed request will be 401,
+  and the first `retrieve_inbox` then fails `401 signature verification failed`.
+  The ERROR names the remedy and is correct; the surface line is the misleading
+  one (DF-CRIER-503). Fix on the client side: pin
+  `CRIER_AGENT_PRIVATE_KEY_FILE` to the registered key, or use a fresh agent id
+  per throwaway run.
+- Re-registering a KEYLESS agent returns `agent already registered with a
+  different public key` even though both keys are empty
+  (`internal/registry/store.go:477`, DF-CRIER-504) — a restart in keyless mode
+  is a dead end, so prefer a fresh id or delete the stale agent.
+- Cost of the whole path is negligible: bridge spawn → `tools/list` 7.5 ms,
+  deliver 0.26 ms/msg (3.8k msgs/s), retrieve/ack ≈ 0.3 ms. No perf reason to
+  batch defensively.
+- Docker: `docker compose up -d` with `CRIER_HOST_PORT` (default 8767) reaches
+  `/health` 200 as soon as the container starts. If a compose stack refuses to
+  bind, check for leftover stacks from earlier QA runs (`qa-crier-repro-*`,
+  `qacrier*`) — they hold the alternate ports, not the product.
