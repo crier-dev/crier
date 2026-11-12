@@ -118,6 +118,8 @@ var SchemaStatements = append([]string{
 		created_by        JSONB NULL,
 		created_at        TIMESTAMPTZ NOT NULL
 	)`,
+	`CREATE INDEX IF NOT EXISTS chat_threads_session_idx
+		ON chat_threads (session_id, thread_id)`,
 	`CREATE TABLE IF NOT EXISTS chat_context_shares (
 		session_id          TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
 		member_type         TEXT NOT NULL,

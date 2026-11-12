@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,63 @@ func appendRecords(t *testing.T, store Store, recs []*Record) {
 // ---------------------------------------------------------------------------
 // The adapter is the shared repository, and the view is the spec's shape
 // ---------------------------------------------------------------------------
+
+func TestSQLite_ChatThreadsIndexAppliedToExistingDatabase(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "existing.sqlite")
+	store, err := NewSQLiteStore(path)
+	require.NoError(t, err)
+	_, err = store.DB().ExecContext(context.Background(), `DROP INDEX chat_threads_session_idx`)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	reopened, err := NewSQLiteStore(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopened.Close() })
+	var count int
+	require.NoError(t, reopened.DB().QueryRowContext(context.Background(),
+		`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'chat_threads_session_idx'`).Scan(&count))
+	require.Equal(t, 1, count)
+}
+
+func TestSQLite_ChatThreadsLoadUsesSessionIndex(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	_, err := store.DB().ExecContext(ctx, `
+		INSERT INTO chat_sessions (id, created_by, created_at) VALUES ('plan-session', 'tester', '2026-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+	for i := 0; i < 3; i++ {
+		_, err = store.DB().ExecContext(ctx, `
+			INSERT INTO chat_threads (thread_id, session_id, root_message_id, created_at)
+			VALUES (?, 'plan-session', ?, '2026-01-01T00:00:00Z')`,
+			"thread-"+string(rune('a'+i)), "message-"+string(rune('a'+i)))
+		require.NoError(t, err)
+	}
+
+	rows, err := store.DB().QueryContext(ctx, `EXPLAIN QUERY PLAN
+		SELECT thread_id, session_id, parent_thread_id, root_message_id,
+		       anchor_message_id, created_by, created_at
+		FROM chat_threads WHERE session_id = ? ORDER BY thread_id`, "plan-session")
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+		plan = append(plan, detail)
+	}
+	require.NoError(t, rows.Err())
+	planText := strings.Join(plan, "\n")
+	require.NotContains(t, strings.ToUpper(planText), "SCAN CHAT_THREADS")
+	require.Regexp(t, `(?i)SEARCH chat_threads USING (COVERING )?INDEX chat_threads_session_idx`, planText)
+
+	threads, err := store.loadThreads(ctx, "plan-session")
+	require.NoError(t, err)
+	require.Len(t, threads, 3)
+}
 
 func TestSQLite_BackendNameAndSchemaShape(t *testing.T) {
 	t.Parallel()

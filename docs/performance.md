@@ -258,6 +258,26 @@ untouched, and a database that refuses WAL behaves exactly as it did before.
 3. **One aggregate query for the list.** Replace the per-session `Load` in
    `HandleListSessions` with a single grouped read over the view tables (counts,
    last message, preview), so `GET /sessions` stops scaling with session count.
+
+## Applied fix — thread-load index (PERF-003)
+
+`chat_threads_session_idx` now covers `(session_id, thread_id)` in the normal
+SQLite schema initialization path. Because it is `CREATE INDEX IF NOT EXISTS`,
+opening an existing database applies the index without changing stored rows or
+thread-load output. `loadThreads` filters by `session_id` and orders by
+`thread_id`, so SQLite can use this index for both operations.
+
+The acceptance test seeds `chat_threads`, runs `EXPLAIN QUERY PLAN` for the exact
+thread-load query, rejects a full table scan, and requires `SEARCH` using the new
+index. It is a small deterministic fixture: it proves the access path and output
+shape, not a production-scale latency improvement. No benchmark number is
+claimed for PERF-003. Thread writes remain covered by the existing projection
+and thread lifecycle tests; their actual test result is reported with the
+change.
+
+The PostgreSQL schema declares the same idempotent `(session_id, thread_id)`
+index in its initialization path. PostgreSQL query-plan performance was not
+measured in this change, so no PostgreSQL performance win is claimed.
 4. **Widen the read pool once WAL is on.** Multiple readers are safe under WAL;
    keeping one connection is only required today because the per-connection
    pragmas must not be reset by a fresh pooled connection.
