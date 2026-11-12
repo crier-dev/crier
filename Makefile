@@ -993,6 +993,8 @@ release:
 	esac; \
 	echo "release: checking the README release pins match $$v (RELEASE-017)"; \
 	bash scripts/check-release-pin.sh "$$v"; \
+	echo "release: checking OpenAPI info.version matches $$v"; \
+	bash scripts/check-openapi-version.sh "$$v"; \
 	echo "release: version ......... $$v"; \
 	echo "release: repository ...... $$(git rev-parse --show-toplevel)"; \
 	echo "release: ensuring the working tree is clean"; \

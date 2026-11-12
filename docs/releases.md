@@ -34,7 +34,13 @@ contain its own changelog entry. So, before tagging:
    on the version string alone would just have to be edited in the same commit.
    Moving it with the changelog entry is the lock: one commit carries both, and
    the tag point can never contain one without the other.
-5. Commit that (with whatever else the release contains) — `make release`
+5. Set `info.version` in `docs/openapi.yaml` to the release tag being cut,
+   without its leading `v`, then run `make generate` to refresh the embedded
+   copy. This is the release-version policy, not the OpenAPI language version.
+   `bash scripts/check-openapi-version.sh` checks the nearest reachable tag;
+   `make release VERSION=vX.Y.Z` checks the prospective tag before creating it
+   and refuses mismatched or different copies.
+6. Commit that (with whatever else the release contains) — `make release`
    refuses a dirty tree, and this is the reason it does.
 
 ## 2. Cut the tag
