@@ -249,7 +249,37 @@ func TestToolSurfaceReportPinsStartupLine(t *testing.T) {
 			t.Errorf("all-available report must not carry unavailable_tools: %v", got)
 		}
 	})
+
+	t.Run("remote identity rejected", func(t *testing.T) {
+		msg, attrs := ToolSurfaceReportWithIdentity("remote/bridge", tools,
+			"bridge", "http://localhost:8767", "ws://localhost:8767/mesh/connect/bridge", "rejected")
+		if strings.Contains(msg, "all 23 advertised tools are available") && !strings.Contains(msg, "identity=rejected") {
+			t.Fatalf("rejected identity must qualify the availability claim: %q", msg)
+		}
+		got := attrsMap(t, attrs)
+		if got["identity"] != "rejected" {
+			t.Fatalf("identity = %v, want rejected", got["identity"])
+		}
+	})
+
+	t.Run("remote identity confirmed", func(t *testing.T) {
+		msg, attrs := ToolSurfaceReportWithIdentity("remote/bridge", tools,
+			"bridge", "http://localhost:8767", "ws://localhost:8767/mesh/connect/bridge", "confirmed")
+		const want = "MCP tool surface: all 23 advertised tools are available in this mode"
+		if msg != want {
+			t.Fatalf("msg = %q, want %q", msg, want)
+		}
+		got := attrsMap(t, attrs)
+		if got["identity"] != "confirmed" {
+			t.Fatalf("identity = %v, want confirmed", got["identity"])
+		}
+	})
 }
+
+// ch:trace row=DF-CRIER-503 spec=none:dogfood-finding wave=crier-foreman-2026-11-12-15-18-43 test=internal/mcp/prereqs_test.go::TestToolSurfaceReportPinsStartupLine doc=none:runtime-surface evidence=internal/mcp/prereqs_test.go witness=none:live-bridge-not-required verdict=none:foreman-gitreins commit=none:worker-commit memory=none:foreman-closeout
+// STATUS: complete
+// TIER: T1
+// EVIDENCE: internal/mcp/prereqs_test.go::TestToolSurfaceReportPinsStartupLine
 
 // TestScopeRestrictedToolsStateTheirScope pins which tools carry the bridge
 // scope restriction and where the note lives. In remote mode the bridge sends

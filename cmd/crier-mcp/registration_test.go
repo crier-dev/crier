@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/internal/mcp"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/gorilla/mux"
 )
@@ -162,7 +163,14 @@ func TestEnsureBridgeIdentityLogsExistedMatch(t *testing.T) {
 	}
 	h := &captureHandler{}
 
-	ensureBridgeIdentity(rs, bridgeIdentity{Remote: true, AgentID: "bridge-2", PublicKey: pub, KeySource: keySourceFile}, slog.New(h))
+	identityState := ensureBridgeIdentity(rs, bridgeIdentity{Remote: true, AgentID: "bridge-2", PublicKey: pub, KeySource: keySourceFile}, slog.New(h))
+	if identityState != identityConfirmed {
+		t.Fatalf("identity state = %q, want %q", identityState, identityConfirmed)
+	}
+	msg, _ := mcp.ToolSurfaceReportWithIdentity("remote/bridge", 23, "bridge-2", srv.URL, "ws://localhost:8767/mesh/connect/bridge-2", identityState)
+	if msg != "MCP tool surface: all 23 advertised tools are available in this mode" {
+		t.Fatalf("healthy surface message = %q", msg)
+	}
 
 	if _, ok := h.find(slog.LevelInfo, "already registered"); !ok {
 		t.Fatalf("no info line about the existing identity; got:\n%s", h.joined())
@@ -187,7 +195,9 @@ func TestEnsureBridgeIdentityLogsKeyMismatch(t *testing.T) {
 	pub, rs := bridgeKey(t, srv.URL, "bridge-3")
 	h := &captureHandler{}
 
-	ensureBridgeIdentity(rs, bridgeIdentity{Remote: true, AgentID: "bridge-3", PublicKey: pub, KeySource: keySourceEphemeral}, slog.New(h))
+	if got := ensureBridgeIdentity(rs, bridgeIdentity{Remote: true, AgentID: "bridge-3", PublicKey: pub, KeySource: keySourceEphemeral}, slog.New(h)); got != identityRejected {
+		t.Fatalf("identity state = %q, want %q", got, identityRejected)
+	}
 
 	rec, ok := h.find(slog.LevelError, "DIFFERENT public key")
 	if !ok {
@@ -226,7 +236,9 @@ func TestEnsureBridgeIdentityLogsTransportFailure(t *testing.T) {
 	pub, rs := bridgeKey(t, srv.URL, "bridge-4")
 	h := &captureHandler{}
 
-	ensureBridgeIdentity(rs, bridgeIdentity{Remote: true, AgentID: "bridge-4", PublicKey: pub, KeySource: keySourceFile}, slog.New(h))
+	if got := ensureBridgeIdentity(rs, bridgeIdentity{Remote: true, AgentID: "bridge-4", PublicKey: pub, KeySource: keySourceFile}, slog.New(h)); got != identityUnconfirmed {
+		t.Fatalf("identity state = %q, want %q", got, identityUnconfirmed)
+	}
 
 	rec, ok := h.find(slog.LevelError, "registration FAILED")
 	if !ok {

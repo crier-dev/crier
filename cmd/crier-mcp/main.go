@@ -29,6 +29,10 @@ import (
 const (
 	keySourceFile      = "file"      // CRIER_AGENT_PRIVATE_KEY_FILE
 	keySourceEphemeral = "ephemeral" // generated in-process for this run
+
+	identityConfirmed   = "confirmed"
+	identityRejected    = "rejected"
+	identityUnconfirmed = "unconfirmed"
 )
 
 // Env-var names accepted for the bridge's shared bearer token, and the
@@ -152,8 +156,10 @@ func run(args []string) int {
 
 	// Register the bridge's own identity before serving, so the reply leg
 	// (get_messages / ask_agent polling its own inbox) works without an
-	// operator registering the agent by hand (DF-CRIER-28).
-	ensureBridgeIdentity(store, identity, slog.Default())
+	// operator registering the agent by hand (DF-CRIER-28). Keep the verdict
+	// for the startup surface: a server-side key mismatch leaves the advertised
+	// tools reachable but unusable because every signed request will be rejected.
+	identityState := ensureBridgeIdentity(store, identity, slog.Default())
 
 	var deliveryHandler *registry.Handler
 	if !identity.Remote {
@@ -209,10 +215,11 @@ func run(args []string) int {
 	// their variables in their own descriptions (internal/mcp) — and the
 	// operator gets ONE line here, before the first client call. slog writes
 	// to stderr by default, so the JSON-RPC wire on stdout stays clean.
-	reportMsg, reportAttrs := mcp.ToolSurfaceReport(
+	reportMsg, reportAttrs := mcp.ToolSurfaceReportWithIdentity(
 		modeName(os.Getenv(mcp.EnvHTTPURL) != "", cfg.Database.URL != ""),
 		server.ToolCount(),
 		os.Getenv(mcp.EnvAgentID), os.Getenv(mcp.EnvHTTPURL), os.Getenv(mcp.EnvMeshURL),
+		identityState,
 	)
 	slog.Info(reportMsg, reportAttrs...)
 
@@ -357,37 +364,41 @@ func initStore(cfg config.Config) (registry.Store, bridgeIdentity, func(), error
 // Registration failure never aborts startup: the bridge may legitimately be
 // pointed at a server that is unreachable at this instant, and a harness that
 // is already running should not be killed by a bootstrap step. Every failure
-// is logged at error level with its cause instead of being swallowed.
-func ensureBridgeIdentity(store registry.Store, id bridgeIdentity, logger *slog.Logger) {
+// is logged at error level with its cause instead of being swallowed. The
+// returned state is consumed by the startup tool-surface report.
+func ensureBridgeIdentity(store registry.Store, id bridgeIdentity, logger *slog.Logger) string {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if !id.Remote || id.AgentID == "" {
-		return
+		return identityUnconfirmed
 	}
 	remote, ok := store.(*registry.RemoteStore)
 	if !ok {
-		return
+		return identityUnconfirmed
 	}
 
 	res, err := remote.EnsureRegistered(id.AgentID, id.PublicKey, bridgeCapabilities)
 	if err != nil {
 		logger.Error("bridge identity registration FAILED — get_messages/ask_agent will fail with \"agent not found\" until this agent is registered on the server",
 			"agent_id", id.AgentID, "key_source", id.KeySource, "error", err)
-		return
+		return identityUnconfirmed
 	}
 
 	switch {
 	case res.Created:
 		logger.Info("registered bridge identity on the Crier server",
 			"agent_id", id.AgentID, "key_source", id.KeySource, "capabilities", bridgeCapabilities)
+		return identityConfirmed
 	case res.KeyMatches:
 		logger.Info("bridge identity already registered and the server's public key matches — no action needed",
 			"agent_id", id.AgentID, "key_source", id.KeySource)
+		return identityConfirmed
 	default:
 		logger.Error("bridge identity already exists on the server with a DIFFERENT public key — every signed request from this bridge will be rejected with 401",
 			"agent_id", id.AgentID, "key_source", id.KeySource,
 			"remedy", fmt.Sprintf("set CRIER_AGENT_PRIVATE_KEY_FILE to the private key whose public half is registered for %q, or delete the stale agent server-side (DELETE /agents/%s) and restart, or point the bridge at a fresh in-memory server", id.AgentID, id.AgentID))
+		return identityRejected
 	}
 }
 
