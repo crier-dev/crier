@@ -6,6 +6,7 @@
   "canonical_barrier": "Four inherited tracked overlays plus bare .git/ORIG_HEAD; blocked receipt validated structurally but cwd/fd probes were incomplete and marker field omitted ORIG_HEAD, so canonical checkout remained barred.",
   "continuation": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-20-54-27/attempt-1794516914-3143901/continuation-wt",
   "base_sha": "48ee6d7773461a7c7b46c629124d64e8d93af5cb",
+  "closeout_sha": "3fb7a776ee950a94db1c84bee814df2d8d880caa",
   "selection": "block_drive ranked BOARDCTL-HOOK-001 first, but its acceptance is sibling-repo/external-INGRESS gated. REV-CRIER-2 was the next executable block; its two implementation rows are already landed and judged, so this tick performed verification-only reconciliation rather than dispatching duplicate workers.",
   "rows": [
     {
