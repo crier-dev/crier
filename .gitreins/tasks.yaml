@@ -4028,3 +4028,11 @@ tasks:
   status: complete
   created_at: '2026-11-11T22:11:36.984873+00:00'
   completed_at: '2026-11-11T22:17:01.053971+00:00'
+- id: CR-MERGED-PERF
+  title: Merged PERF-002-R3 rework + PERF-003-R2 index cost measurement on main
+  criteria:
+  - merged tree builds, vets, full suite green, PERF-002 latency ACs met on merged
+    tree
+  status: complete
+  created_at: '2026-11-12T09:43:57.508905+00:00'
+  completed_at: '2026-11-12T09:44:02.494883+00:00'
