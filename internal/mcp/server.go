@@ -184,6 +184,16 @@ func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 // definition list.
 func (s *MCPServer) ToolCount() int { return len(s.toolDefinitions()) }
 
+// ToolNames returns the names advertised by tools/list in registration order.
+func (s *MCPServer) ToolNames() []string {
+	defs := s.toolDefinitions()
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Name)
+	}
+	return names
+}
+
 // registerTools populates the tool registry (spec §4).
 func (s *MCPServer) registerTools() {
 	s.tools["register_agent"] = s.handleRegisterAgent
