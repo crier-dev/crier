@@ -39,7 +39,7 @@
     "openapi_tests": "PASS: go test ./cmd/server -run TestOpenAPI|TestDocsClaims|TestREADMEOpenAPIInventoryMatchesSpec -count=1",
     "lint": "PASS: make lint (go vet ./...)"
   },
-  "remote_ci": "green for exact published SHA 48ee6d7773461a7c7b46c629124d64e8d93af5cb: latest completed runs are success; one newer run is pending, so the aggregate remains pending for that workflow",
-  "remote_parity": "origin/main and gitlab/main were equal at the canonical pre-write observation; continuation branch has no commit yet",
+  "remote_ci": "pending: final closeout 88670243b0c8aeb5b401d80a97917b4700ac02f0 has one completed success, one in_progress, and one pending run in the final gh run list; prior 48ee6d77 completed runs were successful",
+  "remote_parity": "PASS: origin/main and gitlab/main both equal final closeout 88670243b0c8aeb5b401d80a97917b4700ac02f0",
   "trace": "ch:trace row=REV-CRIER-2 spec=none:board-acceptance wave=none:verification-only test=make mcp-capabilities-check;go test ./internal/mcp/... doc=docs/mcp-capabilities.md evidence=.gitreins/history/2026-11-12/77fa68b6/verdict.json witness=none:live-server-not-required verdict=77fa68b6 commit=48ee6d7773461a7c7b46c629124d64e8d93af5cb memory=none:memory-write-not-run"
 }
