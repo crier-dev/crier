@@ -17,10 +17,7 @@ func (s *MemoryStore) Register(agent *Agent) error {
 	defer s.mu.Unlock()
 
 	if existing, exists := s.agents[agent.ID]; exists {
-		if registrationKeyDiffers(existing, agent) {
-			return fmt.Errorf("%w: %q", ErrPublicKeyMismatch, agent.ID)
-		}
-		return fmt.Errorf("%w: %q", ErrAgentExists, agent.ID)
+		return registrationConflict(existing, agent)
 	}
 
 	now := time.Now()
