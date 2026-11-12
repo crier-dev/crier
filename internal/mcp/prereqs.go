@@ -1,6 +1,9 @@
 package mcp
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // The three environment variables that gate the bridge-only MCP tools
 // (DF-CRIER-153). These are the same names the handlers use in their gate
@@ -23,8 +26,9 @@ const (
 // toolPrerequisite is one tool's environment gate: EVERY listed variable must
 // be non-empty for the tool to work in the running mode.
 type toolPrerequisite struct {
-	Tool    string
-	EnvVars []string
+	Tool      string
+	EnvVars   []string
+	Condition string
 }
 
 // toolPrerequisites is the single source of truth for "which advertised tool
@@ -48,25 +52,25 @@ type toolPrerequisite struct {
 // TestToolDescriptionsNameTheirPrerequisites derives that requirement from the
 // handlers' real error strings rather than from this table.
 var toolPrerequisites = []toolPrerequisite{
-	{Tool: "get_messages", EnvVars: []string{EnvAgentID}},
-	{Tool: "ask_agent", EnvVars: []string{EnvAgentID}},
-	{Tool: "mesh_peers", EnvVars: []string{EnvHTTPURL}},
-	{Tool: "mesh_request", EnvVars: []string{EnvMeshURL, EnvAgentID}},
+	{Tool: "get_messages", EnvVars: []string{EnvAgentID}, Condition: "CRIER_AGENT_ID is set (the bridge identity owns the inbox lease and acknowledgements)"},
+	{Tool: "ask_agent", EnvVars: []string{EnvAgentID}, Condition: "CRIER_AGENT_ID is set (the bridge identity owns the inbox lease and reply polling)"},
+	{Tool: "mesh_peers", EnvVars: []string{EnvHTTPURL}, Condition: "CRIER_HTTP_URL is set to the Crier server base URL"},
+	{Tool: "mesh_request", EnvVars: []string{EnvMeshURL, EnvAgentID}, Condition: "CRIER_MESH_URL and CRIER_AGENT_ID are set (the bridge opens its WebSocket as that identity)"},
 	// CR-CHAT-033: the dagger control tools address the run records the Crier
 	// SERVER holds, so they need the server base URL like mesh_peers does.
 	// The executor itself is reached by the SERVER (CR_DAGGER_URL), never by
 	// the bridge — crier embeds no executor.
-	{Tool: "create_run", EnvVars: []string{EnvHTTPURL}},
-	{Tool: "run_status", EnvVars: []string{EnvHTTPURL}},
-	{Tool: "cancel_run", EnvVars: []string{EnvHTTPURL}},
-	{Tool: "resume_run", EnvVars: []string{EnvHTTPURL}},
-	{Tool: "rewind_run", EnvVars: []string{EnvHTTPURL}},
-	{Tool: "run_skill", EnvVars: []string{EnvHTTPURL}},
+	{Tool: "create_run", EnvVars: []string{EnvHTTPURL}, Condition: "CRIER_HTTP_URL is set to a Crier server exposing the Dagger control routes"},
+	{Tool: "run_status", EnvVars: []string{EnvHTTPURL}, Condition: "CRIER_HTTP_URL is set to a Crier server exposing the Dagger control routes"},
+	{Tool: "cancel_run", EnvVars: []string{EnvHTTPURL}, Condition: "CRIER_HTTP_URL is set to a Crier server exposing the Dagger control routes"},
+	{Tool: "resume_run", EnvVars: []string{EnvHTTPURL}, Condition: "CRIER_HTTP_URL is set to a Crier server exposing the Dagger control routes"},
+	{Tool: "rewind_run", EnvVars: []string{EnvHTTPURL}, Condition: "CRIER_HTTP_URL is set to a Crier server exposing the Dagger control routes"},
+	{Tool: "run_skill", EnvVars: []string{EnvHTTPURL}, Condition: "CRIER_HTTP_URL is set to a Crier server exposing the Dagger control routes"},
 	// CRIER-MCP-NUDGE: with no bridge identity the nudge tools can answer only
 	// for an agent_id the caller spells out in every call; the default scope —
 	// "my own mail" — does not exist, so the startup report says so.
-	{Tool: "courier_unread_summary", EnvVars: []string{EnvAgentID}},
-	{Tool: "courier_unread_list", EnvVars: []string{EnvAgentID}},
+	{Tool: "courier_unread_summary", EnvVars: []string{EnvAgentID}, Condition: "CRIER_AGENT_ID is set (the default scope is the bridge identity's unread mail)"},
+	{Tool: "courier_unread_list", EnvVars: []string{EnvAgentID}, Condition: "CRIER_AGENT_ID is set (the default scope is the bridge identity's unread mail)"},
 }
 
 // UnavailableTools returns the tools that cannot work in a server built with
@@ -112,6 +116,28 @@ func UnavailableTools(agentID, httpURL, meshURL string) (unavailable, missing []
 // mode label. When every tool is available the line says so — silence is not an
 // option, because "nothing to warn about" and "we forgot to report" must not
 // look alike.
+// CapabilityReportMarkdown renders the generated capability table from the same
+// prerequisite metadata that drives the startup diagnostic. Always-available
+// tools are supplied by toolNames; gated tools are annotated from the table.
+func CapabilityReportMarkdown(toolNames []string) string {
+	gates := make(map[string]toolPrerequisite, len(toolPrerequisites))
+	for _, p := range toolPrerequisites {
+		gates[p.Tool] = p
+	}
+	var b strings.Builder
+	b.WriteString("# MCP capability unlocks\n\n")
+	b.WriteString("Generated from the MCP registration surface and prerequisite metadata; do not edit by hand.\n\n")
+	b.WriteString("| Tool | Unlock condition |\n| --- | --- |\n")
+	for _, name := range toolNames {
+		if p, ok := gates[name]; ok {
+			fmt.Fprintf(&b, "| `%s` | %s |\n", name, p.Condition)
+		} else {
+			fmt.Fprintf(&b, "| `%s` | Always available (no bridge environment or remote dependency) |\n", name)
+		}
+	}
+	return b.String()
+}
+
 func ToolSurfaceReport(mode string, toolCount int, agentID, httpURL, meshURL string) (msg string, attrs []any) {
 	unavailable, missing := UnavailableTools(agentID, httpURL, meshURL)
 	if len(unavailable) == 0 {
