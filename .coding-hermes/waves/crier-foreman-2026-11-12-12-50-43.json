@@ -11,14 +11,27 @@
       "worktree": "/home/kara/worktrees/crier-REV-CRIER-1-125043",
       "branch": "wt/REV-CRIER-1-125043",
       "base_sha": "63bcb02bcd6cfbf7b173b1e7d3d13345dc6f773d",
-      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-12-50-43/rev1-brief.txt"
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-12-50-43/rev1-brief.txt",
+      "result": {
+        "status": "failed-dispatch",
+        "commit": null,
+        "head": "63bcb02bcd6cfbf7b173b1e7d3d13345dc6f773d",
+        "reason": "two launches exited with zero source diff and no commit"
+      }
     },
     {
       "task_id": "REV-CRIER-2",
       "worktree": "/home/kara/worktrees/crier-REV-CRIER-2-125043",
       "branch": "wt/REV-CRIER-2-125043",
       "base_sha": "63bcb02bcd6cfbf7b173b1e7d3d13345dc6f773d",
-      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-12-50-43/rev2-brief.txt"
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-12-50-43/rev2-brief.txt",
+      "result": {
+        "status": "failed-dispatch",
+        "commit": null,
+        "head": "63bcb02bcd6cfbf7b173b1e7d3d13345dc6f773d",
+        "reason": "two launches exited with zero source diff and no commit"
+      }
     }
-  ]
+  ],
+  "wave_result": "no implementation landed; direct merged-tree gates pass on published origin/main"
 }
