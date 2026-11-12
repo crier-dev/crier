@@ -1,0 +1,24 @@
+{
+  "tick_id": "crier-foreman-2026-11-12-12-50-43",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "wave_budget": 3,
+  "wave_size": 2,
+  "selection_reason": "Two ready rows in the same block have no depends_on edges and independent file seams: REV-CRIER-1 owns OpenAPI version copies; REV-CRIER-2 owns MCP capability report/example surfaces.",
+  "workers": [
+    {
+      "task_id": "REV-CRIER-1",
+      "worktree": "/home/kara/worktrees/crier-REV-CRIER-1-125043",
+      "branch": "wt/REV-CRIER-1-125043",
+      "base_sha": "63bcb02bcd6cfbf7b173b1e7d3d13345dc6f773d",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-12-50-43/rev1-brief.txt"
+    },
+    {
+      "task_id": "REV-CRIER-2",
+      "worktree": "/home/kara/worktrees/crier-REV-CRIER-2-125043",
+      "branch": "wt/REV-CRIER-2-125043",
+      "base_sha": "63bcb02bcd6cfbf7b173b1e7d3d13345dc6f773d",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-12-50-43/rev2-brief.txt"
+    }
+  ]
+}
