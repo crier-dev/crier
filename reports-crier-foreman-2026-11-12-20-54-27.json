@@ -1,0 +1,44 @@
+{
+  "tick_id": "crier-foreman-2026-11-12-20-54-27",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "mode": "verification-only-reconciliation",
+  "canonical_barrier": "Four inherited tracked overlays plus bare .git/ORIG_HEAD; blocked receipt validated structurally but cwd/fd probes were incomplete and marker field omitted ORIG_HEAD, so canonical checkout remained barred.",
+  "continuation": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-12-20-54-27/attempt-1794516914-3143901/continuation-wt",
+  "base_sha": "48ee6d7773461a7c7b46c629124d64e8d93af5cb",
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first, but its acceptance is sibling-repo/external-INGRESS gated. REV-CRIER-2 was the next executable block; its two implementation rows are already landed and judged, so this tick performed verification-only reconciliation rather than dispatching duplicate workers.",
+  "rows": [
+    {
+      "id": "REV-CRIER-1",
+      "status": "pending",
+      "implementation_commit": "e8347abc",
+      "published_implementation_ancestor": false,
+      "verification_task": "REV-CRIER-1-RV2-20261112",
+      "verdict_run": ".gitreins/history/2026-11-12/8d0941bc/verdict.json",
+      "verdict": "FAIL / INCOMPLETE",
+      "verdict_reason": "The criterion required verification at the published v0.6.1 tag, but that tag still carries info.version 0.1.0 and lacks scripts/check-openapi-version.sh. Current origin/main passes the checks, but the required published-tag claim is not true.",
+      "disposition": "keep pending; the tag/release evidence gap is real and must not be closed on current-main evidence"
+    },
+    {
+      "id": "REV-CRIER-2",
+      "status": "complete",
+      "implementation_commit": "a99aada3",
+      "published_implementation_ancestor": true,
+      "verification_task": "REV-CRIER-2-RV2-20261112",
+      "verdict_run": ".gitreins/history/2026-11-12/77fa68b6/verdict.json",
+      "verdict": "PASS",
+      "verdict_commit": "48ee6d7773461a7c7b46c629124d64e8d93af5cb",
+      "disposition": "closed by the surgical board update in this continuation"
+    }
+  ],
+  "gates": {
+    "openapi_policy": "PASS: bash scripts/check-openapi-version.sh; info.version 0.6.1 matches v0.6.1 and copies identical",
+    "mcp_capabilities": "PASS: make mcp-capabilities-check; 23 tools",
+    "mcp_tests": "PASS: go test ./internal/mcp/... -count=1",
+    "openapi_tests": "PASS: go test ./cmd/server -run TestOpenAPI|TestDocsClaims|TestREADMEOpenAPIInventoryMatchesSpec -count=1",
+    "lint": "PASS: make lint (go vet ./...)"
+  },
+  "remote_ci": "green for exact published SHA 48ee6d7773461a7c7b46c629124d64e8d93af5cb: latest completed runs are success; one newer run is pending, so the aggregate remains pending for that workflow",
+  "remote_parity": "origin/main and gitlab/main were equal at the canonical pre-write observation; continuation branch has no commit yet",
+  "trace": "ch:trace row=REV-CRIER-2 spec=none:board-acceptance wave=none:verification-only test=make mcp-capabilities-check;go test ./internal/mcp/... doc=docs/mcp-capabilities.md evidence=.gitreins/history/2026-11-12/77fa68b6/verdict.json witness=none:live-server-not-required verdict=77fa68b6 commit=48ee6d7773461a7c7b46c629124d64e8d93af5cb memory=none:memory-write-not-run"
+}
