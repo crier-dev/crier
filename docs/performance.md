@@ -19,6 +19,44 @@ is the HTTP layer.
 
 ---
 
+## PERF-002 — de-fanned `GET /sessions` summary aggregate
+
+PERF-002 replaces the SQLite summary's message/thread joins and
+`COUNT(DISTINCT ...)` operations with correlated per-session subqueries. The
+summary remains one SQL statement, the membership read remains the second
+statement, and the list route performs zero `chat_deliveries` queries. The JSON
+response and filter behavior are unchanged; `TestSQLSessionListSummaryMatchesStateView`
+continues to compare response bytes with the State-loading view.
+
+Exact measurement commands:
+
+```bash
+go test -run '^$' -bench 'BenchmarkSessionList$' -benchtime=20x -count=1 ./internal/session/
+go test -run '^$' -bench 'BenchmarkSessionList' -benchtime=20x -count=1 ./internal/session/
+```
+
+The first command is the shipped 20-session instrument. The second also runs
+`BenchmarkSessionList200`, a separate 200-session scale fixture. Both fixtures
+have 20 messages per session and 20 timed requests after warm-up.
+
+Measured after the fix:
+
+| fixture | p50 | p95 | observed loadavg |
+| --- | ---: | ---: | --- |
+| 20 sessions × 20 messages | 0.440 ms | 0.552 ms | 2.22 2.41 2.31 |
+| 200 sessions × 20 messages | 3.532 ms | 4.413 ms | 2.97 2.54 2.35 |
+
+Acceptance verdicts:
+
+- p50 <= 5 ms at 20x20: **MET** (0.440 ms).
+- p50 <= 20 ms at 200 sessions: **MET** (3.532 ms).
+
+Before PERF-002, the merged aggregate measured p50 12.06 ms / p95 12.71 ms
+at 20x20 and p50 141.89 ms / p95 148.15 ms at 200x20. The project's 100 ms
+p99 benchmark budget is not substituted for either PERF-002 bound.
+
+---
+
 ## Reproducing
 
 ```bash

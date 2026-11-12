@@ -116,15 +116,15 @@ func (s *SQLStore) SessionSummaries(ctx context.Context) ([]SessionSummary, erro
 	rows, err := s.query(ctx, `
 		SELECT s.id, s.namespace, s.kind, s.title, s.created_by, s.created_at,
 		       s.state, s.closed_at, s.visibility, s.harness, s.harness_session_id,
-		       COUNT(DISTINCT m.message_id), COUNT(DISTINCT th.thread_id),
-		       MAX(m.created_at),
+		       (SELECT COUNT(*) FROM chat_transcript m
+			WHERE m.session_id = s.id),
+		       (SELECT COUNT(*) FROM chat_threads th
+			WHERE th.session_id = s.id),
+		       (SELECT MAX(mlast.created_at) FROM chat_transcript mlast
+			WHERE mlast.session_id = s.id),
 		       (SELECT mlast.payload FROM chat_transcript mlast
 			WHERE mlast.session_id = s.id ORDER BY mlast.seq DESC LIMIT 1)
 		FROM chat_sessions s
-		LEFT JOIN chat_transcript m ON m.session_id = s.id
-		LEFT JOIN chat_threads th ON th.session_id = s.id
-		GROUP BY s.id, s.namespace, s.kind, s.title, s.created_by, s.created_at,
-		         s.state, s.closed_at, s.visibility, s.harness, s.harness_session_id
 		ORDER BY s.id`)
 	if err != nil {
 		return nil, fmt.Errorf("session %s store: list summaries: %w", s.dialect.Name(), err)

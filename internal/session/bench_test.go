@@ -113,9 +113,10 @@ type benchReq struct {
 
 // benchEnv is the in-process session API under test.
 type benchEnv struct {
-	srv    *httptest.Server
-	store  Repository
-	client *http.Client
+	srv          *httptest.Server
+	store        Repository
+	client       *http.Client
+	seedSessions int
 }
 
 // benchEnvOnce returns the process-wide env for one benchmark, creating it on
@@ -137,12 +138,16 @@ var (
 )
 
 func benchEnvOnce(b *testing.B, name string) *benchEnv {
+	return benchEnvOnceForSessions(b, name, benchSeedSessions)
+}
+
+func benchEnvOnceForSessions(b *testing.B, name string, seedSessions int) *benchEnv {
 	benchEnvMu.Lock()
 	defer benchEnvMu.Unlock()
 	if e, ok := benchEnvCache[name]; ok {
 		return e
 	}
-	e := newBenchEnv(b, name)
+	e := newBenchEnvForSessions(b, name, seedSessions)
 	benchEnvCache[name] = e
 	return e
 }
@@ -189,7 +194,7 @@ func benchStoreDir(b *testing.B, name string) string {
 // The database lives in a directory this function owns (NOT b.TempDir, whose
 // cleanup the harness runs after every round — see benchEnvOnce); it is a few
 // hundred KB and benchStoreDir reaps it on the next run.
-func newBenchEnv(b *testing.B, name string) *benchEnv {
+func newBenchEnvForSessions(b *testing.B, name string, seedSessions int) *benchEnv {
 	b.Helper()
 
 	dir := benchStoreDir(b, name)
@@ -215,7 +220,7 @@ func newBenchEnv(b *testing.B, name string) *benchEnv {
 		MaxIdleConnsPerHost: 4 * benchClients,
 		IdleConnTimeout:     60 * time.Second,
 	}
-	e := &benchEnv{srv: srv, store: store, client: &http.Client{Transport: tr}}
+	e := &benchEnv{srv: srv, store: store, client: &http.Client{Transport: tr}, seedSessions: seedSessions}
 	// No b.Cleanup teardown: it would run at the end of THIS round and close
 	// the store the next round measures against (see benchEnvOnce). The server,
 	// the transport and the database are released when the test binary exits.
@@ -229,7 +234,7 @@ func newBenchEnv(b *testing.B, name string) *benchEnv {
 func (e *benchEnv) seed(b *testing.B) {
 	b.Helper()
 	ctx := context.Background()
-	for i := 0; i < benchSeedSessions; i++ {
+	for i := 0; i < e.seedSessions; i++ {
 		id := fmt.Sprintf("bench-%03d", i)
 		at := benchBaseTime.Add(time.Duration(i) * time.Millisecond)
 		sess := &Session{
@@ -279,8 +284,8 @@ func (e *benchEnv) seed(b *testing.B) {
 
 // seedPaths returns the transcript read path of every seeded session.
 func (e *benchEnv) seedPaths() []string {
-	out := make([]string, 0, benchSeedSessions)
-	for i := 0; i < benchSeedSessions; i++ {
+	out := make([]string, 0, e.seedSessions)
+	for i := 0; i < e.seedSessions; i++ {
 		out = append(out, fmt.Sprintf("/sessions/bench-%03d/messages", i))
 	}
 	return out
@@ -551,6 +556,15 @@ func BenchmarkSessionList(b *testing.B) {
 	env := benchEnvOnce(b, "list-seq")
 	samples := benchRunSequential(b, env, []benchReq{env.listReq()})
 	benchReport(b, "seq", samples)
+}
+
+// BenchmarkSessionList200 measures the same route on a separate 200-session,
+// 20-message-per-session fixture so the shipped 20-session benchmark remains
+// unchanged while the session-count scaling bound is recorded explicitly.
+func BenchmarkSessionList200(b *testing.B) {
+	env := benchEnvOnceForSessions(b, "list-200-seq", 200)
+	samples := benchRunSequential(b, env, []benchReq{env.listReq()})
+	benchReport(b, "seq-200", samples)
 }
 
 // BenchmarkSessionReadP99 measures the READ endpoints under benchClients
