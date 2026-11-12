@@ -13,6 +13,28 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-12
+
+Range: `v0.6.1`..`v0.7.0` — 52 commits including this release entry (2 merges, 50 non-merge: 1 `feat`, 4 `fix`, 4 `perf`; no breaking change).
+
+### Added
+
+- **MCP capability unlock documentation** (`a99aada3`). Documents the supported capability unlocks and remote-mode usage.
+
+### Fixed
+
+- **MCP identity mismatch reporting** (`812a3333`, `e9c5df02`). Corrects the two dogfood-reproduced identity/error-reporting paths.
+- **OpenAPI release-version alignment** (`70f5a0cd`, `93a5a877`). Keeps both OpenAPI copies synchronized with the release tag.
+
+### Performance
+
+- **Session and thread query costs** (`db5d7939`, `f214a07f`, `6e799aea`, `ea2d9b4f`). Bounds session summary work and measures/indexes thread loading.
+
+### Known issues
+
+- The bunker-e2e runner `bunker-las-02` is offline, so that gate is currently unproven even though the hosted CI workflow is green.
+- The supervised listener on `127.0.0.1:8767` remains stale at `0.5.0-28-g83d28c13`; deployment restart is tracked separately by RELEASE-022.
+
 ## [0.6.1] - 2026-11-11
 
 Range: `v0.6.0`..`v0.6.1` — 69 commits including this release commit (4 merges,
