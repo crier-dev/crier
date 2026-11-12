@@ -308,10 +308,31 @@ thread-load output. `loadThreads` filters by `session_id` and orders by
 The acceptance test seeds `chat_threads`, runs `EXPLAIN QUERY PLAN` for the exact
 thread-load query, rejects a full table scan, and requires `SEARCH` using the new
 index. It is a small deterministic fixture: it proves the access path and output
-shape, not a production-scale latency improvement. No benchmark number is
-claimed for PERF-003. Thread writes remain covered by the existing projection
-and thread lifecycle tests; their actual test result is reported with the
-change.
+shape, not a production-scale latency improvement.
+
+The write cost was measured with the new
+`BenchmarkSessionThreadInsertIndexCost` benchmark. It calls the production
+`Branch` repository API on two otherwise identical seeded SQLite stores. The
+second store drops `chat_threads_session_idx` in benchmark setup only; the
+product initialization path is unchanged. Both arms ran back-to-back in one
+process with `-benchtime=200x`:
+
+```bash
+go test ./internal/session -run '^$' -bench 'ThreadInsert' -benchtime=200x -count=1
+```
+
+Observed on this tree (loadavg before `1.52 2.98 3.18`, after `1.64 2.98 3.18`):
+
+| arm | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| index present | 0.047 ms | 0.121 ms | 0.258 ms |
+| index dropped in test setup | 0.039 ms | 0.096 ms | 0.148 ms |
+
+The measured verdict is **a small but real write cost**, not neutral: the indexed
+arm was 0.008 ms higher at p50 in this same-window run. This is the cost of
+maintaining the index on thread writes, accepted in exchange for the indexed
+`loadThreads` access path. These values are a single shared-host window, not a
+claim about PostgreSQL performance.
 
 The PostgreSQL schema declares the same idempotent `(session_id, thread_id)`
 index in its initialization path. PostgreSQL query-plan performance was not

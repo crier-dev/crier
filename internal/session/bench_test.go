@@ -542,6 +542,78 @@ func BenchmarkSessionCreate(b *testing.B) {
 	benchReport(b, "seq", samples)
 }
 
+// benchThreadInsertSeq makes thread ids and sequence numbers unique across
+// calibration rounds. benchEnvOnce deliberately keeps the store alive across
+// those rounds, so reusing either value would turn later samples into upserts.
+var benchThreadInsertSeq uint64
+
+// BenchmarkSessionThreadInsertIndexCost compares the real thread-branch write
+// with and without chat_threads_session_idx. Both stores are seeded by the same
+// helper; the no-index arm drops the index only after setup. Branch is the
+// production repository API and therefore measures the chat_threads insert plus
+// the same chat_seq bookkeeping that accompanies a thread write.
+func BenchmarkSessionThreadInsertIndexCost(b *testing.B) {
+	cases := []struct {
+		name      string
+		dropIndex bool
+		metric    string
+	}{
+		{name: "indexed", metric: "thread_insert_indexed"},
+		{name: "without_index", dropIndex: true, metric: "thread_insert_without_index"},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			env := benchEnvOnce(b, "thread-insert-"+tc.name)
+			store, ok := env.store.(*SQLStore)
+			if !ok {
+				b.Fatalf("thread insert benchmark store has type %T, want *SQLStore", env.store)
+			}
+			if tc.dropIndex {
+				if _, err := store.DB().Exec(`DROP INDEX IF EXISTS chat_threads_session_idx`); err != nil {
+					b.Fatalf("drop thread session index: %v", err)
+				}
+			}
+			var indexCount int
+			if err := store.DB().QueryRow(`
+				SELECT count(*) FROM sqlite_master
+				WHERE type = 'index' AND name = 'chat_threads_session_idx'`).Scan(&indexCount); err != nil {
+				b.Fatalf("check thread session index: %v", err)
+			}
+			wantIndex := 1
+			if tc.dropIndex {
+				wantIndex = 0
+			}
+			if indexCount != wantIndex {
+				b.Fatalf("thread session index count = %d, want %d", indexCount, wantIndex)
+			}
+
+			ctx := context.Background()
+			ds := make([]time.Duration, 0, b.N)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sequence := atomic.AddUint64(&benchThreadInsertSeq, 1)
+				threadID := fmt.Sprintf("bench-thread-%d", sequence)
+				thread := &Thread{
+					ID:              threadID,
+					SessionID:       "bench-000",
+					ParentThreadID:  "bench-000-m00",
+					RootMessageID:   threadID,
+					AnchorMessageID: "bench-000-m00",
+					CreatedBy:       AuthorRef{Agent: benchAgentA},
+					CreatedAt:       benchBaseTime.Add(time.Duration(sequence) * time.Nanosecond),
+				}
+				start := time.Now()
+				if err := env.store.Branch(ctx, thread, int64(sequence)+100, "benchmark branch"); err != nil {
+					b.Fatalf("branch thread %s: %v", threadID, err)
+				}
+				ds = append(ds, time.Since(start))
+			}
+			b.StopTimer()
+			benchReport(b, "seq", map[string][]time.Duration{tc.metric: ds})
+		})
+	}
+}
+
 // BenchmarkSessionRetrieve measures GET /sessions/{id}/messages — the ordered
 // cross-agent transcript, the session OBJECT read (rows 11-14). No bare
 // GET /sessions/{id} is registered; this is that read.
