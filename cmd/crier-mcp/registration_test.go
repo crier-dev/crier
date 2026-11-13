@@ -270,6 +270,78 @@ func TestEnsureBridgeIdentitySkipsNonRemote(t *testing.T) {
 
 // ---- run() wiring ---------------------------------------------------------
 
+// TestRunRejectedIdentityStartupReport drives the real startup path with a
+// stale server-side key and verifies that the availability line carries the
+// rejected identity qualification instead of making an unqualified all-tools
+// claim.
+// ch:trace row=DF-CRIER-503-RV2-20261113 spec=none:verification-row wave=none:serial-rework test=cmd/crier-mcp/registration_test.go::TestRunRejectedIdentityStartupReport doc=none:test-only evidence=none:worker-test commit=none:worker-commit memory=none:foreman-closeout witness=none:ephemeral-test-captured-in-repository-test
+func TestRunRejectedIdentityStartupReport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the binary")
+	}
+	srv, store := newBridgeTestServer(t)
+
+	stalePub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate stale key: %v", err)
+	}
+	if err := store.Register(&registry.Agent{ID: "bridge-rejected", PublicKey: registry.HexKey(stalePub)}); err != nil {
+		t.Fatalf("seed stale identity: %v", err)
+	}
+	keyPath, _ := writeAgentKeyPEM(t, t.TempDir())
+
+	// CI-016: use the session-shared executable so this test exercises the
+	// committed crier-mcp startup path without adding another package build.
+	bin, _ := mcpSharedTarget(t)
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(),
+		"CRIER_HTTP_URL="+srv.URL,
+		"CRIER_MESH_URL=ws://127.0.0.1:8767/mesh/connect/bridge-rejected",
+		"CRIER_AGENT_ID=bridge-rejected",
+		"CRIER_AGENT_PRIVATE_KEY_FILE="+keyPath,
+		"CRIER_AUTH_TOKEN=",
+		"CR_AUTH_TOKEN=",
+		"CR_DATABASE_URL=",
+		"DATABASE_URL=",
+		"CR_LOG_LEVEL=info",
+	)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatalf("stderr pipe: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+
+	startupLine := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			if strings.Contains(sc.Text(), "MCP tool surface:") {
+				startupLine <- sc.Text()
+				return
+			}
+		}
+		startupLine <- ""
+	}()
+
+	select {
+	case line := <-startupLine:
+		if line == "" {
+			t.Fatal("no startup tool-surface line on stderr")
+		}
+		if !strings.Contains(line, "identity=rejected") {
+			t.Fatalf("startup line does not qualify the rejected identity: %q", line)
+		}
+		if strings.Contains(line, `msg="MCP tool surface: all 23 advertised tools are available in this mode"`) {
+			t.Fatalf("startup line makes an unqualified all-23 claim: %q", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for the startup tool-surface line")
+	}
+}
+
 // TestRunSelfRegistersBridgeIdentity drives the real binary in remote mode
 // against a signed test server: after startup the bridge identity must exist
 // on the server (no operator step) and the stderr log must say so. This is
