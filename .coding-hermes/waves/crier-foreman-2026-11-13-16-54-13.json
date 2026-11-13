@@ -1,0 +1,21 @@
+{
+  "tick_id": "crier-foreman-2026-11-13-16-54-13",
+  "project": "crier",
+  "block": "INT-CI-036",
+  "selection": "Resumed the INT-CI-036 block. Its implementation is already published at 3daffaed; the remaining obligation is a fresh commit-bound GitReins verdict, so this is verification-only reconciliation rather than duplicate implementation dispatch.",
+  "mode": "verification-only-reconciliation",
+  "wave_budget": 12,
+  "wave_size": 0,
+  "workers": [],
+  "verification": {
+    "row": "INT-CI-036",
+    "implementation_commit": "3daffaed0bce0552f589547c9cabe27aa4d869c6",
+    "acceptance": "PROOF: the exact ws-mesh rotated-run arm runs green under the CI-like environment and preserves the foreign listener while proving the selected port is the one served; FAILIF: the battery reports a product failure when the selected port is concurrently occupied by an unrelated process, or fails to classify the setup/runner collision.",
+    "judge_task": "INT-CI-036",
+    "judge_job": "job-a681c641e9214e3db6246678f4fe4a13",
+    "verdict_requirement": "Persisted verdict.json must bind task_id INT-CI-036, the evaluated implementation/integration commit, the crier control worktree, and passed=true.",
+    "publication_requirement": "Publish the verification/board closeout on origin/main and gitlab/main with exact parity."
+  },
+  "base_sha": "ec131da8866f9e56a8bdc3f534a50d604436df15",
+  "trace": "ch:trace row=INT-CI-036 spec=none:CI-failure-repair wave=.coding-hermes/waves/crier-foreman-2026-11-13-16-54-13.json#verification test=examples/scratch-port-rotation-selftest.py::ws-mesh-setup-collision;examples/scratch-port-rotation-selftest.py::ws-mesh-rotate;examples/ws-mesh-demo/run_demo_e2e_test.go doc=none evidence=none:pending-verdict witness=none:live-listener-not-required verdict=none:pending-judge commit=3daffaed0bce0552f589547c9cabe27aa4d869c6 memory=none:pending-closeout"
+}

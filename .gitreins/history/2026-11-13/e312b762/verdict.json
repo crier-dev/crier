@@ -1,0 +1,512 @@
+{
+  "task_id": "INT-CI-036",
+  "task_title": "Fix ws-mesh rotated-run selftest collision classification",
+  "task_criteria": [
+    "The ws-mesh rotated-run acceptance passes in a CI-like environment when an unrelated listener occupies the first candidate: the runner must rotate to a free selected port, start its own relay there, preserve the foreign listener, and prove the selected port is served; the selftest must not report a product failure for a runner-side bind collision."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/crier",
+  "branch": "main",
+  "commit": "ec131da8866f9e56a8bdc3f534a50d604436df15",
+  "pass_class": "judged",
+  "tier2_skipped": false,
+  "working_tree_content_fingerprint": "34475a9b3dde42af998e4980bbbfa6d90838fe3f0f1d757de35e9318cc874d05",
+  "working_tree_dirty_path_count": 1,
+  "items": [
+    {
+      "criterion": "The ws-mesh rotated-run acceptance passes in a CI-like environment when an unrelated listener occupies the first candidate: the runner must rotate to a free selected port, start its own relay there, preserve the foreign listener, and prove the selected port is served; the selftest must not report a product failure for a runner-side bind collision.",
+      "status": "PASS",
+      "detail": "Rotation + own relay + foreign-listener preservation + selected-port proof all verified live: `python3 examples/scratch-port-rotation-selftest.py --case ws-mesh-rotate` -> exit 0, 'PASS: ws-mesh-rotate (11 checks)' with 'ok ws-mesh: the occupied FIRST candidate :37880 was rotated past to :37881', 'ok ws-mesh: the rotated run still succeeds \u2014 no false skip (exit 0 after 3.5s)', 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)', 'ok ws-mesh: the relay answering /health is the pid this run started (:37881)'. Collision classification: is_startup_bind_collision (examples/scratch-port-rotation-selftest.py:881-901) requires the ws-mesh runner, rc!=0, a selected port, '[2/10] start relay on :<port>' before the diagnostic, the diagnostic naming that port, no '[3/10] HTTP-register' before it, no ':<port> is held by pid' ownership-guard line, and no PASS marker; the diagnostic string matches the real product (cmd/server/main.go:1573 'server failed: another process already holds this port (bind: address already in use)'). case_rotate:916-949 then discards the block, re-picks a fresh one and retries within ROTATION_SETUP_RETRIES=3, reporting SETUP exhaustion (:942-944) rather than a product failure. `--case ws-mesh-setup-collision` -> exit 0, 'PASS: ws-mesh-setup-collision (5 checks)' including 'ok ws-mesh: the selected-port setup collision triggers one bounded fresh-block retry (runner attempts=2)'. Full suite `python3 examples/scratch-port-rotation-selftest.py` -> EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', no FAIL lines. CI reachability: .github/workflows/ci.yml:160 `make scratch-port-rotation-selftest` -> Makefile:378-379. Go suite `go test -short -count=1 ./...` had one load-sensitive failure in internal/relay TestSubscribePongingSubscriberSurvives (keepalive_test.go:423, '1m loadavg 29.90'); re-run alone `go test -short -count=1 -run TestSubscribePongingSubscriberSurvives ./internal/relay/` -> 'ok github.com/crier-dev/crier/internal/relay 1.085s', EXIT=0 \u2014 unrelated to this diff, which touches only examples/scratch-port-rotation-selftest.py and .gitreins/tasks.yaml."
+    },
+    {
+      "criterion": "The retry path is reachable from the real runner, not only from the fake: the classifier's required diagnostic is the one the shipped crier server actually emits on EADDRINUSE, and the runner's own output shape ([2/10] start relay on :<port>) matches what run-demo.sh prints.",
+      "status": "PASS",
+      "detail": "cmd/server/main.go:1573 emits exactly 'server failed: another process already holds this port (bind: address already in use)' on EADDRINUSE (logServeFailure, guarded by errors.Is(err, syscall.EADDRINUSE)); examples/ws-mesh-demo/run-demo.sh:284 prints '==> [2/10] start relay on :${DEMO_PORT} (auth-disabled)'. Direct probe of the classifier with a realistic transcript (server ERROR line + 'FAIL: relay exited during startup (pid 1234)', no ownership line, no [3/10]) returned True.",
+      "derived": true
+    },
+    {
+      "criterion": "A genuine product failure on the same selected port is NOT reclassified as setup loss (no masking of real regressions).",
+      "status": "PASS",
+      "detail": "Probe of is_startup_bind_collision: ownership-guard product failure (':25001 is held by pid 999 == our relay pid 1234' + 'NOT the process holding :25001 \u2014 refusing to measure it') -> False; transcript containing the PASS marker -> False; the federation runner with the same text -> False. The in-suite control also asserts this: 'ok ws-mesh: a behavior-stage failure is not classified as setup recovery' and 'ok ws-mesh: a zero exit cannot be classified as a bind collision' (examples/scratch-port-rotation-selftest.py:1165-1168).",
+      "derived": true
+    },
+    {
+      "criterion": "The retry is bounded and terminates: exhaustion reports a SETUP failure rather than looping or silently passing.",
+      "status": "PASS",
+      "detail": "ROTATION_SETUP_RETRIES = 3 (examples/scratch-port-rotation-selftest.py:879); the loop is `for attempt in range(ROTATION_SETUP_RETRIES)` (:916) and on the last attempt records 'SETUP selected-port bind collision recovery exhausted' and returns (:942-944). Observed in the live run: 'ws-mesh: SETUP selected port :27668 was lost at bind; fixture listener :27667 remains listening; retrying on a fresh block (attempt 1/3)' followed by a PASS, i.e. exactly one retry then termination.",
+      "derived": true
+    },
+    {
+      "criterion": "The foreign listener that occupied the first candidate is preserved (never killed) across rotation and retry.",
+      "status": "PASS",
+      "detail": "squatter.still_listening() is part of fixture_ok (:939) and is asserted again at :968-969; squatter.close() appears only in the finally block (:971-972), so the fixture socket is released by the selftest itself, never signalled. Live evidence: 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)' and 'ok ws-mesh: no squatter was disturbed by either run'.",
+      "derived": true
+    },
+    {
+      "criterion": "The new case is reachable from the CI entrypoint (make target invoked by the workflow) and the whole selftest still exits 0.",
+      "status": "PASS",
+      "detail": ".github/workflows/ci.yml:160 runs `make scratch-port-rotation-selftest`; Makefile:378-379 runs `python3 examples/scratch-port-rotation-selftest.py`; the new case is registered in CASES (:138), CASE_TOOLS (:169) and the main() dispatch (:1287-1288). Full run: EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', 12 'PASS:' lines, zero 'FAIL' lines.",
+      "derived": true
+    }
+  ],
+  "merge_recommendation": "no_concerns_found",
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 th",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 this key is ignored\ngitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.api_key_env: unknown key \u2014 this key is ignored\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/crier/.gitreins/logs/guard-20261113T165901.164688Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/crier/.gitreins/logs/guard-20261113T165901.164688Z.log"
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 The ws-mesh rotated-run acceptance passes in a CI-like environment when an unrelated listener occupies the first candidate: the runner must rotate to a free selected port, start its own relay there, preserve the foreign listener, and prove the selected port is served; the selftest must not report a product failure for a runner-side bind collision.: Rotation + own relay + foreign-listener preservation + selected-port proof all verified live: `python3 examples/scratch-port-rotation-selftest.py --case ws-mesh-rotate` -> exit 0, 'PASS: ws-mesh-rotate (11 checks)' with 'ok ws-mesh: the occupied FIRST candidate :37880 was rotated past to :37881', 'ok ws-mesh: the rotated run still succeeds \u2014 no false skip (exit 0 after 3.5s)', 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)', 'ok ws-mesh: the relay answering /health is the pid this run started (:37881)'. Collision classification: is_startup_bind_collision (examples/scratch-port-rotation-selftest.py:881-901) requires the ws-mesh runner, rc!=0, a selected port, '[2/10] start relay on :<port>' before the diagnostic, the diagnostic naming that port, no '[3/10] HTTP-register' before it, no ':<port> is held by pid' ownership-guard line, and no PASS marker; the diagnostic string matches the real product (cmd/server/main.go:1573 'server failed: another process already holds this port (bind: address already in use)'). case_rotate:916-949 then discards the block, re-picks a fresh one and retries within ROTATION_SETUP_RETRIES=3, reporting SETUP exhaustion (:942-944) rather than a product failure. `--case ws-mesh-setup-collision` -> exit 0, 'PASS: ws-mesh-setup-collision (5 checks)' including 'ok ws-mesh: the selected-port setup collision triggers one bounded fresh-block retry (runner attempts=2)'. Full suite `python3 examples/scratch-port-rotation-selftest.py` -> EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', no FAIL lines. CI reachability: .github/workflows/ci.yml:160 `make scratch-port-rotation-selftest` -> Makefile:378-379. Go suite `go test -short -count=1 ./...` had one load-sensitive failure in internal/relay TestSubscribePongingSubscriberSurvives (keepalive_test.go:423, '1m loadavg 29.90'); re-run alone `go test -short -count=1 -run TestSubscribePongingSubscriberSurvives ./internal/relay/` -> 'ok github.com/crier-dev/crier/internal/relay 1.085s', EXIT=0 \u2014 unrelated to this diff, which touches only examples/scratch-port-rotation-selftest.py and .gitreins/tasks.yaml.\n  \u2713 The retry path is reachable from the real runner, not only from the fake: the classifier's required diagnostic is the one the shipped crier server actually emits on EADDRINUSE, and the runner's own output shape ([2/10] start relay on :<port>) matches what run-demo.sh prints.: cmd/server/main.go:1573 emits exactly 'server failed: another process already holds this port (bind: address already in use)' on EADDRINUSE (logServeFailure, guarded by errors.Is(err, syscall.EADDRINUSE)); examples/ws-mesh-demo/run-demo.sh:284 prints '==> [2/10] start relay on :${DEMO_PORT} (auth-disabled)'. Direct probe of the classifier with a realistic transcript (server ERROR line + 'FAIL: relay exited during startup (pid 1234)', no ownership line, no [3/10]) returned True.\n  \u2713 A genuine product failure on the same selected port is NOT reclassified as setup loss (no masking of real regressions).: Probe of is_startup_bind_collision: ownership-guard product failure (':25001 is held by pid 999 == our relay pid 1234' + 'NOT the process holding :25001 \u2014 refusing to measure it') -> False; transcript containing the PASS marker -> False; the federation runner with the same text -> False. The in-suite control also asserts this: 'ok ws-mesh: a behavior-stage failure is not classified as setup recovery' and 'ok ws-mesh: a zero exit cannot be classified as a bind collision' (examples/scratch-port-rotation-selftest.py:1165-1168).\n  \u2713 The retry is bounded and terminates: exhaustion reports a SETUP failure rather than looping or silently passing.: ROTATION_SETUP_RETRIES = 3 (examples/scratch-port-rotation-selftest.py:879); the loop is `for attempt in range(ROTATION_SETUP_RETRIES)` (:916) and on the last attempt records 'SETUP selected-port bind collision recovery exhausted' and returns (:942-944). Observed in the live run: 'ws-mesh: SETUP selected port :27668 was lost at bind; fixture listener :27667 remains listening; retrying on a fresh block (attempt 1/3)' followed by a PASS, i.e. exactly one retry then termination.\n  \u2713 The foreign listener that occupied the first candidate is preserved (never killed) across rotation and retry.: squatter.still_listening() is part of fixture_ok (:939) and is asserted again at :968-969; squatter.close() appears only in the finally block (:971-972), so the fixture socket is released by the selftest itself, never signalled. Live evidence: 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)' and 'ok ws-mesh: no squatter was disturbed by either run'.\n  \u2713 The new case is reachable from the CI entrypoint (make target invoked by the workflow) and the whole selftest still exits 0.: .github/workflows/ci.yml:160 runs `make scratch-port-rotation-selftest`; Makefile:378-379 runs `python3 examples/scratch-port-rotation-selftest.py`; the new case is registered in CASES (:138), CASE_TOOLS (:169) and the main() dispatch (:1287-1288). Full run: EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', 12 'PASS:' lines, zero 'FAIL' lines.\nThe ws-mesh rotated-run selftest now classifies the narrow selected-port startup bind diagnostic as runner setup loss, retries on a fresh port block within a bounded budget, keeps the foreign listener alive, and still proves the selected port is served \u2014 verified by live runs of ws-mesh-rotate (11 checks), ws-mesh-setup-collision (5 checks) and the full 12/12 suite, all exit 0. [uncovered failure paths: failure mode 0 (The setup-collision retry path is exercised only through a monkeypatched run_script, so a future change to the real runner's startup output shape could silently make the classifier unreachable in production while the control still passes): detected_by is empty \u2014 uncovered failure path]",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n\n\u2026 [5045 chars omitted \u2014 5 line(s)] \u2026\n  \u2713 The new case is reachable from the CI entrypoint (make target invoked by the workflow) and the whole selftest still exits 0.: .github/workflows/ci.yml:160 runs `make scratch-port-rotation-selftest`; Makefile:378-379 runs `python3 examples/scratch-port-rotation-selftest.py`; the new case is registered in CASES (:138), CASE_TOOLS (:169) and the main() dispatch (:1287-1288). Full run: EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', 12 'PASS:' lines, zero 'FAIL' lines.\nThe ws-mesh rotated-run selftest now classifies the narrow selected-port startup bind diagnostic as runner setup loss, retries on a fresh port block within a bounded budget, keeps the foreign listener alive, and still proves the selected port is served \u2014 verified by live runs of ws-mesh-rotate (11 checks), ws-mesh-setup-collision (5 checks) and the full 12/12 suite, all exit 0. [uncovered failure paths: failure mode 0 (The setup-collision retry path is exercised only through a monkeypatched run_script, so a future change to the real runner's startup output shape could silently make the classifier unreachable in production while the control still passes): detected_by is empty \u2014 uncovered failure path]",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "The ws-mesh rotated-run acceptance passes in a CI-like environment when an unrelated listener occupies the first candidate: the runner must rotate to a free selected port, start its own relay there, preserve the foreign listener, and prove the selected port is served; the selftest must not report a product failure for a runner-side bind collision.",
+                "status": "PASS",
+                "detail": "Rotation + own relay + foreign-listener preservation + selected-port proof all verified live: `python3 examples/scratch-port-rotation-selftest.py --case ws-mesh-rotate` -> exit 0, 'PASS: ws-mesh-rotate (11 checks)' with 'ok ws-mesh: the occupied FIRST candidate :37880 was rotated past to :37881', 'ok ws-mesh: the rotated run still succeeds \u2014 no false skip (exit 0 after 3.5s)', 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)', 'ok ws-mesh: the relay answering /health is the pid this run started (:37881)'. Collision classification: is_startup_bind_collision (examples/scratch-port-rotation-selftest.py:881-901) requires the ws-mesh runner, rc!=0, a selected port, '[2/10] start relay on :<port>' before the diagnostic, the diagnostic naming that port, no '[3/10] HTTP-register' before it, no ':<port> is held by pid' ownership-guard line, and no PASS marker; the diagnostic string matches the real product (cmd/server/main.go:1573 'server failed: another process already holds this port (bind: address already in use)'). case_rotate:916-949 then discards the block, re-picks a fresh one and retries within ROTATION_SETUP_RETRIES=3, reporting SETUP exhaustion (:942-944) rather than a product failure. `--case ws-mesh-setup-collision` -> exit 0, 'PASS: ws-mesh-setup-collision (5 checks)' including 'ok ws-mesh: the selected-port setup collision triggers one bounded fresh-block retry (runner attempts=2)'. Full suite `python3 examples/scratch-port-rotation-selftest.py` -> EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', no FAIL lines. CI reachability: .github/workflows/ci.yml:160 `make scratch-port-rotation-selftest` -> Makefile:378-379. Go suite `go test -short -count=1 ./...` had one load-sensitive failure in internal/relay TestSubscribePongingSubscriberSurvives (keepalive_test.go:423, '1m loadavg 29.90'); re-run alone `go test -short -count=1 -run TestSubscribePongingSubscriberSurvives ./internal/relay/` -> 'ok github.com/crier-dev/crier/internal/relay 1.085s', EXIT=0 \u2014 unrelated to this diff, which touches only examples/scratch-port-rotation-selftest.py and .gitreins/tasks.yaml.",
+                "resolution_probability": 0.37
+              },
+              {
+                "criterion": "The retry path is reachable from the real runner, not only from the fake: the classifier's required diagnostic is the one the shipped crier server actually emits on EADDRINUSE, and the runner's own output shape ([2/10] start relay on :<port>) matches what run-demo.sh prints.",
+                "status": "PASS",
+                "detail": "cmd/server/main.go:1573 emits exactly 'server failed: another process already holds this port (bind: address already in use)' on EADDRINUSE (logServeFailure, guarded by errors.Is(err, syscall.EADDRINUSE)); examples/ws-mesh-demo/run-demo.sh:284 prints '==> [2/10] start relay on :${DEMO_PORT} (auth-disabled)'. Direct probe of the classifier with a realistic transcript (server ERROR line + 'FAIL: relay exited during startup (pid 1234)', no ownership line, no [3/10]) returned True.",
+                "derived": true
+              },
+              {
+                "criterion": "A genuine product failure on the same selected port is NOT reclassified as setup loss (no masking of real regressions).",
+                "status": "PASS",
+                "detail": "Probe of is_startup_bind_collision: ownership-guard product failure (':25001 is held by pid 999 == our relay pid 1234' + 'NOT the process holding :25001 \u2014 refusing to measure it') -> False; transcript containing the PASS marker -> False; the federation runner with the same text -> False. The in-suite control also asserts this: 'ok ws-mesh: a behavior-stage failure is not classified as setup recovery' and 'ok ws-mesh: a zero exit cannot be classified as a bind collision' (examples/scratch-port-rotation-selftest.py:1165-1168).",
+                "derived": true
+              },
+              {
+                "criterion": "The retry is bounded and terminates: exhaustion reports a SETUP failure rather than looping or silently passing.",
+                "status": "PASS",
+                "detail": "ROTATION_SETUP_RETRIES = 3 (examples/scratch-port-rotation-selftest.py:879); the loop is `for attempt in range(ROTATION_SETUP_RETRIES)` (:916) and on the last attempt records 'SETUP selected-port bind collision recovery exhausted' and returns (:942-944). Observed in the live run: 'ws-mesh: SETUP selected port :27668 was lost at bind; fixture listener :27667 remains listening; retrying on a fresh block (attempt 1/3)' followed by a PASS, i.e. exactly one retry then termination.",
+                "derived": true
+              },
+              {
+                "criterion": "The foreign listener that occupied the first candidate is preserved (never killed) across rotation and retry.",
+                "status": "PASS",
+                "detail": "squatter.still_listening() is part of fixture_ok (:939) and is asserted again at :968-969; squatter.close() appears only in the finally block (:971-972), so the fixture socket is released by the selftest itself, never signalled. Live evidence: 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)' and 'ok ws-mesh: no squatter was disturbed by either run'.",
+                "derived": true
+              },
+              {
+                "criterion": "The new case is reachable from the CI entrypoint (make target invoked by the workflow) and the whole selftest still exits 0.",
+                "status": "PASS",
+                "detail": ".github/workflows/ci.yml:160 runs `make scratch-port-rotation-selftest`; Makefile:378-379 runs `python3 examples/scratch-port-rotation-selftest.py`; the new case is registered in CASES (:138), CASE_TOOLS (:169) and the main() dispatch (:1287-1288). Full run: EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', 12 'PASS:' lines, zero 'FAIL' lines.",
+                "derived": true
+              }
+            ],
+            "summary": "The ws-mesh rotated-run selftest now classifies the narrow selected-port startup bind diagnostic as runner setup loss, retries on a fresh port block within a bounded budget, keeps the foreign listener alive, and still proves the selected port is served \u2014 verified by live runs of ws-mesh-rotate (11 checks), ws-mesh-setup-collision (5 checks) and the full 12/12 suite, all exit 0. [uncovered failure paths: failure mode 0 (The setup-collision retry path is exercised only through a monkeypatched run_script, so a future change to the real runner's startup output shape could silently make the classifier unreachable in production while the control still passes): detected_by is empty \u2014 uncovered failure path]",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY",
+      "tool_calls": [
+        {
+          "tool": "get_task_item",
+          "command": "get_task_item {\"id\": \"INT-CI-036\"}",
+          "exit_code": 0,
+          "output_sha": "97da2a18e9489ba4ec06cf656c6f2c892e806aa7dfd93785d71c9b24dabae9a5"
+        },
+        {
+          "tool": "run_command",
+          "command": "ls -la && cat .gitreins/config.yaml 2>/dev/null",
+          "exit_code": 0,
+          "output_sha": "4ceb0999b47943c4c374c41dffa7be704a0630fce953a39c8f44e3cad2162dee"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"test_command\" .gitreins/config.yaml; echo \"---\"; git log --oneline -5; echo \"---\"; git status --short | head -50",
+          "exit_code": 0,
+          "output_sha": "fc417c935a1ea2a077be153d82b02d5d9e2156e9b56d3f9c8ad19a560c01663e"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -rn \"rotated-run\\|rotated_run\\|rotation\" --include=*.py --include=*.go --include=*.sh --include=*.yaml --include=*.yml -l . 2>/dev/null | grep -v node_modules | head -40",
+          "exit_code": 0,
+          "output_sha": "6283707b90b316ae66ef54b4fa5c214bf87c97f994f7b748dbb514175ba52e90"
+        },
+        {
+          "tool": "run_command",
+          "command": "git show --stat 3daffaed; echo \"====\"; git show 3daffaed | head -400",
+          "exit_code": 0,
+          "output_sha": "ce21f52dca2c956b6982ef31dd4a82520e9d598f4af0051b8e1c6c26c62d8773"
+        },
+        {
+          "tool": "run_command",
+          "command": "git show 3daffaed -- examples/scratch-port-rotation-selftest.py | sed -n '1,260p'",
+          "exit_code": 0,
+          "output_sha": "facaf777a5a73838f1d8ea414b9ae0e8eee5a1a8ad375e29e6c90396d2e0b97e"
+        },
+        {
+          "tool": "run_command",
+          "command": "wc -l examples/scratch-port-rotation-selftest.py; sed -n '860,1010p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "f04b9a53e6d54b8db1b54b157094bc76bcfbc820b34a44ecabeea6e5358abb0e"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '900,1010p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "6a2c01a07b0e7b3069572eecc6513738876819094932894cef3ffe498b2952ca"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '940,1000p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "1fa74f303f5c30edcd89f414caf45f19824eb4110be1da14d0084994d16b78fe"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '1,200p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "da69d801b31f82aa4fe4bd79194ed24fa8e1ead59186ecf17f18f6e477428f04"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '200,420p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "fbdd03627ad8558de0f821ec99c4d86f170c82b87042065a7927efdeb30e4a0a"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '420,560p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "afd0c4f042670368d12b118fcc33de17ec7796e5cea1d629cfdcdb9b0469d3cc"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '560,760p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "0a9385f006fd9d099b25f45619a24abef5c3283f63997dfe693208b508fc8429"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '760,870p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "0d292ddce9f7fd3ad8057b423c8f4ff30282b2f172e7c830e9e4263622a12160"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '820,860p' examples/scratch-port-rotation-selftest.py; echo \"=== ws-mesh wiring ===\"; grep -n \"ws-mesh\" -A 40 examples/scratch-port-rotation-selftest.py | sed -n '1,120p'",
+          "exit_code": 0,
+          "output_sha": "e9e100293e8c34fc95fa823ba55f0c64517c216cbb40090a9a0f91d99dee07e8"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '640,700p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "de46217fb25d656d40e3fdd0f584231fa91848a3adbb3c8bb70cd56bd00e5f9d"
+        },
+        {
+          "tool": "run_command",
+          "command": "ls examples/ws-mesh-demo/; echo \"====\"; cat examples/ws-mesh-demo/run-demo.sh",
+          "exit_code": 0,
+          "output_sha": "39348ed03d95bf5b412aa87d460070e4b271fa001f6091cd09e378800ec0983e"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"another process already holds this port\\|is held by pid\\|start relay on\\|\\[2/10\\]\\|\\[3/10\\]\" examples/ws-mesh-demo/run-demo.sh",
+          "exit_code": 0,
+          "output_sha": "e10889d3a5dfbd6a2cc0d2ca503a4d3e4ebf534ec4dcb0e5bd96500eb4f4234b"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '250,330p' examples/ws-mesh-demo/run-demo.sh",
+          "exit_code": 0,
+          "output_sha": "962415fc2a1eaec8dcbac2206e929b255276eb12531079cad3517ffbcca29a26"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '300,320p' examples/ws-mesh-demo/run-demo.sh; echo \"=== port-guard ===\"; cat scripts/lib/port-guard.sh",
+          "exit_code": 0,
+          "output_sha": "1a876da1ada7d2abf9a41ae012f477f377c856ac9b1a6425d0ed0f90876563e8"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"another process already holds this port\" -r scripts/ examples/ internal/ cmd/ 2>/dev/null | head -20",
+          "exit_code": 0,
+          "output_sha": "ef6001d4262d64835224f4dd2ad02c2c717cc694c497d014dfa749eb9116fd04"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '1540,1600p' cmd/server/main.go",
+          "exit_code": 0,
+          "output_sha": "6fbeef8fe494d6b13bf2e11ce95cd88c870eeaa5e5e792c68fab8614d64f51d7"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '1120,1210p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "fdf14a0a1e7d46dc228e4b12409656a44fd4faa1df2491b208e84fbffbd4fd4e"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '1155,1180p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "6414fde87e59e0eca1215c223331102ef8a69f0d9986384723cff4ccad839792"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara 2>/dev/null; cd - >/dev/null 2>&1; python3 examples/scratch-port-rotation-selftest.py --help 2>&1 | head -40",
+          "exit_code": 0,
+          "output_sha": "f617874c152b8bc455ec4f1224d7c63dfffd07a48f8586a89da6ee7834996ac0"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && timeout 600 python3 examples/scratch-port-rotation-selftest.py --case ws-mesh-setup-collision 2>&1 | tail -30; echo \"EXIT=$?\"",
+          "exit_code": 0,
+          "output_sha": "c5546306faf2b70452148e47fa242ad17f4ac8fdcec95557c74a127ad64258a4"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && timeout 900 python3 examples/scratch-port-rotation-selftest.py --case ws-mesh-rotate 2>&1 | tail -40; echo \"EXIT=$?\"",
+          "exit_code": 0,
+          "output_sha": "5b7ff93c078fb1f98e37fc7ce8f8baab99e6073577c34f15f7fa5e7f172a5c53"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"Read examples/scratch-port-rotation-selftest.py (1311 lines), ws-mesh-demo/run-demo.sh, scripts/lib/port-guard.sh, cmd/server/main.go logServeFailure.\\nRan: --case ws-mesh-setup-collision -> PASS 5 checks, exit 0.\\nRan: --case ws-mesh-rotate -> PASS 11 checks, exit 0 (real runner, squatted first candidate, rotated to next, foreign listener preserved, relay pid owned).\\nDiagnostic string \\\"server failed: another process already holds this port\\\" matches cmd/server/main.go:1573.\\nNext: check CI workflow wiring, whether the case is reachable from CI, and whether the real runner can actually emit the collision diagnostic (i.e. is the retry path reachable in reality, not just via the fake).\", \"key\": \"progress\"}",
+          "exit_code": 0,
+          "output_sha": "97cd0373b46f91fbf0324f9ae2faa2e140309e1cca655b3cfee3ae0af68ecd5e"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && grep -rn \"scratch-port-rotation-selftest\" .github/workflows/ Makefile | head -20",
+          "exit_code": 0,
+          "output_sha": "757580ebafe63580386c7ec40e5eaa3d6148f325c6aa93f82554766215113c17"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && sed -n '130,175p' .github/workflows/ci.yml",
+          "exit_code": 0,
+          "output_sha": "522daa8e1ccb007f16aa9df7915eba410693064085c6b9af061e2d4385be13fb"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && timeout 1800 python3 examples/scratch-port-rotation-selftest.py 2>&1 | tail -60; echo \"EXIT=${PIPESTATUS[0]}\"",
+          "exit_code": 2,
+          "output_sha": "3f28aee11c7a2bc66d026dff38ca20198861cdb51f3a753469c6ae25f1ecf690"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && timeout 1800 python3 examples/scratch-port-rotation-selftest.py > /tmp/spr.log 2>&1; echo \"EXIT=$?\"; grep -c \"^PASS:\" /tmp/spr.log; grep -n \"^FAIL\" /tmp/spr.log | head; tail -3 /tmp/spr.log",
+          "exit_code": 0,
+          "output_sha": "80f6c1608527e7e57f1294c004e83c92434e30f3b72d422ea5ae908af6267207"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"Full selftest run: EXIT=0, 12/12 cases PASS, no FAIL lines (/tmp/spr.log).\\nCI wiring: .github/workflows/ci.yml:160 `make scratch-port-rotation-selftest`; Makefile:378-379 runs the python selftest.\\nDiagnostic string matches cmd/server/main.go:1573 (slog.Error \\\"server failed: another process already holds this port (bind: address already in use)\\\").\\nNow: run go test -short -count=1 ./... per .gitreins/config.yaml test_command.\", \"key\": \"progress2\"}",
+          "exit_code": 0,
+          "output_sha": "83fadb6308f8d7f03018ef3f47c82acda79df6f0ca36ea286e0dc75a9957eb46"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && timeout 1800 go test -short -count=1 ./... 2>&1 | tail -25; echo \"EXIT=${PIPESTATUS[0]}\"",
+          "exit_code": -15,
+          "output_sha": "eb0d50c717091f2da816f4f69bb39d52c872447ddb60c237a6366919fbaaa5d9"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && (timeout 900 go test -short -count=1 ./... > /tmp/gotest.log 2>&1; echo \"EXIT=$?\" >> /tmp/gotest.log) & sleep 25; echo started",
+          "exit_code": 0,
+          "output_sha": "95175047e6467d07c506e63d407737cd906671e30ffc6c3695417684d7a1cc30"
+        },
+        {
+          "tool": "run_command",
+          "command": "sleep 60; tail -30 /tmp/gotest.log",
+          "exit_code": -15,
+          "output_sha": "54b20f0e56f2444416a6ee940998ac05d83fc0c3e7f21b9b122e2c2e47fa8277"
+        },
+        {
+          "tool": "run_command",
+          "command": "tail -30 /tmp/gotest.log; echo \"---\"; grep -c \"^ok\" /tmp/gotest.log",
+          "exit_code": 0,
+          "output_sha": "000e12eeb76ab8cd5e45baf70e8fd65665948cbb289cef51d3932b577313d901"
+        },
+        {
+          "tool": "run_command",
+          "command": "sleep 25; tail -40 /tmp/gotest.log; echo \"---\"; grep -c \"^ok\" /tmp/gotest.log; grep -n \"FAIL\\|EXIT=\" /tmp/gotest.log | head",
+          "exit_code": 0,
+          "output_sha": "8ef810be344400f8576458656e62de0bcda642d533b1b82c3464b6f79d1caedc"
+        },
+        {
+          "tool": "run_command",
+          "command": "sleep 28; wc -l /tmp/gotest.log; tail -5 /tmp/gotest.log",
+          "exit_code": 0,
+          "output_sha": "e5767e174e70e21962fc1f715836223c08b40a7eeb899eb640ba1d0f092c5eab"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"FAIL\\|EXIT=\" /tmp/gotest.log | head -20; echo \"====\"; grep -n -B5 -A30 \"^--- FAIL\" /tmp/gotest.log | head -80",
+          "exit_code": 0,
+          "output_sha": "c97bc6dd81a4aaa0ab52335d85bdcd59f11d72ae1777e1c8a9a909b8fba10167"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && (timeout 300 go test -short -count=1 -run TestSubscribePongingSubscriberSurvives ./internal/relay/ > /tmp/relay1.log 2>&1; echo \"EXIT=$?\" >> /tmp/relay1.log) & sleep 27; echo started",
+          "exit_code": 0,
+          "output_sha": "8a2f14b33da3589fbd0257defa22a70861b3d74482d9bfc6e6bdd9be0c03f316"
+        },
+        {
+          "tool": "run_command",
+          "command": "sleep 20; cat /tmp/relay1.log | tail -20",
+          "exit_code": 0,
+          "output_sha": "59a2444a4311a29b367721252a96c54f1404b8b3830383170c936eda04699239"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"go test -short -count=1 ./... : FAIL in internal/relay TestSubscribePongingSubscriberSurvives (keepalive_test.go:423) \\u2014 load-sensitive (1m loadavg 29.90, wake stall 2.99ms). Re-run alone: `go test -short -count=1 -run TestSubscribePongingSubscriberSurvives ./internal/relay/` -> ok, EXIT=0. Unrelated to this change (diff touches only examples/scratch-port-rotation-selftest.py + tasks.yaml).\", \"key\": \"gotest\"}",
+          "exit_code": 0,
+          "output_sha": "31e19032c16cc931d19aa64b1c7fd2ff87000bb422bbac8d5e50c8926a0ce567"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && sed -n '1000,1060p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "e02d6bcb1b04729b0b6cb71b1513807a79209fb5063bc25c60c49d690a336bbd"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && sed -n '1210,1250p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "7c70fb34bd66b8912e1a5b30242250e6a37dd82076ddf769f0fc041efbe05bdd"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && grep -n \"def free_run\" -A 25 examples/scratch-port-rotation-selftest.py; echo \"=== Squatter ===\"; grep -n \"class Squatter\" -A 40 examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "2a05c528372227ddd0bde768df590873abfe239dab72770fbca4a7bc872574cb"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && grep -n \"def assert_port_owned\" -A 40 scripts/lib/port-guard.sh",
+          "exit_code": 1,
+          "output_sha": "6d75834a27f0b6561854f99f118c2723ee37198c2162275ac7a405361bd1c167"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && grep -n \"assert_port_owned()\" -A 45 scripts/lib/port-guard.sh",
+          "exit_code": 0,
+          "output_sha": "175f0ec1beebe146a04af7879c58cd335eba96c435e7518e633ea9db8b13110e"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && grep -n \"def case_ws_mesh_setup_collision\" -A 70 examples/scratch-port-rotation-selftest.py | sed -n '1,75p'",
+          "exit_code": 0,
+          "output_sha": "b3f4ca57505ad366d369bced19d2e58a15d15996404f5cf73c9a9d777ea26a87"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && grep -n \"def case_rotate\" -A 60 examples/scratch-port-rotation-selftest.py | sed -n '1,65p'",
+          "exit_code": 0,
+          "output_sha": "f058e3951b7c82869eadf8130002e4cd939bc249fed485ea1b00067d839c4fed"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && sed -n '940,950p' examples/scratch-port-rotation-selftest.py",
+          "exit_code": 0,
+          "output_sha": "f8c687ed4a27c9b68302dd61321ec98adabebbbe7578bb66517edbea8203852e"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"Verified criterion 1 (given):\\n- Classifier is_startup_bind_collision (examples/scratch-port-rotation-selftest.py:881-901) requires: runner.name==\\\"ws-mesh\\\", rc!=0, a selected port, \\\"[2/10] start relay on :<port>\\\" before the collision diagnostic, the diagnostic naming that port, no \\\"[3/10] HTTP-register\\\" before it, no \\\":<port> is held by pid\\\" (i.e. not the ownership-guard product failure), and no PASS marker.\\n- Diagnostic string matches the real product: cmd/server/main.go:1573 slog.Error(\\\"server failed: another process already holds this port (bind: address already in use)\\\").\\n- Retry loop case_rotate:916-949 re-picks a fresh block (service_blocks/free_run), re-squats the new first candidate, bounded by ROTATION_SETUP_RETRIES=3, and reports SETUP exhaustion (not a product failure) at :942-944.\\n- Foreign listener preserved: squatter.still_listening() checked at :939 (fixture_ok) and :968-969; squatter.close() only in finally.\\n- Selected port served: case_ws_mesh_rotate:1212-1218 asserts \\\":<port> is held by pid\\\", transcript relay URL, \\\"[2/10] start relay on :<port>\\\", and '\\\"count\\\":0'.\\n- Ran: `python3 examples/scratch-port-rotation-selftest.py --case ws-mesh-setup-collision` -> PASS (5 checks), exit 0.\\n- Ran: `--case ws-mesh-rotate` -> PASS (11 checks), exit 0, real runner rotated 37880->37881, foreign holder left running.\\n- Ran full: `python3 examples/scratch-port-rotation-selftest.py` -> EXIT=0, 12/12 cases PASS.\\n- CI reachability: .github/workflows/ci.yml:160 `make scratch-port-rotation-selftest`; Makefile:378-379.\\n- go test -short -count=1 ./... : internal/relay TestSubscribePongingSubscriberSurvives failed under load (loadavg 29.9); re-run alone -> ok EXIT=0. Unrelated to this diff (only examples/*.py + tasks.yaml changed).\\n\", \"key\": \"verified_0\"}",
+          "exit_code": 0,
+          "output_sha": "0686d62ce1c452aff3e1c197ef22ef8699ccca4593008f20606f45725585a95a"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"derived_0: The retry path is reachable from the real runner, not only from the fake: the classifier's required diagnostic is the one the shipped crier server actually emits on EADDRINUSE, and the runner's own output shape ([2/10] start relay on :<port>) matches what run-demo.sh prints.\\nderived_1: A genuine product failure on the same selected port is NOT reclassified as setup loss (no masking of real regressions).\\nderived_2: The retry is bounded and terminates: exhaustion reports a SETUP failure rather than looping or silently passing.\\nderived_3: The foreign listener that occupied the first candidate is preserved (never killed) across rotation and retry.\\nderived_4: The new case is reachable from the CI entrypoint (make target invoked by the workflow) and the whole selftest still exits 0.\\n\", \"key\": \"derived\"}",
+          "exit_code": 0,
+          "output_sha": "592ded4d560af6f46f1ea88260745424c54fc0421dd28c5ab48649b8fb8193c0"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 - <<'EOF'\nimport importlib.util, sys\nspec = importlib.util.spec_from_file_location(\"spr\", \"examples/scratch-port-rotation-selftest.py\")\nm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nr = m.LIVE[\"ws-mesh\"]\np = r.primary.label\nsel = 25001\n# realistic product failure: ownership guard fires (squatter took the port)\nprod = (f\"port-guard: selected :{sel} for {p} \u2014 first candidate\\n\"\n        f\"[2/10] start relay on :{sel}\\n\"\n        f\"    :{sel} is held by pid 999 == our relay pid 1234 (ss -tlnp)\\n\"\n        \"ERROR: the ws-mesh-demo relay is NOT the process holding :25001 \u2014 refusing to measure it.\\n\")\nprint(\"ownership-guard product failure classified as setup?\", m.is_startup_bind_collision(r, 1, prod))\n# realistic setup collision: server died at bind, no ownership line, no [3/10]\nsetup = (f\"port-guard: selected :{sel} for {p} \u2014 first candidate\\n\"\n         f\"[2/10] start relay on :{sel}\\n\"\n         f\"FAIL: relay exited during startup (pid 1234)\\n\"\n         f\"time=... level=ERROR msg=\\\"server failed: another process already holds this port (bind: address already in use)\\\" error=\\\"listen tcp :25001: bind: address already in use\\\" port=25001\\n\")\nprint(\"realistic startup collision classified as setup?\", m.is_startup_bind_collision(r, 1, setup))\n# other runner must never be reclassified\nprint(\"federation runner classified?\", m.is_startup_bind_collision(m.LIVE[\"federation\"], 1, setup))\nEOF",
+          "exit_code": 1,
+          "output_sha": "90f4120b69e794d437a6062d84257134f174300aae4272dfdefc000dd5872e91"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 - <<'EOF'\nimport importlib.util, sys\nspec = importlib.util.spec_from_file_location(\"spr\", \"examples/scratch-port-rotation-selftest.py\")\nm = importlib.util.module_from_spec(spec); sys.modules[\"spr\"] = m; spec.loader.exec_module(m)\nr = m.LIVE[\"ws-mesh\"]\np = r.primary.label\nsel = 25001\nprod = (f\"port-guard: selected :{sel} for {p} \u2014 first candidate\\n\"\n        f\"[2/10] start relay on :{sel}\\n\"\n        f\"    :{sel} is held by pid 999 == our relay pid 1234 (ss -tlnp)\\n\"\n        \"ERROR: the ws-mesh-demo relay is NOT the process holding :25001 \u2014 refusing to measure it.\\n\")\nprint(\"ownership-guard product failure classified as setup?\", m.is_startup_bind_collision(r, 1, prod))\nsetup = (f\"port-guard: selected :{sel} for {p} \u2014 first candidate\\n\"\n         f\"[2/10] start relay on :{sel}\\n\"\n         f\"FAIL: relay exited during startup (pid 1234)\\n\"\n         f'time=... level=ERROR msg=\"server failed: another process already holds this port (bind: address already in use)\" error=\"listen tcp :25001: bind: address already in use\" port=25001\\n')\nprint(\"realistic startup collision classified as setup?\", m.is_startup_bind_collision(r, 1, setup))\nprint(\"federation runner classified?\", m.is_startup_bind_collision(m.LIVE[\"federation\"], 1, setup))\nprint(\"ws-mesh with PASS marker?\", m.is_startup_bind_collision(r, 1, setup + \"==> DEMO PASS\\n\"))\nEOF",
+          "exit_code": 0,
+          "output_sha": "01945dcd05466ca46af80f66a187174f64d04c9bafe8f2027deafaff53f3bebd"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: derived_0 \\u2014 classifier's required diagnostic is the one the shipped server emits (cmd/server/main.go:1573 \\\"server failed: another process already holds this port (bind: address already in use)\\\"), and the runner prints \\\"[2/10] start relay on :<port>\\\" (examples/ws-mesh-demo/run-demo.sh:284). Direct probe: a realistic startup-collision transcript (server ERROR line + \\\"FAIL: relay exited during startup\\\") -> is_startup_bind_collision == True.\\nPASS: derived_1 \\u2014 probe: ownership-guard product failure (\\\":<port> is held by pid ... == our relay pid\\\" + \\\"NOT the process holding\\\") -> False; PASS-marker transcript -> False; federation runner -> False.\\nPASS: derived_2 \\u2014 ROTATION_SETUP_RETRIES=3 (:879), loop range(3) (:916), exhaustion at :942-944 reports \\\"SETUP selected-port bind collision recovery exhausted\\\" and returns; observed in run output \\\"retrying on a fresh block (attempt 1/3)\\\".\\nPASS: derived_3 \\u2014 squatter.still_listening() in fixture_ok (:939) and checked at :968-969; squatter.close() only in finally (:971-972); live run output \\\"ok ws-mesh: the holder of :37880 was left running\\\".\\nPASS: derived_4 \\u2014 .github/workflows/ci.yml:160 runs `make scratch-port-rotation-selftest`; Makefile:378-379 runs the python selftest; full run EXIT=0, 12/12 cases PASS.\\n\", \"key\": \"verified_derived\"}",
+          "exit_code": 0,
+          "output_sha": "90e1133ab18a751007c0301cf46a7ade4d61ba303b84f9d323edcc3a9f7f5cc8"
+        }
+      ]
+    }
+  },
+  "review": {
+    "reviewer_email": "totalwindupflightsystems@gmail.com",
+    "reviewer_name": "totalwindupflightsystems",
+    "commit_author_email": "totalwindupflightsystems@gmail.com",
+    "commit_author_name": "totalwindupflightsystems",
+    "self_review": true,
+    "findings": [],
+    "summary": "The diff only updates a task's completed_at timestamp in .gitreins/tasks.yaml, with no code, logic, or wiring changes to review."
+  },
+  "summary": "Stage tier1: PASS\n    \u2713 guard: gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 th\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 The ws-mesh rotated-run acceptance passes in a CI-like environment when an unrelated listener occupies the first candidate: the runner must rotate to a free selected port, start its own relay there, preserve the foreign listener, and prove the selected port is served; the selftest must not report a product failure for a runner-side bind collision.: Rotation + own relay + foreign-listener preservation + selected-port proof all verified live: `python3 examples/scratch-port-rotation-selftest.py --case ws-mesh-rotate` -> exit 0, 'PASS: ws-mesh-rotate (11 checks)' with 'ok ws-mesh: the occupied FIRST candidate :37880 was rotated past to :37881', 'ok ws-mesh: the rotated run still succeeds \u2014 no false skip (exit 0 after 3.5s)', 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)', 'ok ws-mesh: the relay answering /health is the pid this run started (:37881)'. Collision classification: is_startup_bind_collision (examples/scratch-port-rotation-selftest.py:881-901) requires the ws-mesh runner, rc!=0, a selected port, '[2/10] start relay on :<port>' before the diagnostic, the diagnostic naming that port, no '[3/10] HTTP-register' before it, no ':<port> is held by pid' ownership-guard line, and no PASS marker; the diagnostic string matches the real product (cmd/server/main.go:1573 'server failed: another process already holds this port (bind: address already in use)'). case_rotate:916-949 then discards the block, re-picks a fresh one and retries within ROTATION_SETUP_RETRIES=3, reporting SETUP exhaustion (:942-944) rather than a product failure. `--case ws-mesh-setup-collision` -> exit 0, 'PASS: ws-mesh-setup-collision (5 checks)' including 'ok ws-mesh: the selected-port setup collision triggers one bounded fresh-block retry (runner attempts=2)'. Full suite `python3 examples/scratch-port-rotation-selftest.py` -> EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', no FAIL lines. CI reachability: .github/workflows/ci.yml:160 `make scratch-port-rotation-selftest` -> Makefile:378-379. Go suite `go test -short -count=1 ./...` had one load-sensitive failure in internal/relay TestSubscribePongingSubscriberSurvives (keepalive_test.go:423, '1m loadavg 29.90'); re-run alone `go test -short -count=1 -run TestSubscribePongingSubscriberSurvives ./internal/relay/` -> 'ok github.com/crier-dev/crier/internal/relay 1.085s', EXIT=0 \u2014 unrelated to this diff, which touches only examples/scratch-port-rotation-selftest.py and .gitreins/tasks.yaml.\n  \u2713 The retry path is reachable from the real runner, not only from the fake: the classifier's required diagnostic is the one the shipped crier server actually emits on EADDRINUSE, and the runner's own output shape ([2/10] start relay on :<port>) matches what run-demo.sh prints.: cmd/server/main.go:1573 emits exactly 'server failed: another process already holds this port (bind: address already in use)' on EADDRINUSE (logServeFailure, guarded by errors.Is(err, syscall.EADDRINUSE)); examples/ws-mesh-demo/run-demo.sh:284 prints '==> [2/10] start relay on :${DEMO_PORT} (auth-disabled)'. Direct probe of the classifier with a realistic transcript (server ERROR line + 'FAIL: relay exited during startup (pid 1234)', no ownership line, no [3/10]) returned True.\n  \u2713 A genuine product failure on the same selected port is NOT reclassified as setup loss (no masking of real regressions).: Probe of is_startup_bind_collision: ownership-guard product failure (':25001 is held by pid 999 == our relay pid 1234' + 'NOT the process holding :25001 \u2014 refusing to measure it') -> False; transcript containing the PASS marker -> False; the federation runner with the same text -> False. The in-suite control also asserts this: 'ok ws-mesh: a behavior-stage failure is not classified as setup recovery' and 'ok ws-mesh: a zero exit cannot be classified as a bind collision' (examples/scratch-port-rotation-selftest.py:1165-1168).\n  \u2713 The retry is bounded and terminates: exhaustion reports a SETUP failure rather than looping or silently passing.: ROTATION_SETUP_RETRIES = 3 (examples/scratch-port-rotation-selftest.py:879); the loop is `for attempt in range(ROTATION_SETUP_RETRIES)` (:916) and on the last attempt records 'SETUP selected-port bind collision recovery exhausted' and returns (:942-944). Observed in the live run: 'ws-mesh: SETUP selected port :27668 was lost at bind; fixture listener :27667 remains listening; retrying on a fresh block (attempt 1/3)' followed by a PASS, i.e. exactly one retry then termination.\n  \u2713 The foreign listener that occupied the first candidate is preserved (never killed) across rotation and retry.: squatter.still_listening() is part of fixture_ok (:939) and is asserted again at :968-969; squatter.close() appears only in the finally block (:971-972), so the fixture socket is released by the selftest itself, never signalled. Live evidence: 'ok ws-mesh: the holder of :37880 was left running (a foreign listener is not ours to kill)' and 'ok ws-mesh: no squatter was disturbed by either run'.\n  \u2713 The new case is reachable from the CI entrypoint (make target invoked by the workflow) and the whole selftest still exits 0.: .github/workflows/ci.yml:160 runs `make scratch-port-rotation-selftest`; Makefile:378-379 runs `python3 examples/scratch-port-rotation-selftest.py`; the new case is registered in CASES (:138), CASE_TOOLS (:169) and the main() dispatch (:1287-1288). Full run: EXIT=0, 'scratch-port-rotation-selftest: 12/12 case(s) behaved', 12 'PASS:' lines, zero 'FAIL' lines.\nThe ws-mesh rotated-run selftest now classifies the narrow selected-port startup bind diagnostic as runner setup loss, retries on a fresh port block within a bounded budget, keeps the foreign listener alive, and still proves the selected port is served \u2014 verified by live runs of ws-mesh-rotate (11 checks), ws-mesh-setup-collision (5 checks) and the full 12/12 suite, all exit 0. [uncovered failure paths: failure mode 0 (The setup-collision retry path is exercised only through a monkeypatched run_script, so a future change to the real runner's startup output shape could silently make the classifier unreachable in production while the control still passes): detected_by is empty \u2014 uncovered failure path]\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-13T17:05:03.874724",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-13T17:05:04.200220+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 6556,
+        "truncated": false,
+        "source": "git show ec131da8866f"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 380,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "INT-CI-036"
+  }
+}
