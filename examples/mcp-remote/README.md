@@ -6,8 +6,7 @@ Start a local Crier server first (the default is an in-memory server on port 876
 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false make run
 ```
 
-Copy `env.template`, then launch the bridge with the server URL, bridge identity,
-and mesh URL set:
+Copy `env.template`, then launch the bridge with the selected Tier 2 values:
 
 ```bash
 set -a
@@ -16,16 +15,20 @@ set +a
 make build-mcp && ./bin/crier-mcp
 ```
 
-The bridge starts with the 11 always-available tools when these variables are
-unset. The cumulative startup tiers are 11 by default, 15 after setting
-`CRIER_AGENT_ID`, 22 after also setting `CRIER_HTTP_URL`, and 23 after also
-setting `CRIER_MESH_URL`. The startup diagnostic reports these counts, while
-`tools/list` continues to advertise all 23 tools at every tier.
+The template selects one tier; sourcing it does not demonstrate every tier. The
+cumulative startup tiers are 11 by default, 15 after setting `CRIER_AGENT_ID`,
+22 after also setting `CRIER_HTTP_URL`, and 23 after also setting
+`CRIER_MESH_URL`. To run the Tier 3 variant, uncomment `CRIER_MESH_URL` in the
+template before sourcing it. The startup diagnostic reports `available_tools`
+for the selected tier, while `tools/list` continues to advertise all 23 tools
+at every tier (`tools=23`).
 
-The following is the exact stable capability line captured from the runnable
-local flow documented by this example. The captured startup line is kept in
-[`local-transcript.txt`](local-transcript.txt); ephemeral-key and version lines
-are intentionally omitted because they vary per run.
+The following is the exact Tier 3 invocation and startup line captured from the
+runnable local flow documented by this example. It intentionally uses an empty
+`CRIER_AGENT_PRIVATE_KEY_FILE`: this is a fresh/empty in-memory server flow,
+not a repeatable restart against an already populated server. The captured
+startup line is kept in [`local-transcript.txt`](local-transcript.txt);
+ephemeral-key and version lines are omitted because they vary per run.
 
 ```text
 CRIER_PORT=18767 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false PIDFILE=.rev-crier-2.pid make run
@@ -33,15 +36,25 @@ CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.
 2026/11/13 14:30:39 INFO MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed
 ```
 
+Here `tools=23` is the advertised `tools/list` surface. Because all three
+bridge variables are set, the startup report has no `available_tools` field;
+its Tier 3 value is 23. With the sourceable template as committed (Tier 2),
+the corresponding startup attributes are `tools=23 available_tools=22`.
+
 The server's default auth setting is secure, so the invocation explicitly turns
 off `CR_REQUIRE_AGENT_SIG` for this local demonstration. With enforcement off,
-the bridge's automatic `CRIER_AGENT_ID` registration completes and the startup
-line confirms `identity=confirmed`.
+the bridge's automatic `CRIER_AGENT_ID` registration completes and the captured
+startup line confirms `identity=confirmed`.
 
 The server must be running before the bridge starts. In remote mode, crier-mcp
-registers `CRIER_AGENT_ID` automatically. `CRIER_AGENT_PRIVATE_KEY_FILE` is
-optional when the server has signature enforcement disabled as in the command
-above; use a stable key for a long-lived bridge against the secure default.
+registers `CRIER_AGENT_ID` automatically. Without
+`CRIER_AGENT_PRIVATE_KEY_FILE`, the bridge generates an ephemeral signing key.
+That key is regenerated on every run: starting the bridge again against the same
+persistent server therefore produces `identity=rejected` unless the original
+stable key is supplied. Use a stable key from the first bridge start, or delete
+the existing agent server-side / start a fresh in-memory server before repeating
+the empty-key flow. Signature enforcement being disabled does not remove this
+registration-key identity check.
 
 The complete capability report is generated from the registration metadata:
 `make mcp-capabilities-check` verifies all 23 tools and their unlock conditions.
