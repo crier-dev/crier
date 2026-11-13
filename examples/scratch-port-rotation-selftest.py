@@ -135,6 +135,7 @@ CASES = [
     "gateway-rotate",
     "gateway-exhaust",
     "gateway-explicit",
+    "ws-mesh-setup-collision",
     "ws-mesh-rotate",
     "ws-mesh-exhaust",
     "ws-mesh-explicit",
@@ -165,6 +166,7 @@ CASE_TOOLS: dict[str, frozenset[str]] = {
     "gateway-rotate": _GATEWAY_TOOLS,
     "gateway-exhaust": _GATEWAY_TOOLS,
     "gateway-explicit": _GATEWAY_TOOLS,
+    "ws-mesh-setup-collision": _WS_MESH_TOOLS,
     "ws-mesh-rotate": _WS_MESH_TOOLS,
     "ws-mesh-exhaust": _WS_MESH_TOOLS,
     "ws-mesh-explicit": _WS_MESH_TOOLS,
@@ -873,57 +875,104 @@ def block_env(runner: LiveRunner, blocks: list[list[int]], budget: int) -> dict[
     return env
 
 
+WS_MESH_STARTUP_BIND_COLLISION = "server failed: another process already holds this port"
+ROTATION_SETUP_RETRIES = 3
+
+
+def is_startup_bind_collision(runner: LiveRunner, rc: int, output: str) -> bool:
+    """Recognize only the runner's own selected-port startup failure.
+
+    A free-port preflight cannot reserve a port. The crier server therefore has a
+    narrow, explicit bind-failure diagnostic for the pick-to-bind race. Require
+    that diagnostic, a selected port for this runner, and a non-zero exit before
+    treating the run as setup and retrying; ordinary product failures stay
+    failures of the first established fixture.
+    """
+    port = selected_for(output, runner.primary.label)
+    if runner.name != "ws-mesh" or rc == 0 or port is None:
+        return False
+    start = output.find(f"[2/10] start relay on :{port}")
+    collision = output.find(WS_MESH_STARTUP_BIND_COLLISION)
+    behavior = output.find("[3/10] HTTP-register")
+    return (start >= 0 and collision > start
+            and re.search(rf"\bport[=: ]+{port}\b", output[collision:]) is not None
+            and (behavior < 0 or collision < behavior)
+            and f":{port} is held by pid" not in output
+            and runner.pass_marker not in output)
+
+
 def case_rotate(runner: LiveRunner, work: Path, budget: int = 3) -> CaseResult:
     """First default candidate occupied -> rotate to the next, run still PASSes.
 
     The collision is deterministic (a socket this selftest owns), and the run is
     the real runner: its own PASS line can only be printed when every component
-    and client used the port the selector chose.
+    and client used the port the selector chose. If an unrelated process wins the
+    selector-to-bind race, that is setup loss, not a product result: discard the
+    attempted block, re-pick a fresh one, and retry within a bounded budget.
     """
     res = CaseResult(f"{runner.name}-rotate")
-    blocks = service_blocks(budget, len(runner.services))
-    if not blocks:
-        res.check(False, f"{runner.name}: a run of {budget} consecutive free ports is available for the fixture")
-        return res
-
     primary = runner.primary
-    squatted = blocks[0][0]
-    try:
-        squatter = Squatter(squatted)
-    except AssertionError as exc:
-        res.check(False, f"{runner.name}: the first default candidate is squattable by this selftest", str(exc))
-        return res
-    try:
-        res.check(ss_shows(squatted), f"{runner.name}: the squatted candidate is really occupied (ss agrees)",
-                  f":{squatted}")
-        env = live_env_for(runner, work, block_env(runner, blocks, budget), tag="rotate")
-        rc, output, secs = run_script(runner.script, env, 300)
-        res.detail = output
-        chosen = selections(output)
+    used_ports: set[int] = set()
+    for attempt in range(ROTATION_SETUP_RETRIES):
+        blocks = service_blocks(budget, len(runner.services))
+        if not blocks or any(p in used_ports for block in blocks for p in block):
+            res.check(False, f"{runner.name}: SETUP could not find a fresh block of {budget} consecutive ports")
+            return res
+        used_ports.update(p for block in blocks for p in block)
+        squatted = blocks[0][0]
+        try:
+            squatter = Squatter(squatted)
+        except AssertionError as exc:
+            res.check(False, f"{runner.name}: SETUP could not squat the first candidate", str(exc))
+            return res
+        try:
+            occupied = ss_shows(squatted)
+            env = live_env_for(runner, work, block_env(runner, blocks, budget), tag=f"rotate-{attempt + 1}")
+            rc, output, secs = run_script(runner.script, env, 300)
+            res.detail = output
+            chosen = selections(output)
+            want = blocks[0][1]
+            fixture_ok = (occupied and selected_for(output, primary.label) == want
+                          and squatted in skipped_ports(output)
+                          and f"port-guard:   holder pid : {squatter.pid}" in output
+                          and f"ss -tlnp | grep :{squatted}" in output
+                          and squatter.still_listening())
+            if fixture_ok and is_startup_bind_collision(runner, rc, output):
+                lost = selected_for(output, primary.label)
+                if attempt + 1 == ROTATION_SETUP_RETRIES:
+                    res.check(False, f"{runner.name}: SETUP selected-port bind collision recovery exhausted",
+                              f"{ROTATION_SETUP_RETRIES} attempts; last lost :{lost}")
+                    return res
+                print(f"{runner.name}: SETUP selected port :{lost} was lost at bind; "
+                      f"fixture listener :{squatted} remains listening; retrying on a fresh block "
+                      f"(attempt {attempt + 1}/{ROTATION_SETUP_RETRIES})")
+                continue
 
-        want = blocks[0][1]
-        res.check(selected_for(output, primary.label) == want,
-                  f"{runner.name}: the occupied FIRST candidate :{squatted} was rotated past to :{want}",
-                  f"selected {chosen.get(primary.label)}")
-        res.check(squatted in skipped_ports(output),
-                  f"{runner.name}: the skipped candidate is named as the reason to rotate",
-                  f"skipped={skipped_ports(output)}")
-        res.check(f"port-guard:   holder pid : {squatter.pid}" in output,
-                  f"{runner.name}: the skip names the holder pid ({squatter.pid}) of the squatted candidate")
-        res.check(f"ss -tlnp | grep :{squatted}" in output,
-                  f"{runner.name}: the skip prints the audit command for the squatted candidate")
-        for svc, block in list(zip(runner.services, blocks))[1:]:
-            res.check(selected_for(output, svc.label) == block[0],
-                      f"{runner.name}: {svc.port_var} took its own free first candidate (no cross-service collision)",
-                      f"selected {chosen.get(svc.label)} (want {block[0]})")
-        res.check(rc == 0 and runner.pass_marker in output,
-                  f"{runner.name}: the rotated run still succeeds — no false skip",
-                  f"exit {rc} after {secs:.1f}s")
-        res.check(squatter.still_listening(),
-                  f"{runner.name}: the holder of :{squatted} was left running (a foreign listener is not ours to kill)")
-        return res
-    finally:
-        squatter.close()
+            res.check(occupied, f"{runner.name}: the squatted candidate is really occupied (ss agrees)",
+                      f":{squatted}")
+            res.check(selected_for(output, primary.label) == want,
+                      f"{runner.name}: the occupied FIRST candidate :{squatted} was rotated past to :{want}",
+                      f"selected {chosen.get(primary.label)}")
+            res.check(squatted in skipped_ports(output),
+                      f"{runner.name}: the skipped candidate is named as the reason to rotate",
+                      f"skipped={skipped_ports(output)}")
+            res.check(f"port-guard:   holder pid : {squatter.pid}" in output,
+                      f"{runner.name}: the skip names the holder pid ({squatter.pid}) of the squatted candidate")
+            res.check(f"ss -tlnp | grep :{squatted}" in output,
+                      f"{runner.name}: the skip prints the audit command for the squatted candidate")
+            for svc, block in list(zip(runner.services, blocks))[1:]:
+                res.check(selected_for(output, svc.label) == block[0],
+                          f"{runner.name}: {svc.port_var} took its own free first candidate (no cross-service collision)",
+                          f"selected {chosen.get(svc.label)} (want {block[0]})")
+            res.check(rc == 0 and runner.pass_marker in output,
+                      f"{runner.name}: the rotated run still succeeds — no false skip",
+                      f"exit {rc} after {secs:.1f}s")
+            res.check(squatter.still_listening(),
+                      f"{runner.name}: the holder of :{squatted} was left running (a foreign listener is not ours to kill)")
+            return res
+        finally:
+            squatter.close()
+    return res
 
 
 def case_exhaust(runner: LiveRunner, work: Path, budget: int = 3) -> CaseResult:
@@ -1088,6 +1137,70 @@ def case_gateway_rotate(work: Path) -> CaseResult:
     return res
 
 
+def case_ws_mesh_setup_collision(work: Path) -> CaseResult:
+    """Deterministic control: a selected port lost at bind is setup recovery.
+
+    The shipped runner cannot be forced into this race without changing the
+    process it starts. Keep the classifier's control deterministic and narrow:
+    the exact startup diagnostic with a selected port is recoverable, while a
+    product-shaped failure on the same port is not.
+    """
+    res = CaseResult("ws-mesh-setup-collision")
+    runner = LIVE["ws-mesh"]
+    selected = ROTATION_SETUP_RETRIES + 1
+    startup = (
+        f"port-guard: selected :{selected} for {runner.primary.label} — first candidate\n"
+        f"[2/10] start relay on :{selected}\n"
+        f"server failed: another process already holds this port: port {selected}\n"
+    )
+    product = (
+        f"port-guard: selected :{selected} for {runner.primary.label} — first candidate\n"
+        f"[2/10] start relay on :{selected}\n"
+        "[3/10] HTTP-register demo-agent-a and demo-agent-b\n"
+        f"server failed: another process already holds this port: port {selected}\n"
+        "FAIL: mesh peer count != 2\n"
+    )
+    res.check(is_startup_bind_collision(runner, 1, startup),
+              "ws-mesh: selected-port bind collision is classified as setup recovery")
+    res.check(not is_startup_bind_collision(runner, 1, product),
+              "ws-mesh: a behavior-stage failure is not classified as setup recovery")
+    res.check(is_startup_bind_collision(runner, 0, startup) is False,
+              "ws-mesh: a zero exit cannot be classified as a bind collision")
+
+    # Drive the real retry loop with a narrow fake runner result: the first
+    # selected port loses its bind, while the second fresh block succeeds. This
+    # proves recovery is executed, not merely recognized by the classifier.
+    global run_script
+    calls = 0
+    original_run_script = run_script
+
+    def fake_run_script(_script: Path, env: dict[str, str], _timeout: int) -> tuple[int, str, float]:
+        nonlocal calls
+        calls += 1
+        base = int(env[runner.primary.base_var])
+        selected_port = base + 1
+        common = (f"port-guard: candidate :{base} is in use — rotating past it for {runner.primary.label}\n"
+                  f"port-guard:   holder pid : {os.getpid()}\n"
+                  f"port-guard:   audit with : ss -tlnp | grep :{base}\n"
+                  f"port-guard: selected :{selected_port} for {runner.primary.label} — skipped 1 occupied candidate(s) :{base}\n"
+                  f"[2/10] start relay on :{selected_port}\n")
+        if calls == 1:
+            return (1, common + f"server failed: another process already holds this port: port {selected_port}\n", 0.0)
+        return (0, common + "DEMO PASS\n", 0.0)
+
+    run_script = fake_run_script
+    try:
+        recovered = case_rotate(runner, work / "retry-control", budget=3)
+    finally:
+        run_script = original_run_script
+    res.check(calls == 2,
+              "ws-mesh: the selected-port setup collision triggers one bounded fresh-block retry",
+              f"runner attempts={calls}")
+    res.check(not recovered.failed and recovered.checks,
+              "ws-mesh: the recovered retry reaches the normal rotation checks")
+    return res
+
+
 def case_ws_mesh_rotate(work: Path) -> CaseResult:
     res = case_rotate(LIVE["ws-mesh"], work)
     if not res.detail:
@@ -1171,6 +1284,8 @@ def main() -> int:
                 results.append(case_exhaust(LIVE["hermes-gateway"], work / "gw-exhaust"))
             elif name == "gateway-explicit":
                 results.append(case_explicit(LIVE["hermes-gateway"], work / "gw-explicit"))
+            elif name == "ws-mesh-setup-collision":
+                results.append(case_ws_mesh_setup_collision(work / "ws-setup-collision"))
             elif name == "ws-mesh-rotate":
                 results.append(case_ws_mesh_rotate(work / "ws-rotate"))
             elif name == "ws-mesh-exhaust":
