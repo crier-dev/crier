@@ -1,0 +1,26 @@
+diff --git a/.gitreins/tasks.yaml b/.gitreins/tasks.yaml
+index fd80ec0b..83df2711 100644
+--- a/.gitreins/tasks.yaml
++++ b/.gitreins/tasks.yaml
+@@ -4116,3 +4116,21 @@ tasks:
+   status: complete
+   created_at: '2026-11-13T05:35:57.493177+00:00'
+   completed_at: '2026-11-13T05:36:23.894564+00:00'
++- id: DF-CRIER-503-RV-20261113
++  title: Verify DF-CRIER-503 identity-qualified tool surface
++  criteria:
++  - 'PROOF: merged origin/main tests and source show confirmed identity keeps the
++    availability claim while rejected identity qualifies or refuses it; FAILIF: rejected
++    identity emits an unqualified all-advertised-tools availability claim.'
++  status: complete
++  created_at: '2026-11-13T10:34:30.228728+00:00'
++  completed_at: '2026-11-13T10:38:40.663860+00:00'
++- id: DF-CRIER-504-RV-20261113
++  title: Verify DF-CRIER-504 keyless registration conflict
++  criteria:
++  - 'PROOF: merged origin/main tests classify empty/empty as actionable keyless duplicate
++    and preserve genuine public-key mismatch; FAILIF: empty/empty is reported as different
++    public key.'
++  status: complete
++  created_at: '2026-11-13T10:34:31.229544+00:00'
++  completed_at: '2026-11-13T10:50:02.371179+00:00'

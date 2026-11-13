@@ -1,0 +1,16 @@
+{
+  "tick_id": "crier-foreman-2026-11-13-10-24-38",
+  "project": "crier",
+  "block": "DF-CRIER-504",
+  "wave_budget": 12,
+  "slots": 6,
+  "mode": "verification-only-recovery",
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first, but its remaining acceptance is sibling-repo and externally gated by INGRESS-CRIER-001; fell through to the next dispatchable block DF-CRIER-504.",
+  "rows": [
+    {"task_id":"DF-CRIER-503","depends_on":[],"implementation_commit":"e9c5df02ade187ae0a61c376a11550bae99831f6","worktree":"/home/kara/worktrees/crier-DF-CRIER-503","branch":"wt/DF-CRIER-503","dispatch":"not dispatched; existing implementation recovered"},
+    {"task_id":"DF-CRIER-504","depends_on":[],"implementation_commit":"812a33334afaf4c42d9f83b02a880820d7ca422e","worktree":"/home/kara/worktrees/crier-DF-CRIER-504","branch":"wt/DF-CRIER-504","dispatch":"not dispatched; existing implementation recovered"}
+  ],
+  "workers": [],
+  "wave_size": 0,
+  "local_gate": "PASS: go build ./...; go vet ./...; go test ./cmd/crier-mcp ./internal/mcp ./internal/registry -count=1; FAIL: gitreins guard --full due pre-existing secrets in board/history and crier-agent.key"
+}
