@@ -9,6 +9,8 @@ info:
 
     Distributed tracing is opt-in with CR_TRACING_ENABLED. When enabled, Crier accepts and propagates W3C `traceparent` context and exports sampled spans to the configured OTLP HTTP endpoint (default) or the local-only stdout exporter. Trace export never includes message payloads, prompts, authentication data or query strings. Tracing is disabled by default; the Prometheus `/metrics` surface remains independent.
   # Policy: info.version tracks the release tag, without its leading v.
+  # Before releasing, edit this source, run go generate ./cmd/server, then run
+  # bash scripts/check-openapi-version.sh <release-tag> (also enforced by make release).
   version: "0.7.0"
 servers:
   - url: http://localhost:8767
