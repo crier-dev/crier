@@ -1565,6 +1565,11 @@ func TestStopRunningServer(t *testing.T) {
 	ln.Close()
 }
 
+// ch:trace row=REV-CRIER-1 spec=none:board-acceptance wave=none:serial-fallback test=cmd/server/main_test.go::TestOpenAPIServed/openapi.yaml_matches_the_embedded_spec_without_auth doc=cmd/server/openapi.yaml;docs/openapi.yaml evidence=none:command-output-retained-in-worker-report witness=none:historical-release-tag-not-current verdict=none:worker-commit commit=worker-sha-after-commit-unavailable memory=none:foreman-closeout
+// STATUS: partial
+// TIER: T1
+// EVIDENCE: go test ./cmd/server -count=1 -run 'TestOpenAPIServed|TestOpenAPIDocsSpec'
+//
 // TestOpenAPIServed is the CR-GAP-049 end-to-end gate: on a running server,
 // GET /openapi.json returns HTTP 200 with the spec as valid JSON (openapi ==
 // "3.1.0"), GET /openapi.yaml returns the raw embedded spec, and GET /docs
@@ -1648,6 +1653,25 @@ func TestOpenAPIServed(t *testing.T) {
 		if string(body) != string(openapiYAML) {
 			t.Errorf("GET /openapi.yaml: body (%d bytes) differs from the embedded spec (%d bytes)", len(body), len(openapiYAML))
 		}
+		var served, source struct {
+			Info struct {
+				Version string `yaml:"version"`
+			} `yaml:"info"`
+		}
+		docs, err := os.ReadFile("../../docs/openapi.yaml")
+		if err != nil {
+			t.Fatalf("read source spec: %v", err)
+		}
+		if err := yaml.Unmarshal(body, &served); err != nil {
+			t.Fatalf("parse served spec: %v", err)
+		}
+		if err := yaml.Unmarshal(docs, &source); err != nil {
+			t.Fatalf("parse source spec: %v", err)
+		}
+		if served.Info.Version == "" || served.Info.Version != source.Info.Version {
+			t.Fatalf("served info.version %q differs from source %q or is empty", served.Info.Version, source.Info.Version)
+		}
+		t.Logf("served and source info.version: %s", served.Info.Version)
 	})
 
 	t.Run("docs links to both endpoints without auth", func(t *testing.T) {
