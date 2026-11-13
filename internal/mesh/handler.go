@@ -107,8 +107,13 @@ func HandleConnect(m *Mesh) http.HandlerFunc {
 		}
 
 		pc := NewAcceptedPeerConnection(agentID, conn)
-		pc.StartReadLoop()
+		// Install the frame callback before starting the reader. The WebSocket
+		// upgrade has already completed at this point, so a client is allowed to
+		// write immediately; starting the read loop first leaves a window where
+		// the first frame is consumed while PeerConnection.onMsg is still nil.
+		// That was observable as an apparently silent malformed-frame drop.
 		m.AcceptPeer(agentID, pc)
+		pc.StartReadLoop()
 		if inboxNotify {
 			m.SetInboxNotify(agentID, true)
 		}

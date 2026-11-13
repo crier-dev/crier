@@ -1070,24 +1070,37 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 // but wrong-shaped frame (REGISTER with a string lease_ttl_ms, the doc's own
 // example) must draw a refusal whose request_id equals that frame's own
 // message_id — the correlation half of the contract.
-func liveMeshMalformedFrameStatus(baseURL string) (int, error) {
+func liveMeshMalformedFrameStatus(baseURL string) (status int, probeErr error) {
+	var dialAt, dialDone, writeAt, writeDone, deadline time.Time
+	defer func() {
+		if probeErr != nil {
+			probeErr = fmt.Errorf("%w (dial_at=%s dial_done=%s write_at=%s write_done=%s read_deadline=%s; timestamps alone cannot prove server receipt or a late reply)",
+				probeErr, dialAt.Format(time.RFC3339Nano), dialDone.Format(time.RFC3339Nano),
+				writeAt.Format(time.RFC3339Nano), writeDone.Format(time.RFC3339Nano), deadline.Format(time.RFC3339Nano))
+		}
+	}()
 	// http://127.0.0.1:PORT → ws://127.0.0.1:PORT. The booted server has
 	// CR_AUTH_TOKEN set and /mesh/connect is NOT auth-exempt, so the upgrade
 	// request carries the same token the gate's HTTP probes send (a token-less
 	// upgrade is answered 401 before the handshake).
 	wsURL := "ws" + strings.TrimPrefix(baseURL, "http")
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	dialAt = time.Now()
 	conn, _, err := dialer.Dial(wsURL+"/mesh/connect/docsclaims-malformed-probe", http.Header{"Authorization": []string{"Bearer test-token"}})
+	dialDone = time.Now()
 	if err != nil {
 		return 502, fmt.Errorf("dial mesh connect: %w", err)
 	}
 	defer conn.Close()
 
 	// --- arm 1: unparseable frame → ERROR INVALID_MESSAGE, request_id ABSENT ---
+	writeAt = time.Now()
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(`this is not a frame`)); err != nil {
 		return 502, fmt.Errorf("write unparseable frame: %w", err)
 	}
-	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+	writeDone = time.Now()
+	deadline = time.Now().Add(5 * time.Second)
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		return 502, fmt.Errorf("set read deadline: %w", err)
 	}
 	_, raw, err := conn.ReadMessage()
@@ -1135,11 +1148,14 @@ func liveMeshMalformedFrameStatus(baseURL string) (int, error) {
 
 	// --- arm 2: readable but wrong-shaped frame → refusal correlates ---
 	const arm2ID = "docsclaims-reg-bad-191"
+	writeAt = time.Now()
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(
 		`{"type":"REGISTER","version":1,"message_id":"`+arm2ID+`","agent_id":"docsclaims-malformed-probe","lease_ttl_ms":"thirty"}`)); err != nil {
 		return 502, fmt.Errorf("write wrong-shaped REGISTER: %w", err)
 	}
-	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+	writeDone = time.Now()
+	deadline = time.Now().Add(5 * time.Second)
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		return 502, fmt.Errorf("set read deadline (arm 2): %w", err)
 	}
 	_, raw2, err := conn.ReadMessage()
