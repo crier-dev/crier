@@ -17,5 +17,6 @@
     "publication_requirement": "Publish the verification/board closeout on origin/main and gitlab/main with exact parity."
   },
   "base_sha": "ec131da8866f9e56a8bdc3f534a50d604436df15",
-  "trace": "ch:trace row=INT-CI-036 spec=none:CI-failure-repair wave=.coding-hermes/waves/crier-foreman-2026-11-13-16-54-13.json#verification test=examples/scratch-port-rotation-selftest.py::ws-mesh-setup-collision;examples/scratch-port-rotation-selftest.py::ws-mesh-rotate;examples/ws-mesh-demo/run_demo_e2e_test.go doc=none evidence=none:pending-verdict witness=none:live-listener-not-required verdict=none:pending-judge commit=3daffaed0bce0552f589547c9cabe27aa4d869c6 memory=none:pending-closeout"
+  "final_closeout_sha": "85c1ce841cc385f5ba23c8452456dfec0781d34a",
+  "trace": "ch:trace row=INT-CI-036 spec=none:CI-failure-repair wave=.coding-hermes/waves/crier-foreman-2026-11-13-16-54-13.json#verification test=examples/scratch-port-rotation-selftest.py::ws-mesh-setup-collision;examples/scratch-port-rotation-selftest.py::ws-mesh-rotate;examples/ws-mesh-demo/run_demo_e2e_test.go doc=none evidence=.gitreins/history/2026-11-13/e312b762/verdict.json witness=none:live-listener-proof-captured-by-selftest verdict=e312b762 commit=85c1ce841cc385f5ba23c8452456dfec0781d34a memory=none:write-not-verified"
 }
