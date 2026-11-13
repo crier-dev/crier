@@ -66,17 +66,26 @@ func (r *flakyRelay) handler() http.HandlerFunc {
 
 func (r *flakyRelay) callCount() int { return int(r.calls.Load()) }
 
-// waitFor polls cond until it holds or the deadline passes.
-func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
-	t.Helper()
+// waitForCondition polls cond until it holds or the deadline passes.
+// It returns false on timeout so tests can also prove that a condition does not
+// become true inside a deliberately shorter observation budget.
+func waitForCondition(timeout time.Duration, cond func() bool) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if cond() {
-			return
+			return true
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("timed out after %s waiting for %s", timeout, what)
+	return cond()
+}
+
+// waitFor polls cond until it holds or the deadline passes.
+func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
+	t.Helper()
+	if !waitForCondition(timeout, cond) {
+		t.Fatalf("timed out after %s waiting for %s", timeout, what)
+	}
 }
 
 // testHoldConfig returns millisecond timings so no test waits real seconds.
@@ -365,8 +374,13 @@ func TestHoldManagerRetriesUntilRecoveryDeliversOnce(t *testing.T) {
 	mgr.Start()
 	defer mgr.Stop()
 
-	// Hold budget not yet exhausted: the manager must be retrying.
-	time.Sleep(20 * time.Millisecond)
+	// Hold budget not yet exhausted: the manager must be retrying. Observe the
+	// relay event with a bounded wait instead of assuming a wall-clock sleep was
+	// enough for a scheduled goroutine to run.
+	waitFor(t, 2*time.Second, "the retry attempt to reach the relay", func() bool {
+		return relay.callCount() >= 2
+	})
+
 	if relay.callCount() < 2 {
 		t.Fatalf("link still failing: forwarded %d times, want at least the first pass plus a retry", relay.callCount())
 	}
@@ -398,6 +412,44 @@ func TestHoldManagerRetriesUntilRecoveryDeliversOnce(t *testing.T) {
 	if mgr.Pending() != 0 {
 		t.Errorf("Pending = %d, want 0 after delivery", mgr.Pending())
 	}
+}
+
+// TestHoldManagerRetryWaitIsNonVacuous proves that the retry observation does
+// not pass merely because the synchronous forward happened. The retry interval
+// deliberately exceeds the observation budget, so callCount must remain at the
+// initial forward until the budget expires.
+func TestHoldManagerRetryWaitIsNonVacuous(t *testing.T) {
+	relay := newFlakyRelay(t, http.StatusServiceUnavailable)
+	srv := httptest.NewServer(relay.handler())
+	defer srv.Close()
+
+	client := NewClient([]string{srv.URL}, time.Second, "")
+	queue := NewMemoryHoldQueue()
+	mgr := NewHoldManager(client, queue, HoldConfig{
+		MaxHold:          time.Second,
+		RetryEvery:       100 * time.Millisecond,
+		MaxRetryInterval: 100 * time.Millisecond,
+	})
+	client.SetHoldManager(mgr)
+
+	_, _, held, err := client.ForwardOrHold(context.Background(), "agent-remote", []byte(`{"payload":{}}`), HoldMeta{
+		MessageID: "msg-nonvacuous", Sender: "agent-local", RequestID: "req-nonvacuous",
+	})
+	mustHold(t, held, err)
+
+	mgr.Start()
+	defer mgr.Stop()
+
+	const waitBudget = 10 * time.Millisecond
+	if waitForCondition(waitBudget, func() bool { return relay.callCount() >= 2 }) {
+		t.Fatalf("retry observed inside %s despite RetryEvery=%s", waitBudget, 100*time.Millisecond)
+	}
+	if got := relay.callCount(); got != 1 {
+		t.Fatalf("forwarded %d times inside the non-vacuity budget, want exactly the synchronous first forward", got)
+	}
+
+	// A deliberate mutation to `got != 2` is the reproducible red proof: it
+	// fails with `forwarded 1 times inside the non-vacuity budget`.
 }
 
 // TestHoldManagerExhaustionReportsFederationFailedExactlyOnce proves the
