@@ -29,7 +29,7 @@
   "verification": {
     "local_gate": "PASS: make mcp-capabilities-check; go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1; go build ./...; go vet ./...",
     "gitreins": "REV-CRIER-2-R5 lifecycle reached complete, but task complete produced no persisted commit-bound verdict before the evaluator process exited; parent row remains pending rather than being falsely closed.",
-    "publication": "PASS: bf371713 published at origin/main and gitlab/main with exact parity 0/0.",
-    "remote_ci": "pending/in_progress for bf371713 at close; mandatory top-three listing showed no completed failure."
+    "publication": "PASS: implementation bf371713 and final closeout 800771d0 published at origin/main and gitlab/main with exact parity 0/0.",
+    "remote_ci": "pending/in_progress for bf371713 at implementation close and 800771d0 at final closeout; mandatory top-three listing showed no completed failure."
   }
 }
