@@ -25,10 +25,12 @@ at every tier (`tools=23`).
 
 The following is the exact Tier 3 invocation and startup line captured from the
 runnable local flow documented by this example. It intentionally uses an empty
-`CRIER_AGENT_PRIVATE_KEY_FILE`: this is a fresh/empty in-memory server flow,
-not a repeatable restart against an already populated server. The captured
-startup line is kept in [`local-transcript.txt`](local-transcript.txt);
-ephemeral-key and version lines are omitted because they vary per run.
+`CRIER_AGENT_PRIVATE_KEY_FILE` (an empty value is equivalent to leaving it
+unset): on a fresh in-memory server, the first invocation creates the agent and
+reports `identity=confirmed`. This is not a repeatable restart against a reused
+server that already has the agent registration. The captured startup line is kept in
+[`local-transcript.txt`](local-transcript.txt); ephemeral-key and version lines
+are omitted because they vary per run.
 
 ```text
 CRIER_PORT=18767 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false PIDFILE=.rev-crier-2.pid make run
@@ -43,20 +45,50 @@ the corresponding startup attributes are `tools=23 available_tools=22`.
 
 The server's default auth setting is secure, so the invocation explicitly turns
 off `CR_REQUIRE_AGENT_SIG` for this local demonstration. With enforcement off,
-the bridge's automatic `CRIER_AGENT_ID` registration completes and the captured
-startup line confirms `identity=confirmed`.
+the bridge's automatic `CRIER_AGENT_ID` registration completes on the fresh
+server and the captured startup line confirms `identity=confirmed`.
 
 The server must be running before the bridge starts. In remote mode, crier-mcp
 registers `CRIER_AGENT_ID` automatically. Without
-`CRIER_AGENT_PRIVATE_KEY_FILE`, the bridge generates an ephemeral signing key.
-That key is regenerated on every run: starting the bridge again against the same
-persistent server therefore produces `identity=rejected` unless the original
-stable key is supplied. Use a stable key from the first bridge start, or delete
-the existing agent server-side / start a fresh in-memory server before repeating
-the empty-key flow. Signature enforcement being disabled does not remove this
-registration-key identity check.
+`CRIER_AGENT_PRIVATE_KEY_FILE`, or with `CRIER_AGENT_PRIVATE_KEY_FILE=` as in
+the command above, the bridge generates an ephemeral signing key. That key is
+regenerated on every run. Therefore the exact second invocation below, against
+the same still-running server, does not confirm the existing identity:
+
+```text
+CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18767 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18767/mesh/connect/mcp-agent CRIER_AGENT_PRIVATE_KEY_FILE= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp
+... identity=rejected
+```
+
+The server keeps the public key from the first registration, while the second
+bridge has generated a different key. Its signed requests are consequently
+rejected. Signature enforcement being disabled does not remove this
+registration-key identity check. To repeat the empty-key command with
+`identity=confirmed`, stop the server and start a fresh in-memory server (or
+delete `mcp-agent` on the existing server first); do not claim that an empty
+key is restart-stable.
+
+For repeated startup against the same server, generate one stable PKCS#8 PEM
+key once and reuse that exact file on every bridge invocation. The following
+commands show the key creation and both runs; these runs must target a fresh
+server, because a server that already registered a different ephemeral key
+will continue to reject the new stable key until its `mcp-agent` registration
+is deleted.
+
+```bash
+mkdir -p "$HOME/.config/crier"
+openssl genpkey -algorithm ED25519 -out "$HOME/.config/crier/mcp-agent.key"
+export CRIER_AGENT_PRIVATE_KEY_FILE="$HOME/.config/crier/mcp-agent.key"
+CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18767 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18767/mesh/connect/mcp-agent timeout 4s ./bin/crier-mcp
+# identity=confirmed (first stable-key registration)
+CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18767 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18767/mesh/connect/mcp-agent timeout 4s ./bin/crier-mcp
+# identity=confirmed (same stable key, same server)
+```
 
 The complete capability report is generated from the registration metadata:
 `make mcp-capabilities-check` verifies all 23 tools and their unlock conditions.
 
-ch:trace row=REV-CRIER-2 spec=docs/mcp-capabilities.md wave=crier-foreman-2026-11-11-23-05-04 test=go test ./internal/mcp -run 'TestToolDescriptionsNameTheirPrerequisites|TestUnavailableToolsInMode|TestToolSurfaceReportPinsStartupLine|TestCapabilityReportMatchesToolsListAndNamesEveryUnlock' -count=1 doc=docs witness=path@commit verdict=none:worker commit=none:worker memory=none:foreman-closeout
+ch:trace row=REV-CRIER-2 spec=none:board-acceptance wave=.coding-hermes/waves/crier-foreman-2026-11-13-23-26-31.json test=make mcp-capabilities-check;go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1 doc=examples/mcp-remote/README.md evidence=none:worker-commit-awaiting-verdict witness=none:worker-live-probe verdict=none:foreman-runs-after-merge commit=<worker-sha> memory=none:foreman-closeout
+STATUS: complete | partial
+TIER: T1
+EVIDENCE: <exact committed worker SHA and command outputs>
