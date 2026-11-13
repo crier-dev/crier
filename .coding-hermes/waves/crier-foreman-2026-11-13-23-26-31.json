@@ -1,0 +1,35 @@
+{
+  "tick_id": "crier-foreman-2026-11-13-23-26-31",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "mode": "serial-fallback",
+  "wave_budget": 8,
+  "slots": 8,
+  "base_sha": "a0eb9988ef7596575a0df8dd2f3fc12a32b60d7d",
+  "selection": {
+    "rows": ["REV-CRIER-2"],
+    "reason": "REV-CRIER-2 was the next executable block after BOARDCTL-HOOK-001, whose remaining acceptance is externally gated by INGRESS-CRIER-001. The selected block had one ready row, so no mutually independent wave existed; serial fallback was required.",
+    "rework_task": "REV-CRIER-2-R5",
+    "rework_scope": "Document fresh-server-only behavior and stable-key reuse after the prior exact live probe proved ephemeral-key rejection on a reused server."
+  },
+  "workers": [
+    {
+      "task_id": "REV-CRIER-2",
+      "gitreins_task": "REV-CRIER-2-R5",
+      "worktree": "/home/kara/worktrees/crier-REV-CRIER-2-R5",
+      "branch": "wt/REV-CRIER-2-R5",
+      "base_sha": "a0eb9988ef7596575a0df8dd2f3fc12a32b60d7d",
+      "worker_commit": "8f782c6a56248a74d14e492ebd62f65a736284e2",
+      "merged_commit": "bf371713ad3cea032bdf755db07963d7d3ef8941",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "status": "accepted-and-merged"
+    }
+  ],
+  "verification": {
+    "local_gate": "PASS: make mcp-capabilities-check; go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1; go build ./...; go vet ./...",
+    "gitreins": "REV-CRIER-2-R5 lifecycle reached complete, but task complete produced no persisted commit-bound verdict before the evaluator process exited; parent row remains pending rather than being falsely closed.",
+    "publication": "PASS: bf371713 published at origin/main and gitlab/main with exact parity 0/0.",
+    "remote_ci": "pending/in_progress for bf371713 at close; mandatory top-three listing showed no completed failure."
+  }
+}
