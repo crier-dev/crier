@@ -17,9 +17,26 @@ make build-mcp && ./bin/crier-mcp
 ```
 
 The bridge starts with the 11 always-available tools when these variables are
-unset. Setting `CRIER_AGENT_ID`, `CRIER_HTTP_URL`, and `CRIER_MESH_URL` enables
-the other 12 tools, for 23 advertised and available tools. The startup diagnostic
-reports the same counts, while `tools/list` continues to advertise all 23 tools.
+unset. The cumulative startup tiers are 11 by default, 15 after setting
+`CRIER_AGENT_ID`, 22 after also setting `CRIER_HTTP_URL`, and 23 after also
+setting `CRIER_MESH_URL`. The startup diagnostic reports these counts, while
+`tools/list` continues to advertise all 23 tools at every tier.
+
+The following is the exact stable capability line captured from the runnable
+local flow documented by this example. The captured startup line is kept in
+[`local-transcript.txt`](local-transcript.txt); ephemeral-key and version lines
+are intentionally omitted because they vary per run.
+
+```text
+CRIER_PORT=18767 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false PIDFILE=.rev-crier-2.pid make run
+CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18767 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18767/mesh/connect/mcp-agent CRIER_AGENT_PRIVATE_KEY_FILE= CRIER_AUTH_TOKEN= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp
+2026/11/13 14:30:39 INFO MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed
+```
+
+The server's default auth setting is secure, so the invocation explicitly turns
+off `CR_REQUIRE_AGENT_SIG` for this local demonstration. With enforcement off,
+the bridge's automatic `CRIER_AGENT_ID` registration completes and the startup
+line confirms `identity=confirmed`.
 
 The server must be running before the bridge starts. In remote mode, crier-mcp
 registers `CRIER_AGENT_ID` automatically. `CRIER_AGENT_PRIVATE_KEY_FILE` is
