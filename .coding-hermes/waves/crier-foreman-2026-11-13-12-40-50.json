@@ -1,0 +1,28 @@
+{
+  "tick_id": "crier-foreman-2026-11-13-12-40-50",
+  "project": "crier",
+  "block": "DF-CRIER-504",
+  "selection": "Resumed the prior DF-CRIER-504 block. DF-CRIER-504 was already closed on published origin/main; the remaining ready row DF-CRIER-503 had its implementation published but lacked a commit-bound row-specific verdict. Reworked that verification obligation in an isolated worktree rather than dispatching duplicate implementation work.",
+  "mode": "serial-rework-verification",
+  "wave_budget": 10,
+  "wave_size": 1,
+  "workers": [
+    {
+      "task_id": "DF-CRIER-503-RV2-20261113",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-503-R2",
+      "branch": "wt/DF-CRIER-503-R2",
+      "base_sha": "df5b50ab6210b937e62c0eeecd52e5f03ef3b42c",
+      "requested_model": "openai/gpt-6.1-terra",
+      "requested_provider": "xkiro",
+      "implementation_commit": "78c51830",
+      "merged_commit": "99fc3ad25192958a1d7bcda652ebf01a45739bbf",
+      "verdict": ".gitreins/history/2026-11-13/fe1abc23/verdict.json",
+      "verdict_passed": true,
+      "worker_branch_parity": 0
+    }
+  ],
+  "local_gate": "PASS: go test ./... -count=1; go build ./...; go vet ./...",
+  "remote_ci": "not yet exact-head: latest listed main runs are green for df5b50ab; final closeout 99fc3ad2 has no run in the top-3 listing yet",
+  "open_rows": [],
+  "trace": "ch:trace row=DF-CRIER-503 spec=none:dogfood-finding wave=.coding-hermes/waves/crier-foreman-2026-11-13-12-40-50.json#DF-CRIER-503 test=cmd/crier-mcp/registration_test.go::TestRunRejectedIdentityStartupReport doc=none:test-only evidence=.gitreins/history/2026-11-13/fe1abc23/verdict.json witness=none:live-bridge-not-required verdict=fe1abc23 commit=99fc3ad25192958a1d7bcda652ebf01a45739bbf memory=none:pending-closeout"
+}
