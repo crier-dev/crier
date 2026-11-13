@@ -2481,3 +2481,4 @@
 {"id":1794115926888324462,"event_type":"task_updated","task_id":"RELEASE-028","actor":"foreman","tick_number":null,"timestamp":"2026-11-12T23:33:23Z","detail":"{\"status\":\"pending\"}"}
 {"id":1794115926888324463,"event_type":"task_updated","task_id":"RELEASE-026","actor":"foreman","tick_number":null,"timestamp":"2026-11-12T23:33:29Z","detail":"{\"status\":\"pending\"}"}
 {"id":1794115926888324464,"event_type":"task_created","task_id":"RELEASE-029","actor":"foreman","tick_number":null,"timestamp":"2026-11-12T23:33:37Z","detail":"{\"id\":\"RELEASE-029\",\"status\":\"pending\"}"}
+{"id":1794115926888324465,"event_type":"task_updated","task_id":"RELEASE-029","actor":"foreman","tick_number":null,"timestamp":"2026-11-13T00:00:25Z","detail":"{\"status\":\"pending\"}"}
