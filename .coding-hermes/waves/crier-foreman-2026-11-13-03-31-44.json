@@ -1,0 +1,57 @@
+{
+  "tick_id": "crier-foreman-2026-11-13-03-31-44",
+  "project": "crier",
+  "block": "DF-CRIER-504",
+  "block_selection_reason": "block_drive ranked BOARDCTL-HOOK-001 first, but its acceptance is in the sibling coding-hermes-boardctl repository and its remaining dogfood leg is externally gated by INGRESS-CRIER-001. Fell through to DF-CRIER-504, the next dispatchable block with two mutually independent rows. Both rows have already landed in dedicated worktrees and have complete lifecycle records but no persisted commit-bound verdict artifact in the canonical history; this is verification/recovery, not duplicate implementation dispatch.",
+  "base_sha": "5794c008ad401a311bcfc11385c950e9bf32ebdb",
+  "wave_budget": 12,
+  "slots": 6,
+  "mode": "verification-only-recovery-complete",
+  "workers": [],
+  "rows": [
+    {
+      "task_id": "DF-CRIER-503",
+      "status_at_selection": "in_progress",
+      "depends_on": [],
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-503",
+      "branch": "wt/DF-CRIER-503",
+      "base_sha": "276d05a9",
+      "implementation_commit": "e9c5df02ade187ae0a61c376a11550bae99831f6",
+      "dispatch": "not dispatched; existing committed implementation recovered"
+    },
+    {
+      "task_id": "DF-CRIER-504",
+      "status_at_selection": "in_progress",
+      "depends_on": [],
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-504",
+      "branch": "wt/DF-CRIER-504",
+      "base_sha": "276d05a9",
+      "implementation_commit": "812a33334afaf4c42d9f83b02a880820d7ca422e",
+      "dispatch": "not dispatched; existing committed implementation recovered"
+    }
+  ],
+  "recovery_note": "No live worker process was found. Worktrees are clean and each has a nonzero implementation diff against origin/main. A fresh integration worktree/branch and fresh verification lifecycle tasks will bind verdicts to the merged tree.",
+  "closeout": {
+    "rows_verified": [
+      "DF-CRIER-503",
+      "DF-CRIER-504"
+    ],
+    "implementation_commits": {
+      "DF-CRIER-503": "e9c5df02ade0a61c376a11550bae99831f6",
+      "DF-CRIER-504": "812a33334afaf4c42d9f83b02a880820d7ca422e"
+    },
+    "published_ancestor": "not yet; implementation commits are reachable from prior published crier-foreman-2026-11-12-15-18-43 lineage, not current origin/main",
+    "local_gate": "PASS: go build ./...; go vet ./...; go test ./... -count=1 on current origin/main (5794c008)",
+    "gitreins": {
+      "DF-CRIER-503": "PASS: prior tree-bound verdict .gitreins/history/2026-11-12/64aeff0e/verdict.json, commit c9f6cc5e; fresh verification lifecycle was created and completed, but its new persisted verdict was not found before lifecycle cleanup",
+      "DF-CRIER-504": "PASS: fresh .gitreins/history/2026-11-13/cc7248ec/verdict.json, commit 5794c008"
+    },
+    "remote_ci": "observed-only: latest crier-dev/crier list includes success, pending, and failure for releng audit; failure was not created by this tick and no board write was possible in continuation",
+    "remote_parity": "continuation branch origin/foreman/crier-foreman-2026-11-13-03-31-44..HEAD = 0 before closeout bookkeeping",
+    "open_items": [
+      "canonical checkout remains barred by bare .git/ORIG_HEAD and .git/REBASE_HEAD requiring owner disposition",
+      "DF-CRIER-503/504 board rows remain in_progress on published origin/main and need a tree-true board closeout commit",
+      "continuation branch contains manifest only and has not been merged into origin/main"
+    ]
+  }
+}
