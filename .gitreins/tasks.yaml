@@ -4081,29 +4081,33 @@ tasks:
   criteria:
   - go test -count=1 ./internal/federation/ green on clean and chaos-resource legs;
     pre-retry wait is event-driven with bounded budget; non-vacuity proven
-  status: in_progress
+  status: complete
   created_at: '2026-11-13T05:33:46.793351+00:00'
+  completed_at: '2026-11-13T07:07:12.790390+00:00'
 - id: QA-CRIER-57
   title: STATUS-MESH-MALFORMED-FRAME-INVALID-MESSAGE claim reads 5s of wire silence
   criteria:
   - probe failure text distinguishes never-arrived vs answered-late; 200-iteration
     loop green; hosted CI on fix commit green with matrix jobs RUN
-  status: in_progress
+  status: complete
   created_at: '2026-11-13T05:33:47.287495+00:00'
+  completed_at: '2026-11-13T06:30:26.182903+00:00'
 - id: QA-CRIER-60
   title: timeout-kill assertions not stress-resilient under cap and network cut
   criteria:
   - all three failures reproduced at fixed SHA under stress; assertions robust to
     slow reaper/unreaped zombie; clean and stressed runs agree
-  status: in_progress
+  status: complete
   created_at: '2026-11-13T05:33:47.789704+00:00'
+  completed_at: '2026-11-13T07:34:09.707926+00:00'
 - id: QA-CRIER-61
   title: chaos-disconnect grades OK on any rc=1 and quotes a passing package line
   criteria:
   - evidence row names every FAIL package and test; verdict classified from failure
     set not rc; fixture for non-network cause
-  status: in_progress
+  status: complete
   created_at: '2026-11-13T05:33:48.283881+00:00'
+  completed_at: '2026-11-13T07:26:35.916985+00:00'
 - id: QA-CRIER-63
   title: commit 5794c008 dropped 3 pending board rows; shrink gate reds main
   criteria:

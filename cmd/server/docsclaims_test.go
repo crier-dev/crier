@@ -1061,20 +1061,109 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 	}
 }
 
+// meshReadEvent is the result of one reader goroutine. The probe deliberately
+// keeps that reader alive while its logical deadline expires: gorilla/websocket
+// documents a timed-out ReadMessage as permanently unusable, so SetReadDeadline
+// cannot be used for the first arm if the liveness re-probe must use the same
+// connection.
+type meshReadEvent struct {
+	raw []byte
+	err error
+}
+
+func nextMeshRead(conn *websocket.Conn) <-chan meshReadEvent {
+	result := make(chan meshReadEvent, 1)
+	go func() {
+		_, raw, err := conn.ReadMessage()
+		result <- meshReadEvent{raw: raw, err: err}
+	}()
+	return result
+}
+
+func classifyMeshSilence(conn *websocket.Conn, readResult <-chan meshReadEvent) (diagnosis, details string, writeErr error) {
+	const livenessID = "docsclaims-liveness-191"
+	liveness, err := mesh.Marshal(&mesh.Register{
+		Envelope: mesh.Envelope{
+			Type:      mesh.TypeRegister,
+			Version:   1,
+			MessageID: livenessID,
+			Timestamp: time.Now(),
+		},
+		AgentID: docsClaimsProbeAgent,
+		Capabilities: mesh.Capabilities{
+			Version:               "0.1.0",
+			Topics:                []string{},
+			MaxConcurrentSessions: 1,
+		},
+	})
+	if err != nil {
+		return "never-arrived", fmt.Sprintf("marshal_liveness=%v", err), nil
+	}
+	writeErr = conn.WriteMessage(websocket.TextMessage, liveness)
+	if writeErr != nil {
+		return "never-arrived", "liveness_read=write-failed", writeErr
+	}
+
+	var lateFrames []string
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case event := <-readResult:
+			if event.err != nil {
+				return "never-arrived", fmt.Sprintf("liveness_read=%v late_frames=%s", event.err, strings.Join(lateFrames, " | ")), nil
+			}
+			var eventEnv struct {
+				Type      string `json:"type"`
+				RequestID string `json:"request_id"`
+			}
+			if err := json.Unmarshal(event.raw, &eventEnv); err != nil {
+				lateFrames = append(lateFrames, fmt.Sprintf("decode=%v raw=%s", err, event.raw))
+			} else if eventEnv.Type == "REGISTER_ACK" && eventEnv.RequestID == livenessID {
+				return "answered-late", fmt.Sprintf("liveness_read=REGISTER_ACK late_frames=%s", strings.Join(lateFrames, " | ")), nil
+			} else {
+				lateFrames = append(lateFrames, fmt.Sprintf("type=%q request_id=%q raw=%s", eventEnv.Type, eventEnv.RequestID, event.raw))
+			}
+			readResult = nextMeshRead(conn)
+		case <-timer.C:
+			return "never-arrived", fmt.Sprintf("liveness_read=no-reply-before-1s late_frames=%s", strings.Join(lateFrames, " | ")), nil
+		}
+	}
+}
+
+// readMeshReply preserves the reader across the logical deadline. Both malformed
+// frames use this path, so either missing reply gets the same diagnosis.
+func readMeshReply(conn *websocket.Conn, what string, timeout time.Duration) ([]byte, error) {
+	result := nextMeshRead(conn)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case event := <-result:
+		if event.err != nil {
+			diagnosis, details, writeErr := classifyMeshSilence(conn, nextMeshRead(conn))
+			return nil, fmt.Errorf("no reply to %s: DIAGNOSIS=%s initial_read=%v liveness_write=%v %s", what, diagnosis, event.err, writeErr, details)
+		}
+		return event.raw, nil
+	case <-timer.C:
+		diagnosis, details, writeErr := classifyMeshSilence(conn, result)
+		return nil, fmt.Errorf("no reply to %s: DIAGNOSIS=%s initial_read=logical-deadline-expired liveness_write=%v %s", what, diagnosis, writeErr, details)
+	}
+}
+
 // liveMeshMalformedFrameStatus proves DF-CRIER-191's claim the way the doc
 // states it: over the real wire, not by reading code. It dials the booted
 // server's /mesh/connect/<id> WebSocket, sends the unparseable frame
 // `this is not a frame` (malformed_frame_test.go's first case), and inspects
-// the FIRST frame back — reading exactly one frame fails both on silence (the
-// silent drop the sentence bars) and on a non-ERROR reply. A second, readable
-// but wrong-shaped frame (REGISTER with a string lease_ttl_ms, the doc's own
-// example) must draw a refusal whose request_id equals that frame's own
-// message_id — the correlation half of the contract.
+// the FIRST frame back. If that logical read deadline expires, it sends a valid
+// REGISTER on the SAME connection and uses the REGISTER_ACK as liveness
+// evidence: an ACK classifies the original silence as answered-late, while a
+// close or a second silence classifies it as never-arrived. This is observable
+// connection evidence, not timestamp inference.
 func liveMeshMalformedFrameStatus(baseURL string) (status int, probeErr error) {
 	var dialAt, dialDone, writeAt, writeDone, deadline time.Time
 	defer func() {
 		if probeErr != nil {
-			probeErr = fmt.Errorf("%w (dial_at=%s dial_done=%s write_at=%s write_done=%s read_deadline=%s; timestamps alone cannot prove server receipt or a late reply)",
+			probeErr = fmt.Errorf("%w (dial_at=%s dial_done=%s write_at=%s write_done=%s read_deadline=%s)",
 				probeErr, dialAt.Format(time.RFC3339Nano), dialDone.Format(time.RFC3339Nano),
 				writeAt.Format(time.RFC3339Nano), writeDone.Format(time.RFC3339Nano), deadline.Format(time.RFC3339Nano))
 		}
@@ -1100,15 +1189,11 @@ func liveMeshMalformedFrameStatus(baseURL string) (status int, probeErr error) {
 	}
 	writeDone = time.Now()
 	deadline = time.Now().Add(5 * time.Second)
-	if err := conn.SetReadDeadline(deadline); err != nil {
-		return 502, fmt.Errorf("set read deadline: %w", err)
-	}
-	_, raw, err := conn.ReadMessage()
+	raw, err := readMeshReply(conn, "the unparseable frame", time.Until(deadline))
 	if err != nil {
-		// Silence on the wire IS the drift this claim exists to catch, so it
-		// is mapped (200), not reported as a probe error.
-		return 200, fmt.Errorf("no reply to the unparseable frame (read: %v)", err)
+		return 200, err
 	}
+
 	var env struct {
 		Type      string `json:"type"`
 		MessageID string `json:"message_id"`
@@ -1155,12 +1240,9 @@ func liveMeshMalformedFrameStatus(baseURL string) (status int, probeErr error) {
 	}
 	writeDone = time.Now()
 	deadline = time.Now().Add(5 * time.Second)
-	if err := conn.SetReadDeadline(deadline); err != nil {
-		return 502, fmt.Errorf("set read deadline (arm 2): %w", err)
-	}
-	_, raw2, err := conn.ReadMessage()
+	raw2, err := readMeshReply(conn, "the wrong-shaped REGISTER", time.Until(deadline))
 	if err != nil {
-		return 200, fmt.Errorf("no reply to the wrong-shaped REGISTER (read: %v)", err)
+		return 200, err
 	}
 	var errMsg2 struct {
 		RequestID string `json:"request_id"`
