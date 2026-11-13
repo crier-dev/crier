@@ -77,14 +77,14 @@ func TestHandleConnectImmediateMalformedFrames(t *testing.T) {
 		}
 		var reply ErrorMessage
 		if err := json.Unmarshal(raw, &reply); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			t.Fatalf("iteration %d/%d: reply is not an ERROR envelope: %v (raw %s)", i+1, iterations, err, raw)
 		}
 		if reply.Error.Code != ErrCodeInvalidMessage {
-			conn.Close()
+			_ = conn.Close()
 			t.Fatalf("iteration %d/%d: error code = %q, want %q (raw %s)", i+1, iterations, reply.Error.Code, ErrCodeInvalidMessage, raw)
 		}
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 
