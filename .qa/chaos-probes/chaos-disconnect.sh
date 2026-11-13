@@ -63,25 +63,78 @@ trap 'rm -f "$tmp_out"' EXIT
 rc=$?
 cat "$tmp_out" >> "$log"
 
-# Classify live-transport dependency failures under network cut as UNVERIFIED,
-# separate from the offline suite result. A test that fails because the proxy
-# is unreachable under the cut is not a disconnect-handling defect — it is a
-# test that cannot run under the cut. The offline suite (tests that do not
-# depend on live transport) still gets its own PASS/FAIL verdict.
-live_transport_pattern='proxyconnect|connection refused|dial tcp|no such host|TLS handshake timeout'
-if grep -q "NETWORK_CUT_APPLIED" "$log" 2>/dev/null && \
-   grep -qE "$live_transport_pattern" "$tmp_out" 2>/dev/null; then
-  printf 'UNVERIFIED: live transport dependency unavailable under network cut\n' | tee -a "$log"
-  # Offline leg: tests whose output does not mention live-transport failure.
-  # If any package passed, the offline suite has a result to report.
-  if grep -qE '^ok\s' "$tmp_out" 2>/dev/null; then
-    offline_pass=$(grep -cE '^ok\s' "$tmp_out")
-    printf 'OFFLINE_SUITE: %d package(s) passed independently of live transport\n' "$offline_pass" | tee -a "$log"
+# Build the failure set from the failing result lines, never from the first
+# lines of the transcript. In particular, a passing package often precedes the
+# package that failed when Go runs packages in parallel.
+failed_packages=$(awk '$1 == "FAIL" && NF >= 2 { print $2 }' "$log" | awk '!seen[$0]++' | paste -sd, -)
+failed_tests=$(awk '$1 == "---" && $2 == "FAIL:" && NF >= 3 { print $3 }' "$log" | awk '!seen[$0]++' | paste -sd, -)
+failed_packages=${failed_packages:-none}
+failed_tests=${failed_tests:-none}
+printf 'FAILURE_SET: packages=%s tests=%s\n' "$failed_packages" "$failed_tests" | tee -a "$log"
+
+# A failure is tolerated only when every named failing test contains evidence
+# of the injected dead proxy. A transport-looking line in an `ok` package must
+# not turn an unrelated failure into UNVERIFIED, and a mixed failure set is not
+# tolerated. The tab-separated records are test-name<TAB>network-match.
+live_transport_pattern='proxyconnect|connection refused|dial tcp|no such host|TLS handshake timeout|i/o timeout'
+failure_tests=$(awk -v pattern="$live_transport_pattern" '
+function flush() {
+  if (name != "") {
+    printf "%s\t%d\n", name, network
+    name = ""
+    network = 0
+  }
+}
+/^--- FAIL:/ {
+  flush()
+  name = $3
+  network = ($0 ~ pattern)
+  next
+}
+name != "" {
+  if ($0 ~ pattern) network = 1
+  if ($0 ~ /^FAIL[[:space:]]*$/) flush()
+}
+END { flush() }
+' "$log")
+network_only=1
+saw_failure=0
+if [[ -n "$failure_tests" ]]; then
+  while IFS=$'\t' read -r _test_name is_network; do
+    [[ -n "$_test_name" ]] || continue
+    saw_failure=1
+    if [[ "$is_network" != 1 ]]; then
+      network_only=0
+    fi
+  done <<< "$failure_tests"
+else
+  # Compile/package failures have no --- FAIL test line. In that case, use
+  # transport evidence only from non-passing lines; the package name remains in
+  # FAILURE_SET above so the evidence is still actionable.
+  saw_failure=$(awk '$1 == "FAIL" && NF >= 2 { found = 1 } END { print found + 0 }' "$log")
+  if [[ "$saw_failure" == 1 ]] && ! awk -v pattern="$live_transport_pattern" '
+    /^ok[[:space:]]/ || /^\?[[:space:]]/ { next }
+    $0 ~ pattern { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$log"; then
+    network_only=0
   fi
-  if grep -qE '^FAIL\s' "$tmp_out" 2>/dev/null; then
-    offline_fail=$(grep -cE '^FAIL\s' "$tmp_out")
-    printf 'OFFLINE_SUITE_FAIL: %d package(s) failed independent of live transport\n' "$offline_fail" | tee -a "$log"
+fi
+
+network_cut_applied=0
+if [[ -n "${NETWORK_CUT_APPLIED:-}" ]] || grep -q "NETWORK_CUT_APPLIED" "$log" 2>/dev/null; then
+  network_cut_applied=1
+fi
+if [[ "$saw_failure" == 1 && "$network_cut_applied" == 1 && "$network_only" == 1 ]]; then
+  printf 'VERDICT: UNVERIFIED: network-caused failure(s) under network cut; packages=%s tests=%s\n' \
+    "$failed_packages" "$failed_tests" | tee -a "$log"
+elif [[ "$saw_failure" == 1 ]]; then
+  if [[ "$network_cut_applied" == 1 ]]; then
+    reason='unrelated failure(s) under network cut'
+  else
+    reason='unrelated or unclassified failure(s)'
   fi
+  printf 'VERDICT: FAIL: %s; packages=%s tests=%s\n' "$reason" "$failed_packages" "$failed_tests" | tee -a "$log"
 fi
 
 printf 'RESULT: %s (exit %d)\n' "$([[ $rc -eq 0 ]] && echo PASS || echo FAIL)" "$rc" | tee -a "$log"

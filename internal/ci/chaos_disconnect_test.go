@@ -64,6 +64,57 @@ func TestChaosDisconnectEvidenceContract(t *testing.T) {
 		}
 	})
 
+	t.Run("cut-injected unrelated failures are reported, not tolerated", func(t *testing.T) {
+		repo := t.TempDir()
+		if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module fixture\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		bin := t.TempDir()
+		fakeGo := filepath.Join(bin, "go")
+		fakeSuite := `#!/bin/sh
+printf '%s\n' 'ok fixture/passing 0.001s'
+printf '%s\n' '--- FAIL: TestUnrelatedAssertion (0.001s)'
+printf '%s\n' '    unrelated assertion failed'
+printf '%s\n' 'FAIL'
+printf '%s\n' 'FAIL fixture/unrelated 0.002s'
+printf '%s\n' '--- FAIL: TestSecondUnrelated (0.001s)'
+printf '%s\n' '    second unrelated assertion failed'
+printf '%s\n' 'FAIL'
+printf '%s\n' 'FAIL fixture/another-unrelated 0.003s'
+exit 1
+`
+		if err := os.WriteFile(fakeGo, []byte(fakeSuite), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		log := filepath.Join(t.TempDir(), "disc.log")
+		cmd := exec.Command("bash", script, repo)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "DISC_LOG="+log, "NETWORK_CUT_APPLIED=1")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("runner unexpectedly passed: %q", out)
+		}
+		evidence, readErr := os.ReadFile(log)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		text := string(evidence)
+		for _, want := range []string{
+			"FAILURE_SET: packages=fixture/unrelated,fixture/another-unrelated tests=TestUnrelatedAssertion,TestSecondUnrelated",
+			"VERDICT: FAIL: unrelated failure(s) under network cut; packages=fixture/unrelated,fixture/another-unrelated tests=TestUnrelatedAssertion,TestSecondUnrelated",
+			"RESULT: FAIL (exit 1)",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("evidence %q does not contain %q", text, want)
+			}
+		}
+		if strings.Contains(text, "VERDICT: UNVERIFIED") {
+			t.Errorf("unrelated failures were incorrectly tolerated: %q", text)
+		}
+		if strings.Contains(text, "passing package") {
+			t.Errorf("passing package was used as failure reason: %q", text)
+		}
+	})
+
 	t.Run("missing suite path is explicitly unverified", func(t *testing.T) {
 		repo := t.TempDir()
 		bin := t.TempDir()
