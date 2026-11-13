@@ -1,0 +1,24 @@
+{
+  "tick_id": "crier-foreman-2026-11-13-01-08-40",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "mode": "serial-verification-only",
+  "wave_size": 0,
+  "selection": {
+    "ranked_block": "REV-CRIER-2",
+    "ready_rows": [
+      "REV-CRIER-1"
+    ],
+    "row_status": "pending",
+    "dependencies": [],
+    "premise_probe": "scripts/check-openapi-version.sh v0.6.1 fails on origin/main: info.version=0.7.0 while nearest tag is v0.6.1",
+    "dispatch_decision": "no worker: existing implementation commit 93a5a877 is not current at origin/main; acceptance remains open and requires release/tag policy reconciliation"
+  },
+  "workers": [],
+  "gates": {
+    "remote_ci": "observed-only before any closeout write",
+    "local": "not run before selection; required after implementation or verification closeout"
+  },
+  "status": "selection-recorded",
+  "closeout_sha": null
+}
