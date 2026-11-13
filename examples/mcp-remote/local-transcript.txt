@@ -1,0 +1,5 @@
+# Local crier-mcp remote-mode startup transcript
+# Server: CRIER_PORT=18767 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false PIDFILE=.rev-crier-2.pid make run
+# Bridge: CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18767 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18767/mesh/connect/mcp-agent CRIER_AGENT_PRIVATE_KEY_FILE= CRIER_AUTH_TOKEN= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp
+# Stable capability line (captured 2026-11-13; timestamps and version omitted from the reproducible claim):
+2026/11/13 14:30:39 INFO MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed
