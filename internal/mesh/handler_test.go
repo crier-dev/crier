@@ -39,6 +39,55 @@ func TestHandleConnectSuccess(t *testing.T) {
 	}
 }
 
+// TestHandleConnectImmediateMalformedFrames proves the accepted connection's
+// reader is wired before a client can write its first frame. A WebSocket client
+// may send immediately after Dial returns; every one of these writes must be
+// observed and refused, rather than disappearing in a start-reader-before-
+// callback window (QA-CRIER-57).
+func TestHandleConnectImmediateMalformedFrames(t *testing.T) {
+	cfg := DefaultMeshConfig("agent-A")
+	cfg.KeepaliveInterval = time.Hour
+	m := NewMesh(cfg)
+	defer m.Stop()
+
+	router := mux.NewRouter()
+	router.HandleFunc("/mesh/connect/{agentID}", HandleConnect(m)).Methods("GET")
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/mesh/connect/qa-crier-57"
+	const iterations = 200
+	for i := 0; i < iterations; i++ {
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("iteration %d/%d: Dial: %v", i+1, iterations, err)
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte("this is not a frame")); err != nil {
+			_ = conn.Close()
+			t.Fatalf("iteration %d/%d: write malformed frame: %v", i+1, iterations, err)
+		}
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			_ = conn.Close()
+			t.Fatalf("iteration %d/%d: set read deadline: %v", i+1, iterations, err)
+		}
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			_ = conn.Close()
+			t.Fatalf("iteration %d/%d: immediate malformed frame was not answered: %v", i+1, iterations, err)
+		}
+		var reply ErrorMessage
+		if err := json.Unmarshal(raw, &reply); err != nil {
+			_ = conn.Close()
+			t.Fatalf("iteration %d/%d: reply is not an ERROR envelope: %v (raw %s)", i+1, iterations, err, raw)
+		}
+		if reply.Error.Code != ErrCodeInvalidMessage {
+			_ = conn.Close()
+			t.Fatalf("iteration %d/%d: error code = %q, want %q (raw %s)", i+1, iterations, reply.Error.Code, ErrCodeInvalidMessage, raw)
+		}
+		_ = conn.Close()
+	}
+}
+
 func TestHandleConnectMissingAgentID(t *testing.T) {
 	cfg := DefaultMeshConfig("agent-A")
 	m := NewMesh(cfg)
