@@ -4037,16 +4037,14 @@ tasks:
   created_at: '2026-11-12T09:43:57.508905+00:00'
   completed_at: '2026-11-12T09:44:02.494883+00:00'
 - id: REV-CRIER-1
-  title: OpenAPI info.version should track the release tag, not stay at 0.1.0
+  title: OpenAPI release metadata policy and synchronized copies
   criteria:
-  - Record the policy decision where the generator can see it
-  - cmd/server/openapi.yaml:11 and docs/openapi.yaml:11 both carry the decided value
-    and agree (regenerate docs via the EMBEDDED COPY go:generate step if applicable)
-  - make lint and openapi/docs checks pass; served /openapi.yaml reports the decided
-    value
-  status: complete
-  created_at: '2026-11-12T10:13:32.277827+00:00'
-  completed_at: '2026-11-12T11:15:45.204750+00:00'
+  - 'PROOF: the release policy is recorded in the source/check and both OpenAPI copies
+    agree at the current release; PROOF: OpenAPI/docs checks and served-spec tests
+    pass; FAILIF: a pre-fix mismatch or stale historical-tag assumption can pass current
+    validation'
+  status: in_progress
+  created_at: '2026-11-13T17:36:43.824419+00:00'
 - id: REV-CRIER-2
   title: 'MCP capability report: add remote-mode env template and one documented 11-to-23
     invocation'
