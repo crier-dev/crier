@@ -8,7 +8,7 @@
   "slots": 13,
   "base_sha": "478bc2008153f6056db13e81afa70a38d6ec80c7",
   "worker": {"task_id": "REV-CRIER-2-R4", "worktree": "/home/kara/worktrees/crier-REV-CRIER-2-R4", "branch": "wt/REV-CRIER-2-R4", "base_sha": "478bc2008153f6056db13e81afa70a38d6ec80c7", "commit": "5edcc71ddf383219a2447c793f926f212d08e11a", "remote_parity": 0},
-  "merged_commit": "8f298f1bd1266e90f3bd1f75d8f4037b1be5dd15",
+  "merged_commit": "20c44e1d53fbc03a1bcd92385b092c787db1c533",
   "gates": {"mcp_capabilities": "PASS: make mcp-capabilities-check", "focused_tests": "PASS: go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1", "build": "PASS: go build ./...", "vet": "PASS: go vet ./...", "full_tests": "PASS: go test ./... -count=1", "deletions": 0},
   "remote_parity": {"origin_main": "PASS", "gitlab_main": "PASS"},
   "gitreins": {"task": "REV-CRIER-2-R4", "status": "complete", "tier2_job": "job-abc0352473724f129b7db9a154a47afb", "verdict": "pending"},
