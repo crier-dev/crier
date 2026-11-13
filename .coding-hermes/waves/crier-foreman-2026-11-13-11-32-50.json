@@ -1,0 +1,26 @@
+{
+  "tick_id": "crier-foreman-2026-11-13-11-32-50",
+  "project": "crier",
+  "block": "DF-CRIER-504",
+  "wave_budget": 12,
+  "slots": 6,
+  "mode": "verification-only-recovery",
+  "selection": "Resume the block named by the prior crier foreman audit; DF-CRIER-503 has a published implementation and its remaining obligation is a fresh commit-bound verdict.",
+  "rows": [
+    {
+      "task_id": "DF-CRIER-503",
+      "depends_on": [],
+      "implementation_commit": "40386adc5dbdd6a19d3c0561f718df4d03ec3d8d",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-503",
+      "branch": "wt/DF-CRIER-503",
+      "dispatch": "not dispatched; existing implementation recovered"
+    }
+  ],
+  "workers": [],
+  "wave_size": 0,
+  "verification": {
+    "criterion": "PROOF: current integrated tree tests and startup report distinguish confirmed and rejected identity; FAILIF: rejected identity retains an unqualified availability claim",
+    "acceptance_probe": "go test ./cmd/crier-mcp -run 'Test.*(Registration|Identity|Surface)' -count=1; go build ./...; go vet ./...; go test ./... -count=1",
+    "reason": "Implementation is already published; no implementation dispatch is justified."
+  }
+}
