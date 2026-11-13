@@ -4046,18 +4046,17 @@ tasks:
   status: in_progress
   created_at: '2026-11-13T17:36:43.824419+00:00'
 - id: REV-CRIER-2
-  title: 'MCP capability report: add remote-mode env template and one documented 11-to-23
-    invocation'
+  title: MCP remote capability tiers and invocation
   criteria:
-  - docs/mcp-capabilities.md still matches tools/list at HEAD (make mcp-capabilities-check
-    PASS, 23 tools each); a checked-in remote-mode env template exists listing every
-    unlock variable (CRIER_AGENT_ID, CRIER_HTTP_URL, CRIER_MESH_URL, CRIER_AGENT_PRIVATE_KEY_FILE)
-    with the tool count each tier unlocks; one documented invocation shows available_tools
-    going from 11 to 23 and is reproducible against a local server; prereqs_test.go
-    still asserts the 23/11 default posture (unchanged)
-  status: in_progress
-  created_at: '2026-11-13T05:19:19.856583+00:00'
-  completed_at: '2026-11-13T18:53:44.945634+00:00'
+  - 'PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records
+    cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL
+    tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents
+    and reproduces local startup from available_tools=11 to 23 with identity=confirmed;
+    internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate,
+    invocation absent/unreproducible, or MCP tests fail.'
+  status: complete
+  created_at: '2026-11-13T19:21:49.926850+00:00'
+  completed_at: '2026-11-13T19:49:37.886006+00:00'
 - id: DF-CRIER-503
   title: qualify MCP tool surface on rejected identity
   criteria:
