@@ -1,18 +1,1 @@
-{
-  "tick_id": "crier-foreman-2026-11-13-20-13-20",
-  "project": "crier",
-  "block": "REV-CRIER-2",
-  "mode": "verification-only-reconciliation",
-  "base_sha": "28fd75d3ae1842cd3975cd260a30ec54c57b056f",
-  "wave_budget": 12,
-  "wave_size": 0,
-  "workers": [],
-  "verification": {
-    "row": "REV-CRIER-2",
-    "implementation_commit": "28fd75d3ae1842cd3975cd260a30ec54c57b056f",
-    "acceptance": "make mcp-capabilities-check; go test ./internal/mcp/... -count=1; verify examples/mcp-remote/env.template and README.md against tools/list and prereqs_test.go",
-    "verdict": "existing commit-bound verdict must be read back before closeout",
-    "publication": "board row, task_completed event, manifest, and audit event must be committed and pushed"
-  },
-  "selection": "REV-CRIER-2 is the highest-ranked executable block; implementation files are already on origin/main, so duplicate implementation dispatch is forbidden."
-}
+{"tick_id":"crier-foreman-2026-11-13-20-13-20","project":"crier","block":"REV-CRIER-2","mode":"verification-only-reconciliation","base_sha":"28fd75d3ae1842cd3975cd260a30ec54c57b056f","wave_budget":12,"wave_size":0,"workers":[],"verification":{"row":"REV-CRIER-2","implementation_commit":"28fd75d3ae1842cd3975cd260a30ec54c57b056f","acceptance":"make mcp-capabilities-check; go test ./internal/mcp/... -count=1; verify examples/mcp-remote/env.template and README.md against tools/list and prereqs_test.go","verdict":"none:existing commit-bound verdict not present in continuation; verification remains open","publication":"board row, task_completed event, manifest, and audit event must be committed and pushed"},"selection":"REV-CRIER-2 is the highest-ranked executable block; implementation files are already on origin/main, so duplicate implementation dispatch is forbidden."}
