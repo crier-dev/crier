@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -971,17 +970,37 @@ func parsePIDs(raw []byte) ([]int, error) {
 	return pids, firstErr
 }
 
-// waitDead fails if pid is still signalable after budget.
+// waitDead fails only when the recorded pid is still a live process. A killed
+// child can remain as a zombie until its parent reaps it; kill(pid, 0) reports
+// that zombie as present and made this assertion flaky under stress.
 func waitDead(t *testing.T, pid int, budget time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(budget)
 	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
+		state, err := procState(pid)
+		if errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z') {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("pid %d is still alive %s after the timeout kill — process group was not killed", pid, budget)
+	state, err := procState(pid)
+	t.Fatalf("pid %d is still live after the timeout kill — state=%q stat_error=%v budget=%s", pid, state, err, budget)
+}
+
+func procState(pid int) (byte, error) {
+	raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return 0, err
+	}
+	close := strings.LastIndexByte(string(raw), ')')
+	if close < 0 {
+		return 0, fmt.Errorf("malformed /proc/%d/stat", pid)
+	}
+	fields := strings.Fields(string(raw)[close+1:])
+	if len(fields) == 0 || fields[0] == "" {
+		return 0, fmt.Errorf("short /proc/%d/stat", pid)
+	}
+	return fields[0][0], nil
 }
 
 type span struct{ start, end int64 }
@@ -1055,11 +1074,4 @@ func maxOverlap(spans []span) int {
 		}
 	}
 	return peak
-}
-
-// processAlive reports whether pid can be signalled (Signal 0). EPERM means the
-// process exists but belongs to another user — still alive.
-func processAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }

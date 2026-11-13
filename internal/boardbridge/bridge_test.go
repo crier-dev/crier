@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -172,17 +172,70 @@ func TestTimeoutKillsProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		err = syscall.Kill(-pid, 0)
-		if errors.Is(err, syscall.ESRCH) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("process group %d still exists after timeout (probe error %v)", pid, err)
+	waitProcessGroupDead(t, pid, 5*time.Second)
+}
+
+// waitProcessGroupDead distinguishes a live member from an unreaped zombie.
+// kill(0) alone is insufficient here: Linux keeps a zombie's /proc entry and
+// still reports the pid as existing until its parent reaps it.
+func waitProcessGroupDead(t *testing.T, pgid int, budget time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		members, err := liveProcessGroupMembers(pgid)
+		if err == nil && len(members) == 0 {
+			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	members, err := liveProcessGroupMembers(pgid)
+	t.Fatalf("process group %d still has live members after timeout kill: members=%v stat_error=%v", pgid, members, err)
+}
+
+func liveProcessGroupMembers(pgid int) ([]int, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	var live []int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		state, group, err := readProcStat(pid)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		if group == pgid && state != 'Z' {
+			live = append(live, pid)
+		}
+	}
+	return live, nil
+}
+
+func readProcStat(pid int) (state byte, pgid int, err error) {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, 0, err
+	}
+	close := strings.LastIndexByte(string(raw), ')')
+	if close < 0 {
+		return 0, 0, fmt.Errorf("malformed /proc/%d/stat", pid)
+	}
+	fields := strings.Fields(string(raw)[close+1:])
+	// After comm, fields[0] is state and fields[2] is pgrp (stat field 5).
+	if len(fields) < 3 {
+		return 0, 0, fmt.Errorf("short /proc/%d/stat", pid)
+	}
+	group, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return 0, 0, fmt.Errorf("pgrp for /proc/%d/stat: %w", pid, err)
+	}
+	return fields[0][0], group, nil
 }
 
 func TestReplyCatalogSummariesAndMutationNote(t *testing.T) {
