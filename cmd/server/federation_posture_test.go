@@ -80,6 +80,7 @@ func TestFederation391StatusWithoutGateCannotClaimEffective(t *testing.T) {
 	require.Equal(t, true, status["federation_token_only_accepted"])
 }
 
+// ch:trace row=RELEASE-025 spec=none:release-flake-acceptance wave=none:serial-fallback test=cmd/server/federation_posture_test.go::TestFederation391ProductionBoots doc=none evidence=none:hosted-CI-pending witness=none:hosted-CI-pending-until-foreman verdict=none:foreman-judge commit=none:worker-sha-pending memory=none:foreman-write
 func TestFederation391ProductionBoots(t *testing.T) {
 	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	for _, tc := range []struct {
@@ -150,6 +151,8 @@ func TestFederation391ProductionBoots(t *testing.T) {
 			})
 			client := &http.Client{Timeout: 2 * time.Second}
 			deadline := time.Now().Add(20 * time.Second)
+			retry := time.NewTicker(25 * time.Millisecond)
+			defer retry.Stop()
 			for {
 				resp, err := client.Get(base + "/health")
 				if err == nil {
@@ -159,11 +162,28 @@ func TestFederation391ProductionBoots(t *testing.T) {
 				select {
 				case err := <-done:
 					t.Fatalf("server exited: %v (log %s)", err, logPath)
-				default:
+				case <-retry.C:
 				}
 				require.True(t, time.Now().Before(deadline), "server not ready: %v (log %s)", err, logPath)
-				time.Sleep(25 * time.Millisecond)
 			}
+			// /health proves that the listener is serving. Read the live posture
+			// before exercising inbox delivery so lifecycle records (including
+			// pending records) are observed as the gate's synchronization event,
+			// rather than relying on startup timing.
+			gateReq, err := http.NewRequest("GET", base+"/status", nil)
+			require.NoError(t, err)
+			gateReq.Header.Set("Authorization", "Bearer posture-test-access")
+			gateResp, err := client.Do(gateReq)
+			require.NoError(t, err)
+			gateRaw, err := io.ReadAll(gateResp.Body)
+			_ = gateResp.Body.Close()
+			require.NoError(t, err)
+			require.Equal(t, 200, gateResp.StatusCode, string(gateRaw))
+			var gateStatus map[string]any
+			require.NoError(t, json.Unmarshal(gateRaw, &gateStatus))
+			require.Equal(t, tc.effective, gateStatus["federation_require_peer_effective"], string(gateRaw))
+			require.Equal(t, float64(peers), gateStatus["federation_peer_count"], string(gateRaw))
+
 			call := func(method, path, body string) (int, http.Header, []byte) {
 				req, err := http.NewRequest(method, base+path, strings.NewReader(body))
 				require.NoError(t, err)
