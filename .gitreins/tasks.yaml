@@ -4156,18 +4156,36 @@ tasks:
   status: complete
   created_at: '2026-11-13T21:28:19.565210+00:00'
   completed_at: '2026-11-13T22:11:10.410388+00:00'
-- id: REV-CRIER-2-R8
-  title: Repair REV-CRIER-2 trace acceptance surface
+- id: REV-CRIER-2-R6
+  title: Verify REV-CRIER-2 at current published tree
+  criteria:
+  - 'PROOF: origin/main contains the generated 23-tool capability report, env.template''s
+    11/15/22/23 tiers, reproducible README remote-mode invocation, unchanged 23/11
+    prereq test, and the named MCP/build/vet gates pass at the judged commit. FAILIF:
+    any acceptance surface is missing, stale, unreproducible, or any named gate fails.'
+  status: complete
+  created_at: '2026-11-14T00:42:01.864384+00:00'
+  completed_at: '2026-11-14T00:44:01.704566+00:00'
+- id: REV-CRIER-2-R7
+  title: Remove stale REV-CRIER-2 trace placeholders
   criteria:
   - 'PROOF: examples/mcp-remote/README.md contains a concrete ch:trace for REV-CRIER-2
-    with a real wave path, a non-verdict evidence command or artifact or none:reason,
-    a verdict or none:reason, a real commit or none:reason, STATUS in PASS/PARTIAL/FAIL/PENDING,
-    TIER, and EVIDENCE naming the command with its observed result; the README contains
-    no worker-sha, exact committed worker SHA, or STATUS: complete | partial placeholders,
-    and the existing 23-tool capability report, 11/15/22/23 tier documentation, and
-    MCP gates remain intact. FAILIF: any placeholder remains, evidence points to a
-    verdict or ignored path, trace fields are malformed, or the named MCP/build/vet
-    gates fail.'
+    with a real wave path, evidence or none:reason, verdict or none:reason, commit
+    or none:reason, STATUS value, TIER value, and EVIDENCE value; it contains none
+    of the placeholder tokens <worker-sha>, <exact committed worker SHA, or STATUS:
+    complete | partial. FAILIF: any placeholder remains or the trace is malformed.'
   status: complete
-  created_at: '2026-11-14T01:30:08.171117+00:00'
-  completed_at: '2026-11-14T01:37:26.465035+00:00'
+  created_at: '2026-11-14T00:51:28.541715+00:00'
+  completed_at: '2026-11-14T00:51:46.917411+00:00'
+- id: REV-CRIER-2-R8
+  title: Make REV-CRIER-2 trace doctrine-compliant
+  criteria:
+  - 'PROOF: examples/mcp-remote/README.md has a valid trace with STATUS: PARTIAL,
+    TIER: T3, evidence=none:reason or a resolvable non-verdict artifact, verdict=none:reason
+    for the failed rework judge, commit=8111938ec648c62676dbbfbf90ff9f4ea16edcec,
+    and EVIDENCE naming the exact successful commands with exit 0. FAILIF: the trace
+    cites a verdict as evidence, cites a nonexistent or gitignored artifact, uses
+    lowercase/non-legal status, uses TIER below T3, or contains placeholders.'
+  status: complete
+  created_at: '2026-11-14T00:53:22.819901+00:00'
+  completed_at: '2026-11-14T01:06:52.346759+00:00'
