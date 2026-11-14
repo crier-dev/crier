@@ -62,6 +62,7 @@ import (
 // wire, so `error` is still the first key a human reads in a raw body.
 type notFoundBody struct {
 	Error      string `json:"error"`
+	Gate       string `json:"gate,omitempty"`
 	Hint       string `json:"hint,omitempty"`
 	DidYouMean string `json:"did_you_mean,omitempty"`
 }

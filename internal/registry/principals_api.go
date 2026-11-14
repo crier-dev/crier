@@ -115,6 +115,7 @@ func refuseManagement(w http.ResponseWriter, armed bool) {
 	}
 	writeJSON(w, http.StatusForbidden, map[string]string{
 		"error":  errManagementNotArmed,
+		"gate":   "CR_PERMISSIONS_ADMIN_TOKEN",
 		"detail": detail,
 	})
 }

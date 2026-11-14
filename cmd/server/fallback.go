@@ -92,9 +92,14 @@ func registerRouterFallbacks(r *mux.Router) {
 			if hint, ok := shapesFor().hintFor(req); ok {
 				httperr.WriteJSON(w, http.StatusNotFound, notFoundBody{
 					Error:      notFoundMessage,
+					Gate:       gateForRequestPath(req.URL.Path),
 					Hint:       hint.Message,
 					DidYouMean: hint.DidYouMean,
 				})
+				return
+			}
+			if gate := gateForRequestPath(req.URL.Path); gate != "" {
+				httperr.WriteJSON(w, http.StatusNotFound, notFoundBody{Error: notFoundMessage, Gate: gate})
 				return
 			}
 			httperr.WriteJSONError(w, http.StatusNotFound, notFoundMessage)

@@ -311,7 +311,6 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 	topic := mux.Vars(req)["topic"]
 	rid := middleware.RequestIDFromContext(req.Context())
 	subscriber := req.Header.Get("X-Agent-ID")
-
 	// The rejection body is JSON, so it is written with httperr rather than
 	// net/http's Error helper, which would label it
 	// "text/plain; charset=utf-8" (DF-CRIER-212).
@@ -320,6 +319,12 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 		slog.Warn("relay: subscribe rejected", "reason", "invalid topic",
 			"topic", topic, "agent_id", subscriber, "request_id", rid)
 		httperr.WriteJSONError(w, http.StatusBadRequest, "invalid topic")
+		return
+	}
+	if !websocket.IsWebSocketUpgrade(req) {
+		httperr.WriteJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "websocket upgrade required",
+		})
 		return
 	}
 

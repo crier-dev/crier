@@ -36,7 +36,7 @@ func NewTrustHandler(store Store, operatorToken, reachToken string) *TrustHandle
 func (h *TrustHandler) operator(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if h.operatorToken == "" || !strings.HasPrefix(auth, "Bearer ") || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, "Bearer ")), []byte(h.operatorToken)) != 1 {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "MANAGEMENT_FORBIDDEN", "detail": "trust records require a distinct CR_PERMISSIONS_ADMIN_TOKEN"})
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "MANAGEMENT_FORBIDDEN", "gate": "CR_PERMISSIONS_ADMIN_TOKEN", "detail": "trust records require a distinct CR_PERMISSIONS_ADMIN_TOKEN"})
 		return false
 	}
 	return h.available(w)
