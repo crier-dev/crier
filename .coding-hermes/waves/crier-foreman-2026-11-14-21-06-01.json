@@ -1,0 +1,33 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-21-06-01",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "mode": "verification-only-owner-gated",
+  "base_sha": "515d258a47f97847da4e595617f89118044ddb9f",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [{
+    "task": "BOARDCTL-HOOK-001",
+    "status": "blocked",
+    "worktree": "/home/kara/worktrees/crier-crier-foreman-2026-11-14-21-06-01",
+    "branch": "wt/crier-foreman-2026-11-14-21-06-01",
+    "commit": "none:verification-only",
+    "worker_report": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-14-21-06-01-worker-BOARDCTL-HOOK-001.log",
+    "implementation_diff": "none",
+    "gitreins": "BOARDCTL-HOOK-001-V18 completed; no durable matching verdict readback; task deleted after completion"
+  }],
+  "wave_budget": 12,
+  "slots": 12,
+  "wave_size": 0,
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. The crier implementation is owned by sibling repository coding-hermes/boardctl@2667a63. The crier worker read-only premise check confirmed no crier-owned hook implementation and the remaining acceptance is external deployed-service configuration plus owner-approved restart.",
+  "live_probe": "http://127.0.0.1:8767/version => 200 version=0.5.0-28-g83d28c13 commit=83d28c13 modified=false; /health => 200; /ingress/sources => 401 missing Authorization header; no CR_INGEST_* keys in /home/kara/.hermes/secrets/crier-fleet.env",
+  "local_gate": "PASS: read-only worktree premise check; no crier source changed. boardctl validate => RESULT: OK (450 pre-existing warnings). Product build/vet/test not rerun because no crier source changed.",
+  "remote_ci": "green: gh run list crier-dev/crier top three are terminal success/pending with no completed failure; latest completed success is 515d258a.",
+  "remote_parity": "PASS origin/main=HEAD=515d258a47f97847da4e595617f89118044ddb9f",
+  "verdict": "none:owner-external-gate; gitreins verification task completed but no matching durable verdict readback",
+  "owner_action": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repo boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "memory": "pending:to be written after publication",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-14-21-06-01.json#BOARDCTL-HOOK-001 test=none:owner-deployment-gate doc=none:verification-only evidence=/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-14-21-06-01-worker-BOARDCTL-HOOK-001.log witness=http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=pending:to-be-written-after-publication",
+  "STATUS": "blocked",
+  "TIER": "T3",
+  "EVIDENCE": "Read-only worker report plus live service probe; crier source remains clean and the unmet acceptance belongs to the service owner."
+}
