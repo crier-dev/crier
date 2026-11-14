@@ -1,0 +1,17 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-16-48-20",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "wave_budget": 12,
+  "slots": 12,
+  "mode": "owner-gated-verification-only",
+  "rows": [],
+  "worktrees": [],
+  "briefs": [],
+  "reason": "block_drive ranked BOARDCTL-HOOK-001 first. The crier implementation is already published in sibling repository coding-hermes/boardctl@2667a63; crier's remaining acceptance is external supervised-service configuration and an owner-approved restart. No independent implementation rows exist in this block, so no worker wave is authorized.",
+  "sha_roles": {
+    "source_sha": "6b369eedfd4c9b310afc1ed60738cd496ed26a75",
+    "verified_code_commit": "2667a63",
+    "gitreins": "none:owner-external-gate"
+  }
+}
