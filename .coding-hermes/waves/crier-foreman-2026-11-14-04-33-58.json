@@ -1,0 +1,38 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-04-33-58",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "selection": {
+    "method": "python3 ~/.hermes/scripts/block_drive.py <continuation> --top 10",
+    "rank": 1,
+    "reason": "Top DRIVE block with one pending row. The implementation is already published in coding-hermes-boardctl at 2667a63 and the remaining Crier obligation is a live cross-repository ingress end-to-end witness, not new implementation work.",
+    "rows_considered": ["BOARDCTL-HOOK-001"],
+    "dependencies": {"BOARDCTL-HOOK-001": []},
+    "independence": "singleton block; no implementation wave possible"
+  },
+  "wave_budget": 12,
+  "slots": 10,
+  "wave_size": 0,
+  "workers": [],
+  "verification": {
+    "mode": "verification-only-owner-gated",
+    "implementation": {
+      "repository": "coding-hermes-boardctl",
+      "commit": "2667a63",
+      "board_row_commit_hash": "2667a63"
+    },
+    "remaining_obligation": "Run the real scratch-repository boardctl hook flow against Crier ingress: install, doctor, real commit, signed POST accepted (202), delivery to the target agent inbox, and doctor spool depth 0 with no dead-letter.",
+    "blocker": "The required Crier ingress deployment/configuration witness is owner-gated: INGRESS-CRIER-001 records CR_INGEST_* environment and approved restart/deployment as not claimed. Do not restart or mutate the supervised Crier service from this tick.",
+    "evidence": "INGRESS-CRIER-001 is complete in the published Crier board but explicitly leaves the live unit environment/restart and end-to-end delivery owner-gated.",
+    "acceptance_probe": "Owner-approved live Crier ingress dogfood using coding-hermes-boardctl's TestBT083* plus a scratch git repository; keep BOARDCTL-HOOK-001 pending until the 202->inbox->doctor-depth-0 witness is published."
+  },
+  "publication": {
+    "worktree": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-14-04-33-58-attempt1/continuation",
+    "branch": "foreman/crier-2026-11-14-04-33-58",
+    "base_sha": "d6f88c8d2fcac067aa0343e271f2ecaebfa234e6"
+  },
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:board-acceptance wave=.coding-hermes/waves/crier-foreman-2026-11-14-04-33-58.json#verification test=none:owner-gated-live-ingress doc=none:row-owned evidence=none:owner-approved-live-witness witness=none:owner-approval-required verdict=none:verification-only-no-new-judge commit=none:verification-only memory=none:pending-final-receipt",
+  "STATUS": "partial",
+  "TIER": "T2",
+  "EVIDENCE": "published implementation 2667a63; remaining live acceptance is owner-gated"
+}
