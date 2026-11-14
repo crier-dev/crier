@@ -1,0 +1,28 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-23-24-10",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "mode": "owner-gated-verification-only",
+  "source_sha": "fa6145abf625dfaf85d67deb8f781a951019edf4",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 0,
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is already published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface for this row. No implementation wave is valid.",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "live_probe": {
+    "version": "HTTP 200; version=0.5.0-28-g83d28c13; commit=83d28c13; modified=false",
+    "health": "HTTP 200",
+    "ingress_sources": "HTTP 401; missing Authorization header",
+    "env": "no CR_INGEST_* keys in /home/kara/.hermes/secrets/crier-fleet.env"
+  },
+  "local_gate": "PASS: bash scripts/check-board.sh; go build ./...; go vet ./...; go test ./... -count=1",
+  "remote_ci": "observed-only: one completed failure, one pending, one completed success in mandatory top-three; failure is prior board-bookkeeping workflow, not this tick",
+  "remote_parity": "origin/main=HEAD=fa6145abf625dfaf85d67deb8f781a951019edf4",
+  "verdict": "none:owner-external-gate",
+  "memory": "none:prepublication",
+  "evidence": ".coding-hermes/evidence/crier-foreman-2026-11-14-23-24-10-BOARDCTL-HOOK-001.json",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-14-23-24-10.json#BOARDCTL-HOOK-001 test=none:owner-deployment-gate doc=none evidence=.coding-hermes/evidence/crier-foreman-2026-11-14-23-24-10-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=none:prepublication",
+  "finished": true
+}
