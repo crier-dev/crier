@@ -1,0 +1,21 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-01-24-03",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "base_sha": "8111938ec648c62676dbbfbf90ff9f4ea16edcec",
+  "mode": "verification-only-rework",
+  "wave_budget": 12,
+  "slots": 13,
+  "selected_rows": ["REV-CRIER-2"],
+  "workers": [],
+  "wave_size": 0,
+  "selection_reason": "The selected block has one ready row whose product implementation is already published. This tick verified and repaired its documentation traceability surface; no duplicate implementation worker was justified.",
+  "verification": {
+    "acceptance": "make mcp-capabilities-check; go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1; go build ./...; go vet ./...; README trace contains no placeholders and uses resolvable evidence semantics.",
+    "implementation_commit": "bf371713ad3cea032bdf755db07963d7d3ef8941",
+    "rework_commit": "20a1c3ad",
+    "published_ref": "origin/wt/continuation-20261114-003754",
+    "verdict_requirement": "Keep the parent board row pending until a persisted verdict binds the exact published integration tree.",
+    "publication_requirement": "Manifest and documentation rework are published on the continuation branch; default origin/main still requires serial integration and final board closeout."
+  }
+}
