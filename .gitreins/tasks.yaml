@@ -4048,15 +4048,13 @@ tasks:
 - id: REV-CRIER-2
   title: MCP remote capability tiers and invocation
   criteria:
-  - 'PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records
-    cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL
-    tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents
-    and reproduces local startup from available_tools=11 to 23 with identity=confirmed;
-    internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate,
-    invocation absent/unreproducible, or MCP tests fail.'
+  - 'PROOF: exact current origin/main tree passes make mcp-capabilities-check, focused
+    MCP tests, go build ./..., go vet ./..., and the checked-in report/example names
+    all 23 tools and exact unlock conditions; FAILIF: any required gate fails, report
+    drifts, or the 23/11 default posture changes.'
   status: complete
-  created_at: '2026-11-13T19:21:49.926850+00:00'
-  completed_at: '2026-11-13T19:49:37.886006+00:00'
+  created_at: '2026-11-14T02:21:20.080500+00:00'
+  completed_at: '2026-11-14T02:21:58.250138+00:00'
 - id: DF-CRIER-503
   title: qualify MCP tool surface on rejected identity
   criteria:
