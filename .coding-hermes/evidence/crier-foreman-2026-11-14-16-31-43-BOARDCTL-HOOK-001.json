@@ -1,0 +1,23 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-16-31-43",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "row": "BOARDCTL-HOOK-001",
+  "classification": "owner-gated-verification-only",
+  "published_source_sha": "97417eabe33010b0bc0a6f07e431ed243df71d7a",
+  "implementation": "coding-hermes/boardctl@2667a63; no crier source implementation delta",
+  "measured_at": "2026-11-14T16:35:03Z",
+  "live_probe": {
+    "service": "http://127.0.0.1:8767",
+    "health": "HTTP 200 {\"status\":\"ok\"}",
+    "version": "HTTP 200 {\"version\":\"0.5.0-28-g83d28c13\",\"commit\":\"83d28c13\",\"build_time\":\"2026-11-09T04:55:55Z\",\"modified\":false}",
+    "ingress_sources": "HTTP 401 {\"error\":\"missing Authorization header\"}",
+    "configured_ingest_keys": []
+  },
+  "acceptance_state": "The implementation is already published, but the required 202-to-inbox-to-doctor-depth-0 leg remains unproven because the supervised service lacks CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE and the live ingress endpoint is unauthorized. Owner action is required before this row can close.",
+  "owner_action": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repo boardctl delivery loop and verify the resulting inbox/doctor-depth-0 evidence.",
+  "local_gate": "NOT RUN: no crier source changed; this is an external deployment gate",
+  "verdict": "none:owner-external-gate",
+  "ci_scope": "Observed-only mandatory top-3 query for crier-dev/crier; no completed failure was present at the observed query.",
+  "inference": "The live version is still the prior deployed artifact; this is measured from /version, not inferred from repository HEAD."
+}

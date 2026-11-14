@@ -1,0 +1,3 @@
+Observed-only CI query for crier-dev/crier at 2026-11-14T16:34:07Z:
+[{"conclusion":"success","createdAt":"2026-11-14T16:25:01Z","displayTitle":"ops(crier): arm a missed-dump alarm for the fleet-bus backup, annotat…","headBranch":"main","status":"completed"},{"conclusion":"","createdAt":"2026-11-14T16:25:01Z","displayTitle":"ops(crier): arm a missed-dump alarm for the fleet-bus backup, annotat…","headBranch":"main","status":"in_progress"},{"conclusion":"","createdAt":"2026-11-14T16:25:01Z","displayTitle":"ops(crier): arm a missed-dump alarm for the fleet-bus backup, annotat…","headBranch":"main","status":"pending"}]
+No completed failure observed.

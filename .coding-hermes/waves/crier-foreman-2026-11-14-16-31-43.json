@@ -1,0 +1,17 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-16-31-43",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "wave_budget": 12,
+  "slots": 12,
+  "mode": "owner-gated-verification-only",
+  "rows": [],
+  "reason": "The ranked row is implementation-complete in sibling repository coding-hermes/boardctl@2667a63. Crier's remaining acceptance is an external supervised-service configuration and approved restart, so no worker or implementation wave is authorized.",
+  "worktrees": [],
+  "briefs": [],
+  "sha_roles": {
+    "source_sha": "97417eabe33010b0bc0a6f07e431ed243df71d7a",
+    "verified_code_commit": "2667a63",
+    "gitreins": "none:owner-external-gate"
+  }
+}
