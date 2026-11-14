@@ -88,7 +88,7 @@ CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.
 The complete capability report is generated from the registration metadata:
 `make mcp-capabilities-check` verifies all 23 tools and their unlock conditions.
 
-ch:trace row=REV-CRIER-2 spec=none:board-acceptance wave=.coding-hermes/waves/crier-foreman-2026-11-14-00-37-54.json test=make mcp-capabilities-check;go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1;go build ./...;go vet ./... doc=examples/mcp-remote/README.md evidence=none:commands-run-and-judge-rework-pending witness=none:local-acceptance-probe verdict=none:rework-judge-failed-placeholder-trace commit=8111938ec648c62676dbbfbf90ff9f4ea16edcec memory=none:pending-board-closeout
+ch:trace row=REV-CRIER-2 spec=none:board-acceptance wave=.coding-hermes/waves/crier-foreman-2026-11-14-01-24-03.json test=make mcp-capabilities-check;go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1;go build ./...;go vet ./... doc=examples/mcp-remote/README.md evidence=none:direct-command-output-recorded-in-foreman-closeout witness=none:live-probe-recorded-in-foreman-closeout verdict=none:documentation-rework-verdict-pending commit=none:documentation-rework-commit-pending memory=none:foreman-closeout-pending
 STATUS: PARTIAL
-TIER: T3
-EVIDENCE: make mcp-capabilities-check (exit 0); go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1 (exit 0); go build ./... (exit 0); go vet ./... (exit 0); full go test ./... -count=1 (exit 0)
+TIER: T2
+EVIDENCE: make mcp-capabilities-check -> PASS (23 tools); go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1 -> PASS; go build ./... -> PASS; go vet ./... -> PASS
