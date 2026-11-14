@@ -13,5 +13,5 @@
   "live_probe": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-14-17-29-39-orient/live-probe.txt",
   "finished": true,
   "finished_at": "2026-11-14T17:58:09Z",
-  "closeout_commit": "pending:containing-commit-cannot-self-name"
+  "closeout_commit": "9c2681512fb4363b45852b8c69105b555141f1c3"
 }
