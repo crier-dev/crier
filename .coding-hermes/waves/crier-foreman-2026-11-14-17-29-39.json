@@ -11,5 +11,7 @@
   "slots": 1,
   "reason": "The block is selected first by block_drive, but its implementation is already published in sibling repository coding-hermes/boardctl@2667a63. Crier acceptance remains gated on external supervised-service configuration and owner-approved restart; no implementation worker is authorized.",
   "live_probe": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-14-17-29-39-orient/live-probe.txt",
-  "finished": false
+  "finished": true,
+  "finished_at": "2026-11-14T17:58:09Z",
+  "closeout_commit": "pending:containing-commit-cannot-self-name"
 }
