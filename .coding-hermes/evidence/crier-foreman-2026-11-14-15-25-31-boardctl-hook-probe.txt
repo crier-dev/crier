@@ -1,0 +1,57 @@
+IDENTITY
+67d0d146252273befee9b943eeffca2eac9421a2
+67d0d146252273befee9b943eeffca2eac9421a2
+0	0
+PORCELAIN
+INGRESS_ROW
+{"id":"INGRESS-CRIER-001","status":"complete","commit_hash":"04e64dcf9ad821667db7f8d258365b34b18aba3e","worker_summary":"Production webhook auth wired at 04e64dcf; focused posture, build, vet, and full Go tests passed; worker branch pushed and merged.","foreman_note":"GitReins verdict 82b64f08 was FAIL on prior commit; rework landed 04e64dcf and passed direct gates. Live unit env/restart and boardctl end-to-end delivery remain owner-gated and are not claimed.","ci_result":"GREEN"}
+BOARDCTL_ROW
+{"id":"BOARDCTL-HOOK-001","status":"pending","commit_hash":"2667a63","worker_status":"complete","foreman_note":"Filed 2026-11-09 AFTER the work: referenced by HARDEN-LOOP-001 depends_on and dispatched under this id but never created on any board — bookkeeping gap found at close time. Code scope merged + coordinator-verified; close gated on the INGRESS-CRIER-001 e2e leg.","acceptance_criteria":"DELIVERABLES: boardctl hook install/uninstall/doctor/dispatch/flush wired into cmd/boardctl/main.go + usage; managed-block editor (install appends delimited block, uninstall removes ONLY that block, byte-identical sibling restore); signed dispatch (X-Crier-Timestamp + sha256=HMAC(secret, timestamp+'.'+body), Idempotency-Key boardctl:<row-id>:<content-hash>); 3-attempt spool -> dead-letter; doctor reports install/version/spool/dead-letter. TESTS: btNNN-style hook tests + real-binary tests; RED arm at parent (unknown command exit 2; tests do not compile at base), GREEN at HEAD (TestBT083* 7/7 incl. a REAL git commit against a 503 fixture: commit exits 0, one signed POST captured, spool depth 1, flush -> dead-letter names row+503, doctor exit 0). ACCEPTANCE: guard PASS all lanes (secrets/go_build/go_lint/go_tests); make fmt-check green; go vet clean; golangci-lint --new-from-rev 0 issues; coordinator independently re-runs TestBT083* AND a live dogfood (scratch repo -> install -> doctor OK -> real commit -> POST attempted, commit NEVER blocked). EVIDENCE (2026-11-09): MERGED to coding-hermes-boardctl main 2667a63 (rebased onto 78bf7ce), pushed; coordinator re-ran TestBT083* PASS; live dogfood: install OK, doctor RESULT OK, real commit fd96d6f POSTed -> live bus 401 -> row SPOOLED (hook never blocks the commit — correct). DOGFOOD LEG RESIDUAL: end-to-end 202->inbox->doctor-depth-0 BLOCKED by INGRESS-CRIER-001 (/ingress/sources 500, /ingress/webhooks 401, CR_INGEST_* unset, INT-015 undeployed). Row closes when INGRESS-CRIER-001 lands and the e2e leg is quoted here. Worker-disclosed residual: --batch-cap bounds rows per fire (one Idempotency-Key = one row); spec's 50-rows-per-POST shape intentionally unused."}
+INGEST_ENV_NAMES
+LIVE_VERSION
+http=200
+{"version":"0.5.0-28-g83d28c13","commit":"83d28c13","build_time":"2026-11-09T04:55:55Z","modified":false}
+LIVE_INGRESS_SOURCES_GET
+http=401
+{"error":"missing Authorization header"}
+LOCAL_BOARDCTL_IMPLEMENTATION_CHECK
+.coding-hermes/tasks.md.bak:210:**Verdict:** IDLE — All gates green. Project complete. 30th idle tick. CRON_PAUSE_REQUESTED since tick 26. Escalate to Bane for project disable. This project has been idle for 30 consecutive ticks with zero actionable findings. The escalation dead-letter threshold (30+ idle ticks with CRON_PAUSE_REQUESTED on disk) is now met.
+.coding-hermes/tasks.md.bak:245:- Escalation dead-letter threshold (30+ idle ticks with CRON_PAUSE_REQUESTED on disk) confirmed met
+.gitreins/tasks.yaml:3670:    dead-letter semantics'
+.gitreins/tasks.yaml:3677:    the delivery in the dead-letter store after capacity exhaustion, (5) an auth refusal
+.gitreins/tasks.yaml:3768:    hook wired into the dead-letter sweep per specs/DUCKBRAIN-ARCHIVE.md; PROOF: a
+.gitreins/tasks.yaml:3769:    test proves a 500 from DuckBrain RETAINS the dead-letter row and increments crier_archive_attempts_total{outcome=failed};
+.gitreins/tasks.yaml:3771:    is crier/dead-letter/{agent_id}/{message_id}; PROOF: with CR_ARCHIVE_ENABLED unset
+.gitreins/tasks.yaml:3779:  title: Fix Postgres dead-letter retention purge regression (archive-hook landing)
+.gitreins/tasks.yaml:3792:  title: 'Federation hold exhaustion: decide wire-vs-document for dead-letter archive'
+.gitreins/tasks.yaml:3795:    owning spec. ARM(a) WIRE: a registry dead-letter record is appended exactly once
+.gitreins/tasks.yaml:3799:    receipt-only, the dead-letter archive stays TTL-only, and the bakeoff claim that
+.gitreins/tasks.yaml:3802:    are claimed or neither arm is recorded. FAILIF: a dead-letter record is written
+cmd/server/a2a.go:347:// A task with no inbox, dead-letter or observation record remains not-found.
+cmd/server/a2a.go:407:				slog.Error("A2A task lifecycle: dead-letter lookup failed",
+cmd/server/a2a_lifecycle_test.go:593:// PurgeExpired, the function the timer calls, which dead-letters what it removes
+cmd/server/a2a_lifecycle_test.go:642:	// A task crier has NO record of is still the not-found — the dead-letter arm
+cmd/server/docsclaims_test.go:1399:	// idempotency replay marker, the expiry-receipt code, the dead-letter path
+cmd/server/docsclaims_test.go:1880:	"COUNT-OWNERSHIP-DEAD-LETTERS-README":      "dead-letters?limit=N",
+cmd/server/main.go:150:	r.HandleFunc("/agents/{id}/inbox/dead-letters", h.HandleDeadLetters).Methods("GET")
+cmd/server/main.go:944:	// lease, and the dead-letter destination a TTL expiry feeds.
+cmd/server/main.go:1412:	// bare PurgeExpired (CR-FEAT-025): it dead-letters every message it removes
+cmd/server/openapi.yaml:26:    description: Durable per-agent inboxes — deliver to an agent id, or to a CAPABILITY (round-robin over its live holders, CR-FEAT-026), with an optional sender idempotency key; retrieve with lease, ack, stats, transfer/reassign between inboxes, and the dead-letter destination for messages that expired unacknowledged.
+cmd/server/openapi.yaml:1362:                  description: "Optional inbox consumer contract (INBOX-CRIER-001): who reads this agent's inbox, the expected read cadence, and the per-agent TTL that bounds how long an unacknowledged message may sit before the expiry sweep dead-letters it and receipts the sender. Absent inherits CR_INBOX_CONTRACT_TTL_S (24h). Validated at registration (400 on violation)."
+cmd/server/openapi.yaml:1962:                    promoted to the dead-letter destination and receipted to
+cmd/server/openapi.yaml:1969:          description: "Message stored in the target's durable inbox (transport \"inbox\"). Webhook-configured agents never answer 201 — their deliveries accept with 200 (blocking) or 202 (async/batch) and are NOT stored (DF-CRIER-157). A stored message that expires while it is still unacknowledged is dead-lettered (GET /agents/{id}/inbox/dead-letters) and produces exactly one MESSAGE_EXPIRED receipt in the SENDER's own inbox (CR-FEAT-025): a TTL expiry is reported, never silent."
+cmd/server/openapi.yaml:2588:  /agents/{id}/inbox/dead-letters:
+cmd/server/openapi.yaml:2594:        The dead-letter destination (CR-FEAT-025): the messages that expired
+cmd/server/openapi.yaml:2602:        of the destination: a message is dead-lettered once, so it is reported
+cmd/server/openapi.yaml:2607:        most), so this route answers from the dead-letter destination alone
+cmd/server/openapi.yaml:2619:        "GET\n/agents/{id}/inbox/dead-letters\n<unix-seconds>".
+cmd/server/openapi.yaml:2669:          description: The configured registry store does not keep a dead-letter destination.
+cmd/server/openapi.yaml:4870:  # dead-letter/moderation surface it is and is NOT a session audit.
+cmd/server/openapi.yaml:5839:        GET /agents/{id}/inbox/dead-letters; an unsigned or invalidly signed
+cmd/server/openapi.yaml:6443:          description: "The id the message was delivered under. It is the primary key of the dead-letter destination, which is what makes a dead letter exactly-once: the same message cannot be recorded twice, and therefore cannot produce a second expiry receipt."
+cmd/server/openapi.yaml:6461:          description: "The expiry instant that elapsed unacknowledged (RFC 3339). Always finite: a message that never expires (ttl_seconds=0) is never purged and so never dead-lettered."
+cmd/server/openapi.yaml:6468:          description: "Why the message was dead-lettered. `ttl_expired_unacked` is the only reason the inbox lane produces today."
+cmd/server/openapi.yaml:6554:      description: "The inbox consumer contract carried on an agent registration/PATCH (Agent.consumer, INBOX-CRIER-001). It states who reads the inbox, on what cadence, and how long an unacknowledged message may sit before the EXPIRY SWEEP promotes it into the dead-letter destination (GET /agents/{id}/inbox/dead-letters, reason consumer_contract_expired) and writes exactly one MESSAGE_EXPIRED receipt into the sender's inbox. Delivery semantics are unchanged: ack/lease/idempotency behave exactly as before; only the terminal outcome gains a bound the sender can rely on."
+cmd/server/protocol_census_test.go:82:	{methods: []string{"GET"}, path: "/agents/{id}/inbox/dead-letters", probeURL: "/agents/probe-agent/inbox/dead-letters"},
+cmd/server/testdata/protocol-census.json:10:    "GET /agents/{id}/inbox/dead-letters",
+cmd/server/testdata/protocol-census.json:84:    "GET /agents/{id}/inbox/dead-letters",
