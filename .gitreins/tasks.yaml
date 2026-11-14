@@ -4156,3 +4156,13 @@ tasks:
   status: complete
   created_at: '2026-11-13T21:28:19.565210+00:00'
   completed_at: '2026-11-13T22:11:10.410388+00:00'
+- id: DOCS-CRIER-001
+  title: Document gate-conditional paths and named gate refusals
+  criteria:
+  - 'Implement and test gate-conditional OpenAPI documentation, named gate errors,
+    and WebSocket route posture. PROOF: focused tests plus go build ./... go vet ./...
+    go test ./... -count=1. FAILIF: any required conditional path lacks its gate or
+    a default gated refusal is unnamed.'
+  status: complete
+  created_at: '2026-11-14T03:29:37.741320+00:00'
+  completed_at: '2026-11-14T04:02:19.093147+00:00'
