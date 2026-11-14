@@ -1,0 +1,447 @@
+{
+  "task_id": "REV-CRIER-2",
+  "task_title": "MCP remote capability tiers and invocation",
+  "task_criteria": [
+    "PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents and reproduces local startup from available_tools=11 to 23 with identity=confirmed; internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate, invocation absent/unreproducible, or MCP tests fail."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/crier",
+  "branch": "main",
+  "commit": "6153604dfc2225142261c4e63d4fd11f28f775c4",
+  "pass_class": "judged",
+  "tier2_skipped": false,
+  "working_tree_content_fingerprint": "ca62d68b67856fd3f5cc3bc79f03b369c8f748510f7bbf3dcf70a42a1c42cb39",
+  "working_tree_dirty_path_count": 1,
+  "items": [
+    {
+      "criterion": "PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents and reproduces local startup from available_tools=11 to 23 with identity=confirmed; internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate, invocation absent/unreproducible, or MCP tests fail.",
+      "status": "PASS",
+      "detail": "Every clause verified by execution, not inspection. (1) `make mcp-capabilities-check` -> exit 0, \"MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)\". Report is genuinely generated, not hand-edited: `go run ./cmd/mcp-capabilities -output /tmp/gen-report.md` then `diff` against docs/mcp-capabilities.md printed \"IDENTICAL\". (2) examples/mcp-remote/env.template:1-12 records the cumulative tiers verbatim (\"11 by default, 15 with an identity, 22 with the server URL, and 23 with the mesh URL\") with per-tier instructions, and lists CRIER_AGENT_PRIVATE_KEY_FILE at line 22. (3) Tier arithmetic is accurate \u2014 I ran a throwaway test against the real UnavailableTools (internal/mcp/prereqs.go:82): tier0 available=11, tier1 available=15, tier2 available=22, tier3 available=23. (4) Live reproduction of all four tiers against a real server: Tier0 `tools=23 available_tools=11`; Tier1 `tools=23 available_tools=15`; Tier2 (sourcing the committed template) `tools=23 available_tools=22 unavailable_tools=[mesh_request]`; Tier3 `MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed` \u2014 byte-identical to the line in README.md:38 and local-transcript.txt. (5) The README's stable-key restart path also reproduces: after DELETE /agents/mcp-agent, run 1 logged \"registered bridge identity ... key_source=file\" + identity=confirmed, run 2 logged \"already registered and the server's public key matches\" + identity=confirmed. (6) internal/mcp/prereqs_test.go:222 pins `got[\"tools\"] != 23 || got[\"available_tools\"] != 11` -> 23/11 unchanged. (7) `go test ./internal/mcp/... ./cmd/crier-mcp/... ./cmd/mcp-capabilities/... -count=1` -> exit 0, \"ok internal/mcp 6.797s / ok cmd/crier-mcp 4.376s\". Cleanup done: server stopped via -stop, pidfile removed, git status clean except .gitreins/tasks.yaml. [resolution 0.17; examples/mcp-remote/README.md, internal/mcp/prereqs_test.go]"
+    }
+  ],
+  "merge_recommendation": "no_concerns_found",
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 th",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 this key is ignored\ngitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.api_key_env: unknown key \u2014 this key is ignored\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/crier/.gitreins/logs/guard-20261114T025354.357548Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/crier/.gitreins/logs/guard-20261114T025354.357548Z.log"
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents and reproduces local startup from available_tools=11 to 23 with identity=confirmed; internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate, invocation absent/unreproducible, or MCP tests fail.: Every clause verified by execution, not inspection. (1) `make mcp-capabilities-check` -> exit 0, \"MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)\". Report is genuinely generated, not hand-edited: `go run ./cmd/mcp-capabilities -output /tmp/gen-report.md` then `diff` against docs/mcp-capabilities.md printed \"IDENTICAL\". (2) examples/mcp-remote/env.template:1-12 records the cumulative tiers verbatim (\"11 by default, 15 with an identity, 22 with the server URL, and 23 with the mesh URL\") with per-tier instructions, and lists CRIER_AGENT_PRIVATE_KEY_FILE at line 22. (3) Tier arithmetic is accurate \u2014 I ran a throwaway test against the real UnavailableTools (internal/mcp/prereqs.go:82): tier0 available=11, tier1 available=15, tier2 available=22, tier3 available=23. (4) Live reproduction of all four tiers against a real server: Tier0 `tools=23 available_tools=11`; Tier1 `tools=23 available_tools=15`; Tier2 (sourcing the committed template) `tools=23 available_tools=22 unavailable_tools=[mesh_request]`; Tier3 `MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed` \u2014 byte-identical to the line in README.md:38 and local-transcript.txt. (5) The README's stable-key restart path also reproduces: after DELETE /agents/mcp-agent, run 1 logged \"registered bridge identity ... key_source=file\" + identity=confirmed, run 2 logged \"already registered and the server's public key matches\" + identity=confirmed. (6) internal/mcp/prereqs_test.go:222 pins `got[\"tools\"] != 23 || got[\"available_tools\"] != 11` -> 23/11 unchanged. (7) `go test ./internal/mcp/... ./cmd/crier-mcp/... ./cmd/mcp-capabilities/... -count=1` -> exit 0, \"ok internal/mcp 6.797s / ok cmd/crier-mcp 4.376s\". Cleanup done: server stopped via -stop, pidfile removed, git status clean except .gitreins/tasks.yaml. [resolution 0.17; examples/mcp-remote/README.md, internal/mcp/prereqs_test.go]\nAll clauses of the single criterion verified by live execution: the capability report is generated and fresh, the four tiers are accurate at 11/15/22/23 both in the template and in real startup output, the README's Tier 3 invocation reproduces the documented identity=confirmed line exactly, prereqs_test.go still pins 23/11, and the MCP test packages pass. [uncovered failure paths: failure mode 0 (README's Tier 3 example uses an empty CRIER_AGENT_PRIVATE_KEY_FILE, so re-running it against the same still-running server yields identity=rejected rather than identity=confirmed): detected_by is empty \u2014 uncovered failure path]",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents and reproduces local startup from available_tools=11 to 23 with identity=confirmed; internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate, invocation absent/unreproducible, or MCP tests fail.: Every clause verified by execution, not inspection. (1) `make mcp-capabilities-check` -> exit 0, \"MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)\". Report is genuinely generated, not hand-edited: `go run ./cmd/mcp-capabilities -output /tmp/gen-report.md` then `diff` against docs/mcp-capabilities.md printed \"IDENTICAL\". (2) examples/mcp-remote/env.template:1-12 records the cumulative tiers verbatim (\"11 by default, 15 with an identity, 22 with the server URL, and 23 with the mesh URL\") with per-tier instructions, and lists CRIER_AGENT_PRIVATE_KEY_FILE at line 22. (3) Tier arithmetic is accurate \u2014 I ran a throwaway test against the real UnavailableTools (internal/mcp/prereqs.go:82): tier0 available=11, tier1 available=15, tier2 available=22, tier3 available=23. (4) Live reproduction of all four tiers against a real server: Tier0 `tools=23 available_tools=11`; Tier1 `tools=23 available_tools=15`; Tier2 (sourcing the committed template) `tools=23 available_tools=22 unavailable_tools=[mesh_request]`; Tier3 `MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed` \u2014 byte-identical to the line in README.md:38 and local-transcript.txt. (5) The README's stable-key restart path also reproduces: after DELETE /agents/mcp-agent, run 1 logged \"registered bridge identity ... key_source=file\" + identity=confirmed, run 2 logged \"already registered and the server's public key matches\" + identity=confirmed. (6) internal/mcp/prereqs_test.go:222 pins `got[\"tools\"] != 23 || got[\"available_tools\"] != 11` -> 23/11 unchanged. (7) `go test ./internal/mcp/... ./cmd/crier-mcp/... ./cmd/mcp-capabilities/... -count=1` -> exit 0, \"ok internal/mcp 6.797s / ok cmd/crier-mcp 4.376s\". Cleanup done: server stopped via -stop, pidfile removed, git status clean except .gitreins/tasks.yaml. [resolution 0.17; examples/mcp-remote/README.md, internal/mcp/prereqs_test.go]\nAll clauses of the single criterion verified by live execution: the capability report is generated and fresh, the four tiers are accurate at 11/15/22/23 both in the template and in real startup output, the README's Tier 3 invocation reproduces the documented identity=confirmed line exactly, prereqs_test.go still pins 23/11, and the MCP test packages pass. [uncovered failure paths: failure mode 0 (README's Tier 3 example uses an empty CRIER_AGENT_PRIVATE_KEY_FILE, so re-running it against the same still-running server yields identity=rejected rather than identity=confirmed): detected_by is empty \u2014 uncovered failure path]",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents and reproduces local startup from available_tools=11 to 23 with identity=confirmed; internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate, invocation absent/unreproducible, or MCP tests fail.",
+                "status": "PASS",
+                "detail": "Every clause verified by execution, not inspection. (1) `make mcp-capabilities-check` -> exit 0, \"MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)\". Report is genuinely generated, not hand-edited: `go run ./cmd/mcp-capabilities -output /tmp/gen-report.md` then `diff` against docs/mcp-capabilities.md printed \"IDENTICAL\". (2) examples/mcp-remote/env.template:1-12 records the cumulative tiers verbatim (\"11 by default, 15 with an identity, 22 with the server URL, and 23 with the mesh URL\") with per-tier instructions, and lists CRIER_AGENT_PRIVATE_KEY_FILE at line 22. (3) Tier arithmetic is accurate \u2014 I ran a throwaway test against the real UnavailableTools (internal/mcp/prereqs.go:82): tier0 available=11, tier1 available=15, tier2 available=22, tier3 available=23. (4) Live reproduction of all four tiers against a real server: Tier0 `tools=23 available_tools=11`; Tier1 `tools=23 available_tools=15`; Tier2 (sourcing the committed template) `tools=23 available_tools=22 unavailable_tools=[mesh_request]`; Tier3 `MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed` \u2014 byte-identical to the line in README.md:38 and local-transcript.txt. (5) The README's stable-key restart path also reproduces: after DELETE /agents/mcp-agent, run 1 logged \"registered bridge identity ... key_source=file\" + identity=confirmed, run 2 logged \"already registered and the server's public key matches\" + identity=confirmed. (6) internal/mcp/prereqs_test.go:222 pins `got[\"tools\"] != 23 || got[\"available_tools\"] != 11` -> 23/11 unchanged. (7) `go test ./internal/mcp/... ./cmd/crier-mcp/... ./cmd/mcp-capabilities/... -count=1` -> exit 0, \"ok internal/mcp 6.797s / ok cmd/crier-mcp 4.376s\". Cleanup done: server stopped via -stop, pidfile removed, git status clean except .gitreins/tasks.yaml. [resolution 0.17; examples/mcp-remote/README.md, internal/mcp/prereqs_test.go]",
+                "resolution_probability": 0.17,
+                "cited_path": "examples/mcp-remote/README.md, internal/mcp/prereqs_test.go"
+              }
+            ],
+            "summary": "All clauses of the single criterion verified by live execution: the capability report is generated and fresh, the four tiers are accurate at 11/15/22/23 both in the template and in real startup output, the README's Tier 3 invocation reproduces the documented identity=confirmed line exactly, prereqs_test.go still pins 23/11, and the MCP test packages pass. [uncovered failure paths: failure mode 0 (README's Tier 3 example uses an empty CRIER_AGENT_PRIVATE_KEY_FILE, so re-running it against the same still-running server yields identity=rejected rather than identity=confirmed): detected_by is empty \u2014 uncovered failure path]",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY",
+      "tool_calls": [
+        {
+          "tool": "get_task_item",
+          "command": "get_task_item {\"id\": \"REV-CRIER-2\"}",
+          "exit_code": 0,
+          "output_sha": "8e409ee1ebde288ae544f3417cafacfb0160c8a7df4169289ed5568edc231d68"
+        },
+        {
+          "tool": "run_command",
+          "command": "ls -la && cat .gitreins/config.yaml 2>/dev/null",
+          "exit_code": 0,
+          "output_sha": "304d98eae64885e8c47499b02ea2e0d082db817f88b2e52e5647a8be59a0aa03"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"mcp-capabilities-check\" -A 40 Makefile | head -80",
+          "exit_code": 0,
+          "output_sha": "c62f4ba72b08129b716e62148e8a8ce21a38c1a768f3567047a1c3f12379eced"
+        },
+        {
+          "tool": "run_command",
+          "command": "ls -la examples/mcp-remote/ 2>&1; echo \"---\"; cat examples/mcp-remote/env.template 2>&1",
+          "exit_code": 0,
+          "output_sha": "2148d45258f44fe0f2e106c808db46705507405c5c418b9535eeb91baae6b659"
+        },
+        {
+          "tool": "run_command",
+          "command": "cat examples/mcp-remote/README.md; echo \"=== transcript ===\"; cat examples/mcp-remote/local-transcript.txt",
+          "exit_code": 0,
+          "output_sha": "090cd1f9e2286d65dbce696d8044910a652c6cf4935eefedc50d702a97063e79"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"mcp-capabilities-check\" -A 60 Makefile | sed -n '80,200p'",
+          "exit_code": 0,
+          "output_sha": "13b8c5e09063913d79afd6c58f40e6574e378b575690a9ec30908bce45799849"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '1,120p' examples/mcp-remote/README.md",
+          "exit_code": 0,
+          "output_sha": "168b80fff3f8043d64b612e021c5d291b4f98ace7a10d231d27a0ee9f721da3c"
+        },
+        {
+          "tool": "run_command",
+          "command": "ls cmd/mcp-capabilities/ 2>&1; echo \"---\"; cat cmd/mcp-capabilities/*.go 2>&1 | head -200",
+          "exit_code": 0,
+          "output_sha": "3cb77cb81595c2b33bf935fc7ddea693c3f969d17109f603451c583a8c312a6f"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara 2>/dev/null; pwd; make mcp-capabilities-check 2>&1 | tail -20",
+          "exit_code": 0,
+          "output_sha": "ee31d20ebff85d2372593856642f24f1280708bb214a805ac9c55289fd8e54b4"
+        },
+        {
+          "tool": "run_command",
+          "command": "cat docs/mcp-capabilities.md 2>&1 | head -120",
+          "exit_code": 0,
+          "output_sha": "6a8630c1d73bbff7842afc2376399403f3eface8a95b536167db8e5f255e29f5"
+        },
+        {
+          "tool": "run_command",
+          "command": "pwd; ls; make mcp-capabilities-check 2>&1 | tail -20",
+          "exit_code": 0,
+          "output_sha": "573974495b96eb43ece1226b7e89873a52583395da15759529fe13e4c59dc1a3"
+        },
+        {
+          "tool": "run_command",
+          "command": "cat internal/mcp/prereqs.go 2>&1 | head -200",
+          "exit_code": 0,
+          "output_sha": "f90fd52b1f18561d9186b80d47b0f26211475f522fa5c8ced6a86e5ae78a97a5"
+        },
+        {
+          "tool": "run_command",
+          "command": "cat internal/mcp/prereqs_test.go 2>&1 | head -200",
+          "exit_code": 0,
+          "output_sha": "3666ce1f3a5a4589b5563f6cb35c6b25eb26fa95b9427047467a3092da2709d3"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"23\\|11\\|15\\|22\" internal/mcp/prereqs_test.go | head -60",
+          "exit_code": 0,
+          "output_sha": "f54d97e49563297d597f5aa7a7d035f89e4a97119da662495a51c5109ed5628e"
+        },
+        {
+          "tool": "run_command",
+          "command": "go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1 2>&1 | tail -20",
+          "exit_code": 0,
+          "output_sha": "e4e89bd56c904309e7b2e1ba152a911759f8c02bab31d61104ea23d3f4c93136"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '200,280p' internal/mcp/prereqs_test.go",
+          "exit_code": 0,
+          "output_sha": "3249e2367a8bf226a8c7c0edf65542f4ccd97709f3ba16bbc5c7fd27071f8b45"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '60,200p' internal/mcp/prereqs.go",
+          "exit_code": 0,
+          "output_sha": "c0b3b31115980bba4b93754ca7b81a6edbd9234cabf581e9b190bdbeaa8359a4"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"make mcp-capabilities-check -> PASS (23 tools, docs/mcp-capabilities.md)\\ngo test ./internal/mcp/ ./cmd/crier-mcp/ -count=1 -> ok both\\nprereqs_test.go:222 pins 23/11\\nenv.template: tiers 11/15/22/23 documented, CRIER_AGENT_PRIVATE_KEY_FILE listed\\nREADME: documents tiers, Tier3 invocation, identity=confirmed\\nTODO: verify tier arithmetic 11/15/22/23 against prereqs.go; verify README invocation reproducibility (CRIER_AGENT_PRIVATE_KEY_FILE= empty, make run port 18767, mesh URL); check cmd/crier-mcp startup line emission\", \"key\": \"progress\"}",
+          "exit_code": 0,
+          "output_sha": "df4191dbd2840664781e11e16fb7cfc375db87138485348ceb6923f27eb96aaa"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '40,60p' internal/mcp/prereqs.go; echo \"=== count ===\"; grep -c \"{Tool:\" internal/mcp/prereqs.go",
+          "exit_code": 0,
+          "output_sha": "c5a315230979d90015ff80cdbc5fefdce25ca2ffa0f0c052a04b293713f8e537"
+        },
+        {
+          "tool": "run_command",
+          "command": "cat > /tmp/tier_test.go <<'EOF'\npackage mcp\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n\n\t\"github.com/crier-dev/crier/internal/registry\"\n)\n\nfunc TestTierArithmetic(t *testing.T) {\n\tn := New(registry.NewMemoryStore()).ToolCount()\n\tfor _, tc := range []struct{ name, id, http, mesh string }{\n\t\t{\"tier0\", \"\", \"\", \"\"},\n\t\t{\"tier1\", \"mcp-agent\", \"\", \"\"},\n\t\t{\"tier2\", \"mcp-agent\", \"http://localhost:8767\", \"\"},\n\t\t{\"tier3\", \"mcp-agent\", \"http://localhost:8767\", \"ws://localhost:8767/mesh/connect/mcp-agent\"},\n\t} {\n\t\tu, m := UnavailableTools(tc.id, tc.http, tc.mesh)\n\t\tfmt.Printf(\"%s: tools=%d available=%d unavailable=%v missing=%v\\n\", tc.name, n, n-len(u), u, m)\n\t}\n}\nEOF\ncp /tmp/tier_test.go internal/mcp/zz_tier_test.go && go test ./internal/mcp/ -run TestTierArithmetic -v -count=1 2>&1 | head -20; rm internal/mcp/zz_tier_test.go",
+          "exit_code": 0,
+          "output_sha": "9cccb294118a61f86f53b849ec5337f347298f34c8f63e995d7768a2d4aa1ea1"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -rn \"ToolSurfaceReportWithIdentity\\|ToolSurfaceReport(\" --include=*.go cmd/ internal/ | grep -v _test.go",
+          "exit_code": 0,
+          "output_sha": "be17eb5142cfedc3504b2536a61277a59434a788f73af28dcbab8c60d23bfcbf"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"CRIER_AGENT_PRIVATE_KEY_FILE\\|identityState\\|identity=\" -r cmd/crier-mcp/*.go | head -40",
+          "exit_code": 0,
+          "output_sha": "de15c808f64b554b7007c4e52bd99962f2098966868bf34aec2c33d9895b9d42"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '140,240p' cmd/crier-mcp/main.go",
+          "exit_code": 0,
+          "output_sha": "7633696aa5c657a6672a3550552d9b2f24ceb10547159021e6d9a2bc50f81b45"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '270,420p' cmd/crier-mcp/main.go",
+          "exit_code": 0,
+          "output_sha": "3768e90083e47903e37c6af99d2901c067f4db477587aad5a8906a7b6590cab5"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '320,400p' cmd/crier-mcp/main.go",
+          "exit_code": 0,
+          "output_sha": "3a23cc4675648fe598da1c3e84574e291d97caac05f2a349c3d4aa565401a001"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '280,400p' cmd/crier-mcp/registration_test.go",
+          "exit_code": 0,
+          "output_sha": "337867e600a4fb8ef95866fb71ac152a8e4695540cefac1a29ff2a08b728d4f2"
+        },
+        {
+          "tool": "run_command",
+          "command": "sed -n '400,560p' cmd/crier-mcp/registration_test.go",
+          "exit_code": 0,
+          "output_sha": "a1e14fb1bb7a8ec0a8ec550f5f9ec85fce05855264e569154bf32a8905389adc"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"func newBridgeTestServer\" -A 40 cmd/crier-mcp/*_test.go | head -60",
+          "exit_code": 0,
+          "output_sha": "836445e0f0814db914e0db5c2f4272039e0f2cdc1878c6f30df01497e1d30857"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n \"^run:\" -A 25 Makefile | head -40; echo \"=== build-mcp ===\"; grep -n \"^build-mcp:\" -A 10 Makefile",
+          "exit_code": 0,
+          "output_sha": "7a4f5a1f38ccf05f5e01112a2f792b9abc8c9cc4e78b84738327ee1cbfbcb9bc"
+        },
+        {
+          "tool": "run_command",
+          "command": "ls -la bin/; grep -n \"CRIER_PORT\\|CR_PORT\" config/config.go | head -20",
+          "exit_code": 0,
+          "output_sha": "e554f6fb6de72adfb7a07654f5e661a89b95e77477e1ea17147da6340b6522e1"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && make build-mcp 2>&1 | tail -5 && make build 2>&1 | tail -5 && ls -la bin/crier bin/crier-mcp",
+          "exit_code": 0,
+          "output_sha": "c0b7f602fedb2e5008839ca451ed50aac3f5e669aaf37a82ba817fd9cd926d23"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && (CRIER_PORT=18767 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false PIDFILE=.rev-crier-2.pid make run > /tmp/srv.log 2>&1 &) ; sleep 6; curl -s -o /dev/null -w \"health=%{http_code}\\n\" http://127.0.0.1:18767/health; tail -5 /tmp/srv.log",
+          "exit_code": 0,
+          "output_sha": "9068ea355c168feb291546095d95deb1dfa3dc8e1927c2fca7ed5aa68e8a79f5"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && ss -tlnp 2>/dev/null | grep 18767; echo \"---\"; curl -s http://127.0.0.1:18767/agents | head -c 500; echo; cat .rev-crier-2.pid 2>/dev/null",
+          "exit_code": 1,
+          "output_sha": "e8afdf1043e8a9403d6bdd4548bcdf28b70a36f3a1506702f0400f2fddc24d66"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && ss -tlnp 2>/dev/null | grep 18767; ps aux | grep -E \"bin/crier\" | grep -v grep | head",
+          "exit_code": 0,
+          "output_sha": "b32a8ca0cc22ae094fac7c590b9cc22b0c544c8e76d55de96c308bdc7bf2f468"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && ss -tlnp 2>/dev/null | grep -E \":18767|:1876[0-9]\"; echo \"---\"; curl -s -o /dev/null -w \"%{http_code}\\n\" http://127.0.0.1:18767/health; ls -la /proc/$(ss -tlnp 2>/dev/null | grep 18767 | head -1 | grep -oP 'pid=\\K[0-9]+')/cwd 2>/dev/null",
+          "exit_code": 2,
+          "output_sha": "41ad83278c60ae6d11ecc454f0f3ae8a4d5b6f1a9e551c5e6d09a6844a92833c"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && for p in $(ls /proc | grep -E '^[0-9]+$'); do if ls -l /proc/$p/fd 2>/dev/null | grep -q socket; then :; fi; done; ss -tlnp 2>/dev/null | grep 18767; echo \"=== try fuser ===\"; fuser -n tcp 18767 2>&1; echo \"=== lsof ===\"; lsof -i :18767 2>/dev/null | head",
+          "exit_code": 0,
+          "output_sha": "c259faa5921fa5a37bc00674116165598da2387a480a8fbab3b383facf1648a2"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && curl -s http://127.0.0.1:18767/version; echo; curl -s http://127.0.0.1:18767/agents | head -c 300; echo; ls -la .rev-crier-2.pid 2>&1",
+          "exit_code": 2,
+          "output_sha": "dc9dfe7ac30e48a78cda9bc348ebfb887def05e7b4992c285cedbe72ea904fce"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && (CRIER_PORT=18768 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false PIDFILE=.rev-crier-2.pid make run > /tmp/srv2.log 2>&1 &) ; sleep 7; curl -s -o /dev/null -w \"health=%{http_code}\\n\" http://127.0.0.1:18768/health; curl -s http://127.0.0.1:18768/version; echo; tail -3 /tmp/srv2.log",
+          "exit_code": 0,
+          "output_sha": "4a709b1380df69169db560969f9d07ad7453702a0c4bf287ac55f8545e784286"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18768 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18768/mesh/connect/mcp-agent CRIER_AGENT_PRIVATE_KEY_FILE= CRIER_AUTH_TOKEN= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface|registered bridge|ephemeral\" ",
+          "exit_code": 0,
+          "output_sha": "046d25174e3bf56755a0f668ef28681c77fb7ef417db50158a81ed887a5e0854"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && curl -s -o /dev/null -w \"health=%{http_code}\\n\" http://127.0.0.1:18768/health; tail -5 /tmp/srv2.log; cat .rev-crier-2.pid 2>/dev/null; ps aux | grep \"bin/crier -pidfile\" | grep -v grep",
+          "exit_code": 0,
+          "output_sha": "119484208ce65e322d6c139c0e46d5d60eb352ac5a6733571529963dbcdb76eb"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && setsid nohup env CRIER_PORT=18769 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false ./bin/crier -pidfile .rev-crier-2.pid > /tmp/srv3.log 2>&1 < /dev/null & sleep 5; curl -s -o /dev/null -w \"health=%{http_code}\\n\" http://127.0.0.1:18769/health; curl -s http://127.0.0.1:18769/version; echo",
+          "exit_code": 0,
+          "output_sha": "ba2ed40465adbb17eceb9d253cc63c05fc208c8d47452ea1a34aa120d723fcc0"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18769 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18769/mesh/connect/mcp-agent CRIER_AGENT_PRIVATE_KEY_FILE= CRIER_AUTH_TOKEN= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface|registered bridge|FAILED\"",
+          "exit_code": 0,
+          "output_sha": "3a164f344cfaaa8bc29019cb201a421a5272980736621cda28c935a4b70c47c9"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && ( set -a; . examples/mcp-remote/env.template; set +a; CRIER_HTTP_URL=http://127.0.0.1:18769 CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_AGENT_PRIVATE_KEY_FILE= CRIER_AUTH_TOKEN= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface\" )",
+          "exit_code": 0,
+          "output_sha": "a99a4aa248f25860f53c6651d09eb77070d2be522a29613d3f1749bb69131781"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && echo \"=== Tier 0 (no bridge vars) ===\"; env -u CRIER_AGENT_ID -u CRIER_HTTP_URL -u CRIER_MESH_URL CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_AGENT_PRIVATE_KEY_FILE= CRIER_AUTH_TOKEN= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface\"; echo \"=== Tier 1 (agent id only) ===\"; env -u CRIER_HTTP_URL -u CRIER_MESH_URL CRIER_AGENT_ID=mcp-agent CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_AGENT_PRIVATE_KEY_FILE= CRIER_AUTH_TOKEN= CR_AUTH_TOKEN= timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface\"",
+          "exit_code": 0,
+          "output_sha": "702bc6601f9078f931369f4779b56cc3c35ff8ee1d061a627160d944e4481eac"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"LIVE REPRODUCTION (all confirmed):\\n- make mcp-capabilities-check -> \\\"MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)\\\" exit 0\\n- go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1 -> ok both\\n- prereqs_test.go:222 pins tools=23/available_tools=11\\n- Tier0 (no vars): tools=23 available_tools=11\\n- Tier1 (CRIER_AGENT_ID): tools=23 available_tools=15\\n- Tier2 (template sourced): tools=23 available_tools=22 unavailable=[mesh_request]\\n- Tier3 (all 3): \\\"all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed\\\" -- EXACT match to README/transcript\\n- env.template lists CRIER_AGENT_PRIVATE_KEY_FILE (line ~22)\\n- README documents 11->15->22->23 progression + Tier3 invocation\\nREMAINING: check README's \\\"make run\\\" default port 8767 claim; check docs/mcp-capabilities.md freshness vs tiers; check whether README's Tier2 claim \\\"tools=23 available_tools=22\\\" is stated (yes, line ~40)\", \"key\": \"verified_0\"}",
+          "exit_code": 0,
+          "output_sha": "3df9769b7890869d60f831a1785b2f816c5f1bb323e612886d290cfb6e4242ca"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && sed -n '38,60p' examples/mcp-remote/README.md",
+          "exit_code": 0,
+          "output_sha": "d6942c33b010d61b6e51058a9dec9782acd79f13413563ae4be9afd3940cc52a"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && sed -n '60,100p' examples/mcp-remote/README.md",
+          "exit_code": 0,
+          "output_sha": "fe75a323a628f89ce4b133c0849e0c6814ea89e3094a89c5855eeddacf9efb95"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && grep -n \"8767\" config/config.go | head -10; grep -rn \"CRIER_PORT\\|8767\" examples/mcp-remote/README.md",
+          "exit_code": 0,
+          "output_sha": "2e12ff56f37e4855931edb6d522fb74b82439ce524afe56990d22106a94f999d"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && mkdir -p /tmp/rev2cfg && openssl genpkey -algorithm ED25519 -out /tmp/rev2cfg/mcp-agent.key 2>&1 && export CRIER_AGENT_PRIVATE_KEY_FILE=/tmp/rev2cfg/mcp-agent.key && echo \"--- run 1 ---\" && CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18769 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18769/mesh/connect/mcp-agent timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface|registered bridge|FAILED|DIFFERENT\"",
+          "exit_code": 0,
+          "output_sha": "d17e397d5d95f6ef1eda7e8ac9f7fe7aa4687b43424d390024cea0c77870b7a2"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && curl -s -X DELETE http://127.0.0.1:18769/agents/mcp-agent -w \" del=%{http_code}\\n\"; export CRIER_AGENT_PRIVATE_KEY_FILE=/tmp/rev2cfg/mcp-agent.key; echo \"--- run 1 (fresh) ---\"; CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18769 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18769/mesh/connect/mcp-agent timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface|registered bridge|DIFFERENT\"; echo \"--- run 2 (same key, same server) ---\"; CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false CRIER_HTTP_URL=http://127.0.0.1:18769 CRIER_AGENT_ID=mcp-agent CRIER_MESH_URL=ws://127.0.0.1:18769/mesh/connect/mcp-agent timeout 4s ./bin/crier-mcp 2>&1 | grep -E \"MCP tool surface|already registered|DIFFERENT\"",
+          "exit_code": 0,
+          "output_sha": "d22aa778b0f9132c5b24086c03e0cc8829f56f9480ee947e688f5e21416a5667"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && ./bin/crier -stop -pidfile .rev-crier-2.pid 2>&1 | tail -2; sleep 1; curl -s -o /dev/null -w \"after_stop=%{http_code}\\n\" http://127.0.0.1:18769/health; rm -f .rev-crier-2.pid; rm -rf /tmp/rev2cfg; git status --porcelain | head -20",
+          "exit_code": 0,
+          "output_sha": "b5814db77f84157ec904f1904b268d85d1af51f0732f6bab5e416cf7542eaa12"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && go test ./internal/mcp/... ./cmd/crier-mcp/... ./cmd/mcp-capabilities/... -count=1 2>&1 | tail -10",
+          "exit_code": 0,
+          "output_sha": "babeaf6b554b6f30392600f3fde217047c652fd7c120946d4ec5239acbd69582"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && grep -n \"^generate:\" -A 15 Makefile | head -25",
+          "exit_code": 0,
+          "output_sha": "8b85b3abba33a995425f715e849683e46dacc4688ea204c5da9fc3d9423b7466"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/crier && go run ./cmd/mcp-capabilities -output /tmp/gen-report.md && diff /tmp/gen-report.md docs/mcp-capabilities.md && echo \"IDENTICAL: report is generated, not hand-edited\"; rm -f /tmp/gen-report.md",
+          "exit_code": 0,
+          "output_sha": "afdcf709b2a04f898f5076853c239dd1a72f5db3b07c4bf0ec8bb9e940c99b58"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"FINAL: ALL PASS\\n- make mcp-capabilities-check -> \\\"MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)\\\" exit 0\\n- report is generated (diff vs fresh `go run ./cmd/mcp-capabilities -output` = IDENTICAL), not hand-edited\\n- env.template: tiers 11/15/22/23 documented cumulatively + CRIER_AGENT_PRIVATE_KEY_FILE listed\\n- README: documents 11->15->22->23, Tier3 invocation, identity=confirmed, honest ephemeral-key caveat\\n- LIVE REPRO all 4 tiers: 11 / 15 / 22 / 23 (exact match)\\n- LIVE REPRO Tier3 line EXACTLY matches README+transcript: \\\"all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed\\\"\\n- LIVE REPRO stable-key path: run1 registered+confirmed, run2 \\\"already registered ... key matches\\\"+confirmed\\n- prereqs_test.go:222 pins 23/11\\n- go test ./internal/mcp/... ./cmd/crier-mcp/... -count=1 -> ok ok\\n- cleanup: server stopped, pidfile removed, git status clean except .gitreins/tasks.yaml\", \"key\": \"verified_0\"}",
+          "exit_code": 0,
+          "output_sha": "39e1279a7be8ab67b176df68607f5af06452bce323ee90a009db6fdef15e98f9"
+        }
+      ]
+    }
+  },
+  "review": {
+    "reviewer_email": "totalwindupflightsystems@gmail.com",
+    "reviewer_name": "totalwindupflightsystems",
+    "commit_author_email": "totalwindupflightsystems@gmail.com",
+    "commit_author_name": "totalwindupflightsystems",
+    "self_review": true,
+    "findings": [],
+    "summary": "The diff only updates a task's completed_at timestamp in .gitreins/tasks.yaml, with no code, logic, or wiring changes to review."
+  },
+  "summary": "Stage tier1: PASS\n    \u2713 guard: gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 th\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 PROOF: make mcp-capabilities-check passes; examples/mcp-remote/env.template records cumulative available tools for default/CRIER_AGENT_ID/CRIER_HTTP_URL/CRIER_MESH_URL tiers and lists CRIER_AGENT_PRIVATE_KEY_FILE; examples/mcp-remote/README.md documents and reproduces local startup from available_tools=11 to 23 with identity=confirmed; internal/mcp/prereqs_test.go remains 23/11. FAILIF: report stale, tiers absent/inaccurate, invocation absent/unreproducible, or MCP tests fail.: Every clause verified by execution, not inspection. (1) `make mcp-capabilities-check` -> exit 0, \"MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)\". Report is genuinely generated, not hand-edited: `go run ./cmd/mcp-capabilities -output /tmp/gen-report.md` then `diff` against docs/mcp-capabilities.md printed \"IDENTICAL\". (2) examples/mcp-remote/env.template:1-12 records the cumulative tiers verbatim (\"11 by default, 15 with an identity, 22 with the server URL, and 23 with the mesh URL\") with per-tier instructions, and lists CRIER_AGENT_PRIVATE_KEY_FILE at line 22. (3) Tier arithmetic is accurate \u2014 I ran a throwaway test against the real UnavailableTools (internal/mcp/prereqs.go:82): tier0 available=11, tier1 available=15, tier2 available=22, tier3 available=23. (4) Live reproduction of all four tiers against a real server: Tier0 `tools=23 available_tools=11`; Tier1 `tools=23 available_tools=15`; Tier2 (sourcing the committed template) `tools=23 available_tools=22 unavailable_tools=[mesh_request]`; Tier3 `MCP tool surface: all 23 advertised tools are available in this mode mode=remote/bridge tools=23 identity=confirmed` \u2014 byte-identical to the line in README.md:38 and local-transcript.txt. (5) The README's stable-key restart path also reproduces: after DELETE /agents/mcp-agent, run 1 logged \"registered bridge identity ... key_source=file\" + identity=confirmed, run 2 logged \"already registered and the server's public key matches\" + identity=confirmed. (6) internal/mcp/prereqs_test.go:222 pins `got[\"tools\"] != 23 || got[\"available_tools\"] != 11` -> 23/11 unchanged. (7) `go test ./internal/mcp/... ./cmd/crier-mcp/... ./cmd/mcp-capabilities/... -count=1` -> exit 0, \"ok internal/mcp 6.797s / ok cmd/crier-mcp 4.376s\". Cleanup done: server stopped via -stop, pidfile removed, git status clean except .gitreins/tasks.yaml. [resolution 0.17; examples/mcp-remote/README.md, internal/mcp/prereqs_test.go]\nAll clauses of the single criterion verified by live execution: the capability report is generated and fresh, the four tiers are accurate at 11/15/22/23 both in the template and in real startup output, the README's Tier 3 invocation reproduces the documented identity=confirmed line exactly, prereqs_test.go still pins 23/11, and the MCP test packages pass. [uncovered failure paths: failure mode 0 (README's Tier 3 example uses an empty CRIER_AGENT_PRIVATE_KEY_FILE, so re-running it against the same still-running server yields identity=rejected rather than identity=confirmed): detected_by is empty \u2014 uncovered failure path]\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-14T02:56:00.196708",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-14T02:56:00.216332+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 1759,
+        "truncated": false,
+        "source": "git show 6153604dfc22"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 494,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "REV-CRIER-2"
+  }
+}

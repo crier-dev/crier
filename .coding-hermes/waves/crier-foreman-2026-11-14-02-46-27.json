@@ -1,0 +1,28 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-02-46-27",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "mode": "verification-only-reconciliation",
+  "wave_budget": 12,
+  "slots": 6,
+  "base_sha": "8111938ec648c62676dbbfbf90ff9f4ea16edcec",
+  "selection": {
+    "rows": ["REV-CRIER-2"],
+    "reason": "block_drive resumed REV-CRIER-2. Its implementation and R5 documentation correction are already published; the remaining obligation is parent-task exact-head verification and board closeout. One ready row means no implementation wave and no duplicate worker.",
+    "prior_block": "BOARDCTL-HOOK-001",
+    "prior_block_reason": "remaining acceptance is externally gated on INGRESS-CRIER-001"
+  },
+  "workers": [],
+  "verification": {
+    "task_id": "REV-CRIER-2",
+    "implementation_commit": "bf371713ad3cea032bdf755db07963d7d3ef8941",
+    "verified_commit": "6153604dfc2225142261c4e63d4fd11f28f775c4",
+    "verdict": ".gitreins/history/2026-11-14/2bdcfa9f/verdict.json",
+    "verdict_status": "PASS",
+    "local_gate": "PASS: make mcp-capabilities-check; go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1; go build ./...; go vet ./...; go test ./... -count=1",
+    "remote_parity": "origin/main is 8111938ec648c62676dbbfbf90ff9f4ea16edcec; gitlab/main and canonical HEAD are 6153604dfc2225142261c4e63d4fd11f28f775c4; origin is 6 commits ahead and must be reconciled before closeout.",
+    "remote_ci": "success plus pending run for prior main head 8111938ec648c62676dbbfbf90ff9f4ea16edcec; no recent completed failure in mandatory top-3.",
+    "acceptance": "The generated capability report, 11/15/22/23 template tiers, stable-key remote example, and unchanged 23/11 prereq posture were verified by the parent GitReins PASS and direct exact-head gates.",
+    "publication_requirement": "Reconcile origin/main before the board/event closeout; publish the manifest and closeout on both remotes; re-read the exact row, event, manifest, verdict, and parity."
+  }
+}
