@@ -16,6 +16,13 @@
     "rework_commit": "20a1c3ad",
     "published_ref": "origin/wt/continuation-20261114-003754",
     "verdict_requirement": "Keep the parent board row pending until a persisted verdict binds the exact published integration tree.",
-    "publication_requirement": "Manifest and documentation rework are published on the continuation branch; default origin/main still requires serial integration and final board closeout."
+    "publication_requirement": "Manifest and documentation rework are published on the continuation branch; default origin/main still requires serial integration and final board closeout.",
+    "gates": {
+      "make_mcp_capabilities_check": "PASS: MCP capability report: PASS (23 tools, docs/mcp-capabilities.md)",
+      "mcp_tests": "PASS: go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1",
+      "go_build": "PASS: go build ./...",
+      "go_vet": "PASS: go vet ./...",
+      "placeholder_check": "PASS: no worker-sha, exact committed worker SHA, or STATUS: complete | partial placeholders"
+    }
   }
 }
