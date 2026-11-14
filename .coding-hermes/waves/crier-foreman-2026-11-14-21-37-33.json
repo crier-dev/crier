@@ -4,6 +4,8 @@
   "block": "BOARDCTL-HOOK-001",
   "mode": "owner-gated-verification-only",
   "source_sha": "eae85e84345144c5a530b7ef38a5b84149148b54",
+  "commit": "1ba166c7ac93b2ae02cc5c96ddd4f01ffe3a3a6b",
+  "memory": "c100cfbc-e725-4595-9318-ed1180ed1647",
   "wave_budget": 8,
   "slots": 8,
   "wave_size": 0,
