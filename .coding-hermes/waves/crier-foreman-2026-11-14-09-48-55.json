@@ -1,0 +1,23 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-09-48-55",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "mode": "verification-only-reconciliation",
+  "wave_budget": 12,
+  "wave_size": 0,
+  "base_sha": "8a5622a3cd7374253f7c7de24d394da036f375bb",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "selection_reason": "block_drive ranked BOARDCTL-HOOK-001 first, but its implementation is already published in the external coding-hermes/boardctl repository; crier owns only the remaining live ingress proof.",
+  "verification": {
+    "implementation_repository": "github.com/coding-hermes/boardctl",
+    "implementation_commit": "2667a638a15794d213f89d74b6a11e4159cee057",
+    "implementation_remote_main": "6663597e3f740ea361fb065c5d06b0d4c8115d04",
+    "remaining_obligation": "Prove the live crier ingress leg: configured source secret -> real boardctl commit -> HTTP 202 -> delivery to the target agent inbox -> boardctl hook doctor spool depth 0 and no dead-letter.",
+    "acceptance_probe": "Read-only live probes of /version, /ingress/sources, and /ingress/webhooks plus the existing crier board evidence; no production restart or secret configuration change.",
+    "owner_blocker": "Live unit environment lacks CR_INGEST_* configuration and the supervised crier restart/deployment is owner-gated; this foreman does not restart the production listener or handle credentials.",
+    "verdict": "none:external-implementation-and-owner-gated-live-proof; no synthetic crier GitReins task created"
+  },
+  "publication": "continuation-branch-only-until-canonical-main-accepts-the-audit",
+  "status": "planned"
+}
