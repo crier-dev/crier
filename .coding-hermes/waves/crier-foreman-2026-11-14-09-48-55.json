@@ -19,5 +19,5 @@
     "verdict": "none:external-implementation-and-owner-gated-live-proof; no synthetic crier GitReins task created"
   },
   "publication": "continuation-branch-only-until-canonical-main-accepts-the-audit",
-  "status": "planned"
+  "status": "finished"
 }
