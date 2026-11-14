@@ -6757,6 +6757,9 @@ components:
           type: integer
           minimum: 0
           maximum: 120000
+        require_response_token:
+          type: boolean
+          description: "For blocking delivery, require the endpoint to echo the per-run X-Crier-Response-Token before accepting the reply."
     WebhookDeliverAccept:
       type: object
       required: [id, transport, delivery_mode]

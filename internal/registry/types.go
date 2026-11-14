@@ -71,6 +71,10 @@ type Agent struct {
 	LastSeen     time.Time   `json:"last_seen"`
 	// Webhook is the optional push-delivery endpoint (CR-FEAT-001).
 	Webhook *webhook.Config `json:"webhook,omitempty"`
+	// ArchivedReason is an explicit operator explanation for a registered
+	// consumer that is no longer expected to answer. It is intentionally
+	// additive; an empty value means the row is not archived.
+	ArchivedReason string `json:"archived_reason,omitempty"`
 	// Hermes is the optional Hermes-session delivery target
 	// (specs/HERMES-SESSION-DELIVERY.md): the delivery becomes one agent turn
 	// inside a Hermes gateway session, created or reused per the configured

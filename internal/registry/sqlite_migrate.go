@@ -42,6 +42,7 @@ var sqliteMigrationOverrides = map[int]string{
 	8: `ALTER TABLE agents ADD COLUMN namespace TEXT CHECK(namespace IS NULL OR length(trim(namespace)) > 0);
  ALTER TABLE inbox_entries ADD COLUMN namespace TEXT CHECK(namespace IS NULL OR length(trim(namespace)) > 0);
  ALTER TABLE dead_letters ADD COLUMN namespace TEXT CHECK(namespace IS NULL OR length(trim(namespace)) > 0);`,
+	20: `ALTER TABLE agents ADD COLUMN consumer TEXT; ALTER TABLE agents ADD COLUMN archived_reason TEXT;`,
 	14: `CREATE TABLE service_delivery_receipts (
  sender TEXT NOT NULL CHECK(length(sender)>0), recipient TEXT NOT NULL CHECK(length(recipient)>0),
  idempotency_key TEXT NOT NULL CHECK(length(idempotency_key)>0),

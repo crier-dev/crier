@@ -14,3 +14,5 @@
 -- unchanged (24h is the documented DefaultMessageTTL).
 ALTER TABLE agents
     ADD COLUMN consumer JSONB NULL;
+ALTER TABLE agents
+    ADD COLUMN archived_reason TEXT NULL;

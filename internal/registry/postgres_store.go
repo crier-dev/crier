@@ -162,15 +162,9 @@ func (s *PostgresStore) operationContext() (context.Context, context.CancelFunc)
 }
 
 // agentConfigColumns is the column list shared by Get and List, in the exact
-// order both scan it: the six registration columns followed by the three
-// optional configs added by 003_add_agent_config_columns and
-// 005_add_agent_a2a_column, and the realm added by 008_add_namespaces.
-//
-// `namespace` is COALESCEd to ” because NULL is the canonical storage of the
-// DEFAULT namespace (008): an existing row — and every new row in a deployment
-// that declares no namespaces — reads back as "", exactly what the in-memory
-// backend and the wire form use.
-const agentConfigColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace, ''), consumer`
+// order both scan it: the six registration columns followed by the optional
+// configs, realm, consumer contract and archive reason.
+const agentConfigColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace, ''), consumer, COALESCE(archived_reason, '')`
 
 // marshalOptionalConfig marshals one of an agent's optional configs (webhook,
 // guard, a2a) for its nullable JSONB column. A nil config — absent, or
@@ -277,10 +271,10 @@ func (s *PostgresStore) Register(agent *Agent) error {
 
 	_, err = s.pool.Exec(ctx, `
 INSERT INTO agents (
-    id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace, consumer
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11::jsonb);`,
+    id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace, consumer, archived_reason
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11::jsonb, $12);`,
 		agent.ID, pubKeyArg, capsJSON, string(status), now, now, webhookJSON, guardJSON, a2aJSON,
-		nullText(namespace.Canonical(agent.Namespace)), consumerJSON,
+		nullText(namespace.Canonical(agent.Namespace)), consumerJSON, nullText(agent.ArchivedReason),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -343,7 +337,7 @@ SELECT `+agentConfigColumns+`
 FROM agents
 WHERE id = $1;`, id).Scan(
 		&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
-		&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace, &consumerJSON,
+		&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace, &consumerJSON, &agent.ArchivedReason,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -415,7 +409,7 @@ ORDER BY registered_at ASC, id ASC;`)
 			consumerJSON     []byte
 		)
 		if err := rows.Scan(&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
-			&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace, &consumerJSON); err != nil {
+			&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace, &consumerJSON, &agent.ArchivedReason); err != nil {
 			slog.Error("postgres list scan", "error", err)
 			s.setListError(fmt.Errorf("postgres list: scan: %w", err))
 			return []*Agent{}
@@ -539,8 +533,8 @@ func (s *PostgresStore) Update(agent *Agent) error {
 	tag, err := s.pool.Exec(ctx, `
 UPDATE agents
 SET capabilities = $2::jsonb, webhook = $3::jsonb, guard = $4::jsonb, a2a = $5::jsonb,
-consumer = $7::jsonb, last_seen = $6
-WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, a2aJSON, now, consumerJSON)
+consumer = $7::jsonb, last_seen = $6, archived_reason = $8
+WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, a2aJSON, now, consumerJSON, nullText(agent.ArchivedReason))
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
 	}

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -156,6 +158,83 @@ type StaleConsumer struct {
 	ContractTTL time.Duration
 	Unacked     int
 	Oldest      time.Time
+}
+
+// ConsumerCensusState is the repository-owned classification of one registered
+// consumer. It deliberately does not claim that a remote host answered: wired
+// means the registry has a valid signed webhook configuration, archived means
+// an explicit operator reason, and unclassified is a fail-closed finding.
+type ConsumerCensusState string
+
+const (
+	ConsumerWired        ConsumerCensusState = "wired"
+	ConsumerArchived     ConsumerCensusState = "archived"
+	ConsumerUnclassified ConsumerCensusState = "unclassified"
+)
+
+// ConsumerCensusEntry names the reason a registered agent is or is not
+// actionable by the repository-owned harness contract.
+type ConsumerCensusEntry struct {
+	AgentID string              `json:"agent_id"`
+	State   ConsumerCensusState `json:"state"`
+	Reason  string              `json:"reason"`
+}
+
+// ClassifyConsumerCensus applies the fail-closed registry census rule. A
+// configured consumer contract is only a repository proof of wiring; live
+// consumer liveness remains an owner-gated deployment check.
+func ClassifyConsumerCensus(agents []*Agent) []ConsumerCensusEntry {
+	out := make([]ConsumerCensusEntry, 0, len(agents))
+	for _, agent := range agents {
+		if agent == nil {
+			continue
+		}
+		entry := ConsumerCensusEntry{AgentID: agent.ID, State: ConsumerUnclassified, Reason: "no verified consumer configuration or archived reason"}
+		if agent.ArchivedReason != "" {
+			entry.State = ConsumerArchived
+			entry.Reason = agent.ArchivedReason
+		} else if agent.Consumer != nil {
+			if err := agent.Consumer.Validate(); err == nil {
+				entry.State = ConsumerWired
+				entry.Reason = "verified consumer configuration"
+			} else {
+				entry.Reason = fmt.Sprintf("invalid consumer configuration: %v", err)
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// ValidateConsumerCensus applies the strict harness gate. Every registered row
+// must either name a valid consumer configuration or carry an explicit archive
+// reason. It returns every unclassified row in one error so callers cannot
+// accidentally continue after checking only the first finding.
+func ValidateConsumerCensus(agents []*Agent) error {
+	entries := ClassifyConsumerCensus(agents)
+	var unclassified []string
+	for _, entry := range entries {
+		if entry.State == ConsumerUnclassified {
+			unclassified = append(unclassified, fmt.Sprintf("%s: %s", entry.AgentID, entry.Reason))
+		}
+	}
+	if len(unclassified) > 0 {
+		return fmt.Errorf("consumer census rejected %d unclassified agent(s): %s", len(unclassified), strings.Join(unclassified, "; "))
+	}
+	return nil
+}
+
+// ConsumerCensus returns the current registry classification in a stable ID
+// order so harness checks and reports are deterministic.
+func (h *Handler) ConsumerCensus() []ConsumerCensusEntry {
+	entries := ClassifyConsumerCensus(h.store.List())
+	slices.SortFunc(entries, func(a, b ConsumerCensusEntry) int { return strings.Compare(a.AgentID, b.AgentID) })
+	return entries
+}
+
+// ValidateConsumerCensus applies the strict census gate to the current registry.
+func (h *Handler) ValidateConsumerCensus() error {
+	return ValidateConsumerCensus(h.store.List())
 }
 
 // ContractExpirer is the sweep capability: promote unacknowledged messages past

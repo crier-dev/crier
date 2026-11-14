@@ -2,6 +2,8 @@ package webhook
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -101,6 +103,10 @@ type FailureNotification struct {
 	StatusCode  int    `json:"status_code,omitempty"`
 	Err         string `json:"error,omitempty"`
 }
+
+// ErrResponseTokenMismatch identifies a blocking response that did not prove
+// it belonged to the current delivery run.
+var ErrResponseTokenMismatch = errors.New("webhook: response token mismatch")
 
 // Driver orchestrates webhook delivery: immediate POST attempts, bounded
 // retries with exponential backoff, a durable queue for offline endpoints,
@@ -351,6 +357,14 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 	if budget <= 0 {
 		budget = 30 * time.Second
 	}
+	responseToken := ""
+	if cfg.RequireResponseToken {
+		rawToken := make([]byte, 16)
+		if _, err := rand.Read(rawToken); err != nil {
+			return nil, fmt.Errorf("webhook: generate response token: %w", err)
+		}
+		responseToken = hex.EncodeToString(rawToken)
+	}
 	attempts := 0
 	targetStatus := 0
 	cut := false
@@ -424,7 +438,13 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 			remaining = time.Nanosecond
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, remaining)
-		res := d.client.PostContext(attemptCtx, cfg, env, attempt)
+		attemptEnvelope := *env
+		attemptEnvelope.Crier.ResponseToken = responseToken
+		res := d.client.PostContext(attemptCtx, cfg, &attemptEnvelope, attempt)
+		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 && responseToken != "" && res.ResponseToken != responseToken {
+			res.Err = ErrResponseTokenMismatch
+			res.Retryable = false
+		}
 		targetStatus = res.StatusCode
 		// The full response body, not HTTP headers or a JSON prefix, must
 		// arrive before this SAME per-target deadline. Never admit a late 2xx.

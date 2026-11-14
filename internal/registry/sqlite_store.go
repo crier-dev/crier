@@ -106,7 +106,7 @@ func sqliteAt(n sql.NullInt64) time.Time {
 }
 func sqliteJSON(v any) ([]byte, error) { return json.Marshal(v) }
 
-const sqliteAgentColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace,''), COALESCE(consumer,'')`
+const sqliteAgentColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace,''), COALESCE(consumer,''), COALESCE(archived_reason,'')`
 
 type sqliteScanner interface{ Scan(...any) error }
 
@@ -114,7 +114,7 @@ func scanSQLiteAgent(row sqliteScanner) (*Agent, error) {
 	a := &Agent{}
 	var key, caps, wh, g, aa, consumer []byte
 	var registered, last int64
-	if err := row.Scan(&a.ID, &key, &caps, &a.Status, &registered, &last, &wh, &g, &aa, &a.Namespace, &consumer); err != nil {
+	if err := row.Scan(&a.ID, &key, &caps, &a.Status, &registered, &last, &wh, &g, &aa, &a.Namespace, &consumer, &a.ArchivedReason); err != nil {
 		return nil, err
 	}
 	a.PublicKey = HexKey(key)
@@ -192,7 +192,7 @@ func (s *SQLiteStore) Register(a *Agent) error {
 		if len(key) == 0 {
 			key = nil
 		}
-		_, err = q.ExecContext(ctx, `INSERT INTO agents(id,public_key,capabilities,status,registered_at,last_seen,webhook,guard,a2a,namespace,consumer) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, a.ID, key, caps, a.Status, sqliteTime(a.RegisteredAt), sqliteTime(a.LastSeen), wh, g, aa, nullableSQLiteString(a.Namespace), consumer)
+		_, err = q.ExecContext(ctx, `INSERT INTO agents(id,public_key,capabilities,status,registered_at,last_seen,webhook,guard,a2a,namespace,consumer,archived_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, a.ID, key, caps, a.Status, sqliteTime(a.RegisteredAt), sqliteTime(a.LastSeen), wh, g, aa, nullableSQLiteString(a.Namespace), consumer, nullableSQLiteString(a.ArchivedReason))
 		return err
 	})
 }
@@ -256,6 +256,7 @@ func (s *SQLiteStore) Update(a *Agent) error {
 		a.Status = old.Status
 		a.RegisteredAt = old.RegisteredAt
 		a.Namespace = old.Namespace
+		a.ArchivedReason = old.ArchivedReason
 		a.LastSeen = time.Now().UTC()
 		if a.Capabilities == nil {
 			a.Capabilities = []string{}

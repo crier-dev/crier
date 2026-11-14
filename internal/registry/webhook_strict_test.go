@@ -12,7 +12,7 @@ import (
 
 // strictAcceptedKeys is the member list the strict webhook decode prints on a
 // rejection, in Config declaration order (DF-CRIER-150).
-const strictAcceptedKeys = `url, auth_type, auth_value_ref, schema_template, custom_schema, delivery_mode, batch, retries, timeout_ms`
+const strictAcceptedKeys = `url, auth_type, auth_value_ref, schema_template, custom_schema, delivery_mode, batch, retries, timeout_ms, require_response_token`
 
 // newStrictWebhookRouter wires the three surfaces these tests need: register,
 // read-back, and update. Webhook configs are only validated where the source

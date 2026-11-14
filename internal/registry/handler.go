@@ -75,7 +75,8 @@ type registerRequest struct {
 	// declare is a 400 UNKNOWN_NAMESPACE, and a realm with AuthToken posture
 	// additionally requires X-Crier-Namespace-Token — a typo is never quietly
 	// mapped back to the default realm.
-	Namespace string `json:"namespace,omitempty"`
+	Namespace      string `json:"namespace,omitempty"`
+	ArchivedReason string `json:"archived_reason,omitempty"`
 }
 
 // agentsResponse is the JSON body for GET /agents.
@@ -763,16 +764,17 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 	}
 
 	agent := &Agent{
-		ID:           req.ID,
-		PublicKey:    HexKey(rawKey),
-		Capabilities: req.Capabilities,
-		Webhook:      req.Webhook,
-		Hermes:       req.Hermes,
-		Boardctl:     req.Boardctl,
-		Guard:        req.Guard,
-		A2A:          req.A2A,
-		Consumer:     req.Consumer,
-		Namespace:    namespaceName,
+		ID:             req.ID,
+		PublicKey:      HexKey(rawKey),
+		Capabilities:   req.Capabilities,
+		Webhook:        req.Webhook,
+		Hermes:         req.Hermes,
+		Boardctl:       req.Boardctl,
+		Guard:          req.Guard,
+		A2A:            req.A2A,
+		Consumer:       req.Consumer,
+		Namespace:      namespaceName,
+		ArchivedReason: req.ArchivedReason,
 	}
 	if agent.Capabilities == nil {
 		agent.Capabilities = []string{}
@@ -1069,6 +1071,22 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			agent.Consumer = &cc
+		}
+	}
+	if member, present := topLevelMemberRaw(body, "archived_reason"); present {
+		var reason *string
+		if string(bytes.TrimSpace(member)) != "null" {
+			var value string
+			if err := json.Unmarshal(member, &value); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "archived_reason must be a string or null"})
+				return
+			}
+			reason = &value
+		}
+		if reason == nil {
+			agent.ArchivedReason = ""
+		} else {
+			agent.ArchivedReason = strings.TrimSpace(*reason)
 		}
 	}
 

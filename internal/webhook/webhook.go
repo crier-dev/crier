@@ -66,6 +66,10 @@ type Config struct {
 	Batch          *BatchConfig  `json:"batch,omitempty"`
 	Retries        int           `json:"retries,omitempty"`
 	TimeoutMs      int           `json:"timeout_ms,omitempty"`
+	// RequireResponseToken opts a blocking endpoint into per-run proof: the
+	// endpoint must echo X-Crier-Response-Token before Crier reports success.
+	// False preserves compatibility with existing webhook consumers.
+	RequireResponseToken bool `json:"require_response_token,omitempty"`
 }
 
 // CustomSchema is a bring-your-own endpoint schema (CR-FEAT-003). It wins
@@ -141,7 +145,10 @@ type EnvelopeMeta struct {
 	// unknown. Additive to Sender: nothing that carried the sender changed
 	// meaning (DF-CRIER-175, spec §3).
 	Target string `json:"target,omitempty"`
-	Kind   string `json:"kind,omitempty"`
+	// ResponseToken is an in-process correlation value for a blocking run. It
+	// is sent as X-Crier-Response-Token and is never serialized in the body.
+	ResponseToken string `json:"-"`
+	Kind          string `json:"kind,omitempty"`
 	// Guard carries the LLM message-guard verdict for this message
 	// (CR-FEAT-010, spec §2.2/§9.3): present on every guarded delivery
 	// (allow/sanitize — blocked messages never POST), absent when the
@@ -178,10 +185,11 @@ func NewClient(timeout time.Duration, secret []byte) *Client {
 
 // Result describes one delivery attempt outcome.
 type Result struct {
-	StatusCode int
-	Retryable  bool
-	Body       []byte // response body (blocking-mode reply source)
-	Err        error
+	StatusCode    int
+	Retryable     bool
+	Body          []byte // response body (blocking-mode reply source)
+	Err           error
+	ResponseToken string
 }
 
 // Post sends one envelope to the endpoint through its schema template.
@@ -206,7 +214,7 @@ func (c *Client) PostContext(ctx context.Context, cfg *Config, env *Envelope, re
 	if err != nil {
 		return Result{Err: fmt.Errorf("build body: %w", err)}
 	}
-	return c.postBody(ctx, cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.Target, env.Crier.SessionID, retry, env.Crier.Guard)
+	return c.postBody(ctx, cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.Target, env.Crier.SessionID, env.Crier.ResponseToken, retry, env.Crier.Guard)
 }
 
 // batchEnvelopeBody is the spec §4 batch payload: {"messages": [envelope, …]}.
@@ -242,7 +250,7 @@ func (c *Client) PostBatchContext(ctx context.Context, cfg *Config, envs []*Enve
 		session = envs[0].Crier.SessionID
 	}
 	target = batchTarget(envs)
-	return c.postBody(ctx, cfg, body, "batch", sender, target, session, retry, batchGuardMeta(envs))
+	return c.postBody(ctx, cfg, body, "batch", sender, target, session, "", retry, batchGuardMeta(envs))
 }
 
 // batchTarget is the target agent id of a coalesced batch POST (spec §3): the
@@ -339,7 +347,7 @@ func batchGuardMeta(envs []*Envelope) *guard.Meta {
 // only when its value is known — an empty value is never sent, because a
 // blank X-Crier-Agent reads downstream as a real-but-empty identity rather
 // than as "unknown".
-func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, sender, target, session string, retry int, gm *guard.Meta) Result {
+func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, sender, target, session, responseToken string, retry int, gm *guard.Meta) Result {
 	ctx, span := tracing.Start(ctx, "webhook.deliver")
 	outcome := "error"
 	defer func() {
@@ -364,6 +372,9 @@ func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, 
 	req.Header.Set("X-Crier-Retry", fmt.Sprintf("%d", retry))
 	if session != "" {
 		req.Header.Set("X-Crier-Session", session)
+	}
+	if responseToken != "" {
+		req.Header.Set("X-Crier-Response-Token", responseToken)
 	}
 	// LLM message-guard outcome headers (spec §7.2, CR-FEAT-010): absent
 	// when the envelope carries no guard metadata.
@@ -417,10 +428,11 @@ func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, 
 		return Result{StatusCode: resp.StatusCode, Err: fmt.Errorf("read webhook reply: %w", err), Retryable: true}
 	}
 
+	responseToken = resp.Header.Get("X-Crier-Response-Token")
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		outcome = "delivered"
-		return Result{StatusCode: resp.StatusCode, Body: respBody}
+		return Result{StatusCode: resp.StatusCode, Body: respBody, ResponseToken: responseToken}
 	case resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests:
 		outcome = "retryable"
 		return Result{StatusCode: resp.StatusCode, Retryable: true}

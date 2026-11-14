@@ -105,6 +105,7 @@ func (s *MemoryStore) Update(agent *Agent) error {
 	// register; the HTTP handler refuses a `namespace` member on a PATCH for
 	// the same reason.
 	agent.Namespace = existing.Namespace
+	agent.ArchivedReason = existing.ArchivedReason
 	s.agents[agent.ID] = agent
 	return nil
 }

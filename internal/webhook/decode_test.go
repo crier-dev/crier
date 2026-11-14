@@ -8,7 +8,7 @@ import (
 // acceptedWebhookKeys is the member list a rejection prints, in the order
 // Config declares them. Pinned literally (not derived) so a rejection message
 // that loses or reorders a key fails here.
-const acceptedWebhookKeys = `url, auth_type, auth_value_ref, schema_template, custom_schema, delivery_mode, batch, retries, timeout_ms`
+const acceptedWebhookKeys = `url, auth_type, auth_value_ref, schema_template, custom_schema, delivery_mode, batch, retries, timeout_ms, require_response_token`
 
 // TestDecodeConfig_StrictMembership is the contract of the strict webhook
 // decode (DF-CRIER-150): a member the config does not declare is refused with
