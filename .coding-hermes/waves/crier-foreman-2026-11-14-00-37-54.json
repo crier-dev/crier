@@ -1,0 +1,20 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-00-37-54",
+  "project": "crier",
+  "block": "REV-CRIER-2",
+  "base_sha": "8111938ec648c62676dbbfbf90ff9f4ea16edcec",
+  "mode": "verification-only-reconciliation",
+  "wave_budget": 12,
+  "slots": 10,
+  "selected_rows": ["REV-CRIER-2"],
+  "workers": [],
+  "wave_size": 0,
+  "selection_reason": "block_drive ranked REV-CRIER-2 first with one ready row. The implementation is already published on origin/main; dispatching duplicate implementation work would be false progress. The remaining obligation is current-tree acceptance plus commit-bound GitReins evidence.",
+  "verification": {
+    "acceptance": "make mcp-capabilities-check; go test ./internal/mcp/ ./cmd/crier-mcp/ -count=1; go build ./...; go vet ./...; verify the generated 23-tool capability report, the 11/15/22/23 env template tiers, the reproducible remote-mode README invocation, and prereqs_test.go's 23/11 default posture.",
+    "implementation_commit": "bf371713ad3cea032bdf755db07963d7d3ef8941",
+    "published_ref": "origin/main",
+    "verdict_requirement": "A persisted GitReins verdict must bind REV-CRIER-2 to the current published tree before the board row can close; otherwise leave it in progress.",
+    "publication_requirement": "Commit and push the manifest and board audit separately from implementation provenance; exact-head CI remains independent evidence."
+  }
+}
