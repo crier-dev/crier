@@ -1,0 +1,14 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-15-55-08",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "wave_budget": 12,
+  "slots": 12,
+  "mode": "owner-gated-verification-only",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "worktree": "/home/kara/worktrees/crier-BOARDCTL-HOOK-001",
+  "branch": "wt/BOARDCTL-HOOK-001",
+  "base_sha": "db16efb8bb583997d57fb47d1482eec5110b6b51",
+  "decision": "No implementation worker: crier row is already implemented in sibling repository coding-hermes/boardctl at 2667a63; remaining acceptance requires external crier ingress configuration and approved restart."
+}

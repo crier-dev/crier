@@ -1,0 +1,33 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-15-55-08",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "selected_row": "BOARDCTL-HOOK-001",
+  "mode": "owner-gated-verification-only",
+  "decision": "No implementation worker dispatched",
+  "reason": "The implementation is owned by sibling repository coding-hermes/boardctl at 2667a63. Crier's remaining acceptance is external deployment/configuration and an approved restart.",
+  "live_probe": {
+    "source": "committed evidence from crier-foreman-2026-11-14-15-25-31",
+    "service": "http://127.0.0.1:8767",
+    "version": "0.5.0-28-g83d28c13",
+    "commit": "83d28c13",
+    "modified": false,
+    "ingress_sources_get": {
+      "http": 401,
+      "body": "{\"error\":\"missing Authorization header\"}"
+    },
+    "env_keys_present": []
+  },
+  "owner_action": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved service restart, then rerun the scratch-repo boardctl delivery loop.",
+  "repository": {
+    "origin": "git@github.com:crier-dev/crier.git",
+    "origin_main": "db16efb8bb583997d57fb47d1482eec5110b6b51",
+    "continuation_worktree": "/home/kara/worktrees/crier-BOARDCTL-HOOK-001",
+    "continuation_base": "db16efb8bb583997d57fb47d1482eec5110b6b51"
+  },
+  "local_gate": "NOT RUN: verification-only external deployment gate; no crier source changed.",
+  "remote_ci": "observed-only: crier-dev/crier top three had one completed success and two pending/in-progress entries; no completed failure.",
+  "verdict": "none:owner-external-gate",
+  "commit": "none:verification-only",
+  "memory_key": "/project/crier/status/2026-11-14-15-55-08"
+}
