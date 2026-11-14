@@ -1,0 +1,22 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-17-29-39",
+  "row": "BOARDCTL-HOOK-001",
+  "tested_sha": "9c4df0794b1270fcc735ab0aca18a2f93f903459",
+  "implementation": "sibling repository coding-hermes/boardctl@2667a63; no crier source delta",
+  "service": {
+    "url": "http://127.0.0.1:8767",
+    "version_status": 200,
+    "version": "0.5.0-28-g83d28c13",
+    "loaded_commit": "83d28c13",
+    "modified": false,
+    "health_status": 200,
+    "ingress_sources_status": 401,
+    "ingress_sources_error": "missing Authorization header",
+    "cr_ingest_env_keys": []
+  },
+  "owner_action": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repo boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "local_gate": "NOT RUN: external deployment gate; no crier source changed",
+  "remote_ci": "pending/in_progress at observed latest main; no completed failure in mandatory top three",
+  "verdict": "none:owner-external-gate",
+  "witness": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-14-17-29-39-orient/live-probe.txt"
+}
