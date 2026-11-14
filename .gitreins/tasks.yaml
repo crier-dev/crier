@@ -4166,3 +4166,18 @@ tasks:
   status: complete
   created_at: '2026-11-14T03:29:37.741320+00:00'
   completed_at: '2026-11-14T04:02:19.093147+00:00'
+- id: RELEASE-031
+  title: dependency vulnerability remediation
+  criteria:
+  - 'FAILIF: govulncheck reports reachable vulnerabilities. PROOF: govulncheck ./...
+    exits 0; go build ./..., go vet ./..., and go test ./... -count=1 pass.'
+  status: in_progress
+  created_at: '2026-11-14T14:04:11.687926+00:00'
+- id: RELEASE-025
+  title: federation production boot timing
+  criteria:
+  - 'FAILIF: TestFederation391ProductionBoots depends on a bare wall-clock sleep.
+    PROOF: go test ./cmd/server -run TestFederation391ProductionBoots -count=20 passes
+    and the source uses a synchronization condition.'
+  status: in_progress
+  created_at: '2026-11-14T14:05:34.923641+00:00'
