@@ -1,0 +1,21 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-22-23-50",
+  "row": "BOARDCTL-HOOK-001",
+  "tested_sha": "b60e85524b0c55a0822b517b518af041cb693eee",
+  "implementation": "sibling repository coding-hermes/boardctl@2667a63; no crier source delta",
+  "service": {
+    "url": "http://127.0.0.1:8767",
+    "version": "0.5.0-28-g83d28c13",
+    "commit": "83d28c13",
+    "modified": false,
+    "health": "200 {\"status\":\"ok\"}",
+    "ingress_sources": "401 {\"error\":\"missing Authorization header\"}",
+    "ingest_env": "no CR_INGEST_* keys in /home/kara/.hermes/secrets/crier-fleet.env"
+  },
+  "owner_action": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repo boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "local_gate": "PASS: boardctl validate --skip-bad-lines (RESULT: OK, 450 pre-existing warnings); no crier source changed.",
+  "remote_ci": "top three: two completed success and one pending; no completed failure",
+  "verdict": "none:owner-external-gate",
+  "memory": "none:deferred-wrapper-rejected-required-payload",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-14-22-23-50.json#BOARDCTL-HOOK-001 test=none:external-owner-gate doc=none evidence=.coding-hermes/evidence/crier-foreman-2026-11-14-22-23-50-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=none:deferred-wrapper-rejected-required-payload"
+}

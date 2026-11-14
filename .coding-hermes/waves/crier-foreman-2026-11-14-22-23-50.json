@@ -1,0 +1,27 @@
+{
+  "tick_id": "crier-foreman-2026-11-14-22-23-50",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "mode": "owner-gated-verification-only",
+  "source_sha": "b60e85524b0c55a0822b517b518af041cb693eee",
+  "wave_budget": 6,
+  "slots": 6,
+  "wave_size": 0,
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is already published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface for this row. The remaining acceptance is external supervised-service configuration, an approved restart, and the live 202-to-inbox-to-doctor-depth-0 dogfood leg. No implementation wave is valid.",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repo boardctl delivery loop.",
+  "live_probe": {
+    "version": "http 200; version=0.5.0-28-g83d28c13; commit=83d28c13; modified=false",
+    "health": "http 200",
+    "ingress_sources": "http 401; missing Authorization header",
+    "env": "no CR_INGEST_* keys in /home/kara/.hermes/secrets/crier-fleet.env"
+  },
+  "local_gate": "PASS: boardctl validate --skip-bad-lines (RESULT: OK, 450 pre-existing warnings); no crier source changed; product source gates not rerun for external verification-only work.",
+  "remote_ci": "top three observed: two completed success and one pending; no completed failure",
+  "remote_parity": "origin/main=HEAD=b60e85524b0c55a0822b517b518af041cb693eee",
+  "verdict": "none:owner-external-gate",
+  "memory": "none:deferred-wrapper-rejected-required-payload",
+  "evidence": ".coding-hermes/evidence/crier-foreman-2026-11-14-22-23-50-BOARDCTL-HOOK-001.json",
+  "finished": true
+}
