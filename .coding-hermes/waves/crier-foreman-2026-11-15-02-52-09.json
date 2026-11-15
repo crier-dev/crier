@@ -1,0 +1,18 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-02-52-09",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "base_sha": "5ad619e4f25e88d34d0100d6b9f76649c02690e8",
+  "wave_budget": 12,
+  "nproc": 16,
+  "loadavg_1m": 1.10,
+  "slots": 6,
+  "wave_size": 0,
+  "mode": "owner-gated-verification-only",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "landed": [],
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface for this row. The remaining acceptance is an external service configuration/restart and live end-to-end delivery leg, so no implementation worker is valid.",
+  "off_by_one": "none:verification-only no debugging"
+}
