@@ -1,0 +1,29 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-07-12-05",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "row": "BOARDCTL-HOOK-001",
+  "mode": "owner-gated-verification-only",
+  "source_sha": "35ca5bf8f87254b1b24fd8750369ff719249c651",
+  "implementation": {"repository": "coding-hermes/boardctl", "commit": "2667a63", "status": "published in sibling repository; no crier implementation diff"},
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Crier cannot own the named implementation surface, so no crier worker was dispatched. The remaining acceptance is an external supervised-service configuration/restart and live 202-to-inbox-to-doctor-depth-0 dogfood.",
+  "wave": {"budget": 12, "nproc": 16, "loadavg_1m": 3.28, "slots": 12, "size": 0, "manifest": ".coding-hermes/waves/crier-foreman-2026-11-15-07-12-05.json"},
+  "live_probe": {
+    "version": "HTTP 200; version=0.5.0-28-g83d28c13; commit=83d28c13; modified=false",
+    "health": "HTTP 200; status=ok",
+    "ingress_sources": "HTTP 401; missing Authorization header",
+    "supervised_env": "CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE absent from /home/kara/.hermes/secrets/crier-fleet.env"
+  },
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "local_gate": "PASS: canonical checkout clean; prior published crier gates pass; boardctl validate RESULT OK with 449 pre-existing warnings.",
+  "remote_ci": "observed-only: crier-dev/crier top three are completed success, pending, completed success; no completed failure.",
+  "verdict": "none:owner-external-gate",
+  "commit": "pending:containing-commit-cannot-self-name",
+  "memory": "none:deferred-wrapper-rejected-required-payload",
+  "off_by_one": "none:verification-only no debugging",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-07-12-05.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-07-12-05-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=pending:containing-commit-cannot-self-name memory=none:deferred-wrapper-rejected-required-payload",
+  "sha_roles": {"source_sha": "35ca5bf8f87254b1b24fd8750369ff719249c651", "verified_code_commit": "2667a63 sibling repository coding-hermes/boardctl", "evidence_commit": "pending:containing-commit-cannot-self-name", "reconciliation_commit": "pending:containing-commit-cannot-self-name"},
+  "STATUS": "blocked",
+  "TIER": "T3",
+  "EVIDENCE": "Fresh live service probes, exact origin parity, full local Go gates inherited from the last published crier verification, and a committed verification-only manifest; the unmet acceptance belongs to the service owner."
+}
