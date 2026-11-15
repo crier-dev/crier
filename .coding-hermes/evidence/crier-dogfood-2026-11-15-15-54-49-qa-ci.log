@@ -1,0 +1,112 @@
+time="2026-11-15T10:22:33-08:00" level=info msg="Using docker host 'unix:///run/bunker/cb6c5ba1/docker.sock', and daemon socket 'unix:///run/bunker/cb6c5ba1/docker.sock'"
+[CI/Whole-board validation (fail closed)] ⭐ Run Set up job
+[CI/Whole-board validation (fail closed)] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/Build & Test                        ] ⭐ Run Set up job
+[CI/Build & Test                        ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/Build & Test                        ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/Whole-board validation (fail closed)]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/Build & Test                        ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Whole-board validation (fail closed)]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Build & Test                        ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Whole-board validation (fail closed)]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/Build & Test                        ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Set up job
+[CI/Whole-board validation (fail closed)]   ✅  Success - Set up job
+[CI/Whole-board validation (fail closed)]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v6
+[CI/Build & Test                        ]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v6
+[CI/Whole-board validation (fail closed)]   ☁  git clone 'https://github.com/actions/checkout' # ref=v5
+[CI/Build & Test                        ] 🧪  Matrix: map[go-version:1.26.10]
+[CI/Build & Test                        ] ⭐ Run Main Checkout
+[CI/Build & Test                        ]   🐳  docker cp src=/home/bunker-cb6c5ba1/qa-crier/. dst=/home/bunker-cb6c5ba1/qa-crier
+[CI/Build & Test                        ]   ✅  Success - Main Checkout [1.215676215s]
+[CI/Build & Test                        ] ⭐ Run Main Set up Go 1.26.10
+[CI/Build & Test                        ]   🐳  docker cp src=/home/bunker-cb6c5ba1/.cache/act/actions-setup-go@v6/ dst=/var/run/act/actions/actions-setup-go@v6/
+[CI/Build & Test                        ]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.2/x64/bin/node /var/run/act/actions/actions-setup-go@v6/dist/setup/index.js] user= workdir=
+[CI/Build & Test                        ]   ❓ add-matcher /run/act/actions/actions-setup-go@v6/matchers.json
+[CI/Build & Test                        ]   ❓  ::group::go env
+[CI/Build & Test                        ]   ❓  ::endgroup::
+[CI/Build & Test                        ]   ✅  Success - Main Set up Go 1.26.10 [23.840561038s]
+[CI/Build & Test                        ]   ⚙  ::set-env:: GOTOOLCHAIN=local
+[CI/Build & Test                        ]   ⚙  ::set-output:: cache-hit=false
+[CI/Build & Test                        ]   ⚙  ::set-output:: go-version=1.26.10
+[CI/Build & Test                        ]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.26.10/x64/bin
+[CI/Build & Test                        ]   ⚙  ::add-path:: /root/go/bin
+[CI/Build & Test                        ] ⭐ Run Main Toolchain floor (go.mod vs running go)
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Toolchain floor (go.mod vs running go) [838.570535ms]
+[CI/Build & Test                        ] ⭐ Run Main Agent-ecosystem registration contract
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Checkout
+[CI/Whole-board validation (fail closed)]   🐳  docker cp src=/home/bunker-cb6c5ba1/qa-crier/. dst=/home/bunker-cb6c5ba1/qa-crier
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Checkout [2.175306668s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Set up Go
+[CI/Whole-board validation (fail closed)]   🐳  docker cp src=/home/bunker-cb6c5ba1/.cache/act/actions-setup-go@v6/ dst=/var/run/act/actions/actions-setup-go@v6/
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.2/x64/bin/node /var/run/act/actions/actions-setup-go@v6/dist/setup/index.js] user= workdir=
+[CI/Whole-board validation (fail closed)]   ❓ add-matcher /run/act/actions/actions-setup-go@v6/matchers.json
+[CI/Whole-board validation (fail closed)]   ❓  ::group::go env
+[CI/Whole-board validation (fail closed)]   ❓  ::endgroup::
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Set up Go [1.129846659s]
+[CI/Whole-board validation (fail closed)]   ⚙  ::set-env:: GOTOOLCHAIN=local
+[CI/Whole-board validation (fail closed)]   ⚙  ::set-output:: cache-hit=false
+[CI/Whole-board validation (fail closed)]   ⚙  ::set-output:: go-version=1.26.10
+[CI/Whole-board validation (fail closed)]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.26.10/x64/bin
+[CI/Whole-board validation (fail closed)]   ⚙  ::add-path:: /root/go/bin
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Checkout pinned boardctl anonymously (no runner token — act)
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Checkout pinned boardctl anonymously (no runner token — act) [3.151170465s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Build required boardctl
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/4] user= workdir=.ci-boardctl
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Build required boardctl [25.777682449s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Validate the whole checked-out board
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/5] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Agent-ecosystem registration contract [38.991366276s]
+[CI/Build & Test                        ] ⭐ Run Main Provision Agent-ecosystem Python battery dependencies
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/4] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Provision Agent-ecosystem Python battery dependencies [6.740952489s]
+[CI/Build & Test                        ] ⭐ Run Main Agent-ecosystem offline execution binding
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/5] user= workdir=
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Validate the whole checked-out board [33.784951538s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Post Set up Go
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.2/x64/bin/node /var/run/act/actions/actions-setup-go@v6/dist/cache-save/index.js] user= workdir=
+[CI/Whole-board validation (fail closed)]   ✅  Success - Post Set up Go [877.492301ms]
+[CI/Whole-board validation (fail closed)] ⭐ Run Complete job
+[CI/Whole-board validation (fail closed)] Cleaning up container for job Whole-board validation (fail closed)
+[CI/Whole-board validation (fail closed)]   ✅  Success - Complete job
+[CI/Whole-board validation (fail closed)] 🏁  Job succeeded
+[CI/Build & Test                        ]   ✅  Success - Main Agent-ecosystem offline execution binding [49.768780102s]
+[CI/Build & Test                        ] ⭐ Run Main Install and verify repository hooks
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/6] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Install and verify repository hooks [2.049149166s]
+[CI/Build & Test                        ] ⭐ Run Main Hook doctor rejection and NEUTER selftest
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/7] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Hook doctor rejection and NEUTER selftest [39.196992259s]
+[CI/Build & Test                        ] ⭐ Run Main Build
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/8] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Build [41.465973551s]
+[CI/Build & Test                        ] ⭐ Run Main MCP capability report drift check
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/9] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main MCP capability report drift check [1.22363675s]
+[CI/Build & Test                        ] ⭐ Run Main Vet
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/10] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Vet [14.535554624s]
+[CI/Build & Test                        ] ⭐ Run Main Test
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/11] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Test [56.459044337s]
+[CI/Build & Test                        ] ⭐ Run Main Demo-harness port-guard selftest
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/12] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Demo-harness port-guard selftest [125.241043ms]
+[CI/Build & Test                        ] ⭐ Run Main Scratch-port rotation selftest
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/13] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Scratch-port rotation selftest [1.271266639s]
+[CI/Build & Test                        ] ⭐ Run Main Harness consumer census contract
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/14] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Main Harness consumer census contract [8.948059031s]
+[CI/Build & Test                        ] ⭐ Run Main Client round-trip (crier keygen + Python/TS clients, no openssl)
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/15] user= workdir=
+[CI/Build & Test                        ]   ❌  Failure - Main Client round-trip (crier keygen + Python/TS clients, no openssl) [186.100729ms]
+[CI/Build & Test                        ] exitcode '2': failure
+[CI/Build & Test                        ] ⭐ Run Complete job
+[CI/Build & Test                        ]   ✅  Success - Complete job
+[CI/Build & Test                        ] 🏁  Job failed
+Error: Job 'Build & Test' failed
