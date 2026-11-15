@@ -16,8 +16,8 @@
   "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop.",
   "live_probe": "http://127.0.0.1:8767/version=200 version=0.5.0-28-g83d28c13 commit=83d28c13 modified=false; /health=200; /ingress/sources=401 missing Authorization header; no CR_INGEST_* keys found in /home/kara/.hermes/secrets/crier-fleet.env",
   "local_gate": "PASS: read-only premise verification; no crier source changed",
-  "remote_ci": "pending/in_progress at published SHA 66ae53fd115a2e5e61f5423592fd6b8743f2275f; no terminal failure observed at close",
-  "remote_parity": "origin/main=HEAD=66ae53fd115a2e5e61f5423592fd6b8743f2275f before this final binding reconciliation; containing commit intentionally not self-referenced",
+  "remote_ci": "pending/in_progress at published SHA 1f7c8a029467781471280429924ca25f47ed4564; no terminal failure observed at close",
+  "remote_parity": "origin/main=HEAD=1f7c8a029467781471280429924ca25f47ed4564 before this final binding reconciliation; containing commit intentionally not self-referenced",
   "verdict": "none:owner-external-gate",
   "commit": "none:verification-only",
   "memory": "f5133573-51a4-4a0a-b00b-b64ada985b1c",
@@ -28,6 +28,6 @@
     "source_sha": "830d21c8b030e6f519345a5350b2d52b98dca107",
     "evidence_commit": "594d0569023f060e458aec3b11470f13e945c0f2",
     "first_published_bookkeeping_sha": "66ae53fd115a2e5e61f5423592fd6b8743f2275f",
-    "reconciliation_commit": "66ae53fd115a2e5e61f5423592fd6b8743f2275f"
+    "reconciliation_commit": "1f7c8a029467781471280429924ca25f47ed4564"
   }
 }
