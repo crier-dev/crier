@@ -1,0 +1,50 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-05-22-36",
+  "project": "crier",
+  "block": "HARDEN-LOOP-001",
+  "mode": "verification-only-reconciliation",
+  "source_sha": "9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 0,
+  "selected_rows": ["UI-CRIER-001", "INBOX-CRIER-001", "HARNESS-CRIER-001"],
+  "rows": [
+    {
+      "id": "UI-CRIER-001",
+      "status": "pending",
+      "implementation": "180e02bed3a39201663fd8e0e59af2e55f4eeb53",
+      "reason": "implementation and repository verification are published; browser screenshots, live authenticated deployment, and exact external witness remain open"
+    },
+    {
+      "id": "INBOX-CRIER-001",
+      "status": "pending",
+      "implementation": "d87ebdcc",
+      "reason": "implementation is published; live TTL/expiry/stale-consumer dogfood requires approved supervised crier restart"
+    },
+    {
+      "id": "HARNESS-CRIER-001",
+      "status": "pending",
+      "existing_worktree": "/home/kara/worktrees/crier-harness-20261114-052252",
+      "existing_branch": "wt/harness-20261114-052252",
+      "reason": "existing owner residue: dirty .gitreins/tasks.yaml; no second worker may be dispatched until owner disposition"
+    }
+  ],
+  "workers": [],
+  "selection": "block_drive resumed HARDEN-LOOP-001 from the prior foreman event. The selected rows are independent by depends_on, but reconciliation proves none is safely dispatchable: UI and INBOX are implementation-landed with external acceptance remaining; HARNESS has an existing in-progress worktree with dirty GitReins coordination state.",
+  "owner_gates": [
+    "UI-CRIER-001: browser screenshots, live authenticated deployment witness, and exact refusal or message-id evidence",
+    "INBOX-CRIER-001: approved supervised crier restart and deployed TTL/expiry/stale-consumer dogfood",
+    "HARNESS-CRIER-001: disposition and completion or recovery of the existing worker/worktree owner"
+  ],
+  "local_gate": "PASS: bash scripts/check-board.sh; go build ./...; go vet ./...; go test ./... -count=1",
+  "remote_ci": "observed-only: mandatory top three crier-dev/crier runs show two completed successes and one pending; no completed failure",
+  "remote_parity": "origin/main=HEAD=9207e104723fb968d9c3c2b7d0a70421bc2ff0e0 before this bookkeeping publication",
+  "verdict": "none:verification-only-reconciliation",
+  "commit": "pending:containing-commit-cannot-self-name",
+  "memory": "none:deferred-wrapper-rejected-required-payload",
+  "off_by_one": "none:verification-only; no debugging performed",
+  "trace": "ch:trace block=HARDEN-LOOP-001 rows=UI-CRIER-001,INBOX-CRIER-001,HARNESS-CRIER-001 spec=none:reconciliation test=none:owner-gated-external-acceptance evidence=.coding-hermes/waves/crier-foreman-2026-11-15-05-22-36.json witness=live:http://127.0.0.1:8767/version verdict=none:verification-only-reconciliation commit=pending:containing-commit-cannot-self-name memory=none:deferred-wrapper-rejected-required-payload",
+  "STATUS": "blocked",
+  "TIER": "T3",
+  "EVIDENCE": "Fresh block census, exact existing-worktree ownership evidence, live service probes, full local Go gates, board validation, and exact origin parity; no worker dispatched because all selected rows are owner-gated or ownership-barred."
+}
