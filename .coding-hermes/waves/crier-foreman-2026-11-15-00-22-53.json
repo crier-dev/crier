@@ -16,8 +16,8 @@
   "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop.",
   "live_probe": "http://127.0.0.1:8767/version=200 version=0.5.0-28-g83d28c13 commit=83d28c13 modified=false; /health=200; /ingress/sources=401 missing Authorization header; no CR_INGEST_* keys found in /home/kara/.hermes/secrets/crier-fleet.env",
   "local_gate": "PASS: read-only premise verification; no crier source changed",
-  "remote_ci": "green: mandatory top three for crier-dev/crier show two completed success and one pending; no completed failure",
-  "remote_parity": "published closeout will be verified after push; evidence commit=594d0569023f060e458aec3b11470f13e945c0f2",
+  "remote_ci": "pending/in_progress at final published SHA 66ae53fd115a2e5e61f5423592fd6b8743f2275f; no terminal failure observed at close",
+  "remote_parity": "origin/main=HEAD=66ae53fd115a2e5e61f5423592fd6b8743f2275f",
   "verdict": "none:owner-external-gate",
   "commit": "none:verification-only",
   "memory": "f5133573-51a4-4a0a-b00b-b64ada985b1c",
@@ -26,6 +26,7 @@
   "memory_key": "/project/crier/foreman/ticks/crier-foreman-2026-11-15-00-22-53",
   "sha_roles": {
     "source_sha": "830d21c8b030e6f519345a5350b2d52b98dca107",
-    "evidence_commit": "594d0569023f060e458aec3b11470f13e945c0f2"
+    "evidence_commit": "594d0569023f060e458aec3b11470f13e945c0f2",
+    "final_published_closeout_sha": "66ae53fd115a2e5e61f5423592fd6b8743f2275f"
   }
 }
