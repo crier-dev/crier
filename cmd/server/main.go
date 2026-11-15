@@ -149,6 +149,7 @@ func registerRegistryRoutes(r *mux.Router, h *registry.Handler) {
 	r.HandleFunc("/agents/{id}/inbox/transfer", h.HandleTransfer).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/dead-letters", h.HandleDeadLetters).Methods("GET")
 	r.HandleFunc("/namespaces", h.HandleListNamespaces).Methods("GET")
+	r.HandleFunc("/harness/consumer-census", h.HandleConsumerCensus).Methods("GET")
 }
 
 // run executes the server. It parses CLI flags first so --help/--version

@@ -159,6 +159,11 @@ jobs:
       - name: Scratch-port rotation selftest
         run: make scratch-port-rotation-selftest
 
+      # HARNESS-CRIER-001: the repository-side consumer census and signed webhook
+      # contract are exercised before the round-trip and bunker legs.
+      - name: Harness consumer census contract
+        run: go test -count=1 ./internal/registry ./internal/ci
+
       # CR-FEAT-027: the signing-ceremony acceptance drive. `crier keygen` plus
       # the first-party Python and TypeScript clients complete a full signed
       # round-trip (register → deliver → signed retrieve → signed ack → signed

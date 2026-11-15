@@ -11,6 +11,8 @@
 #   signed ack (lease_id + message_ids) -> empty retrieve
 #   relay: publish 202 (X-Agent-ID) -> topics listing -> WS receive ->
 #   wildcard WS receive (bat.* matches bat.<ts>)
+#   harness consumer census: every registered harness consumer is wired or
+#   explicitly archived; unclassified rows fail the leg
 #   ttl: deliver expires_at=1s -> retrieve after 2s -> zero messages
 #   foreign-agent inbox isolation: A and B register with their OWN keypairs ->
 #   deliver into A (no signature) -> A signed retrieve 200 with the payload
@@ -202,6 +204,16 @@ TOPIC="bat.${AGENT}"
 
 say "posture"
 req GET /health;                              check "health 200" 200
+req GET /harness/consumer-census
+if [ "$CODE" = 200 ] && python3 -c 'import json,sys
+rows=json.loads(sys.argv[1])
+assert isinstance(rows,list) and all(row.get("state") in {"wired","archived"} and row.get("agent_id") and row.get("reason") for row in rows)' "$BODY"; then
+  PASS=$((PASS+1)); echo "PASS  harness consumer census: wired/archived only"
+  ev "harness consumer census" "$CODE" 200 true
+else
+  FAIL=$((FAIL+1)); echo "FAIL  harness consumer census: unclassified or malformed rows"
+  ev "harness consumer census" "$CODE" 200 false
+fi
 req GET /version;                             check "version 200 json" 200 '"commit"'
 req GET /status;                              check "status: memory backend" 200 '"registry_backend":"memory"'
 check "status: signatures required" "$CODE" '"require_agent_signature":true'

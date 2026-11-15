@@ -5,7 +5,13 @@
     "webhook": {
       "url": "http://sink:9002/hook",
       "delivery_mode": "blocking",
-      "schema_template": "generic"
+      "schema_template": "generic",
+      "require_response_token": true
+    },
+    "consumer": {
+      "reader": "harness",
+      "read_cadence_secs": 30,
+      "ttl_seconds": 86400
     },
     "guard": {
       "policies": [
@@ -21,7 +27,13 @@
     "webhook": {
       "url": "http://agent:9100/hook",
       "delivery_mode": "blocking",
-      "schema_template": "generic"
+      "schema_template": "generic",
+      "require_response_token": true
+    },
+    "consumer": {
+      "reader": "harness",
+      "read_cadence_secs": 30,
+      "ttl_seconds": 86400
     },
     "guard": {
       "policies": [
@@ -38,6 +50,11 @@
       "url": "http://hermes:9000/hook",
       "delivery_mode": "async",
       "schema_template": "generic"
+    },
+    "consumer": {
+      "reader": "harness",
+      "read_cadence_secs": 60,
+      "ttl_seconds": 86400
     },
     "guard": {
       "policies": [
