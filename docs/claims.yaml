@@ -589,9 +589,10 @@ claims:
     # now mount through the ONE registerProtocols loop in
     # cmd/server/protocols.go (which also mounts the 9 dagger routes that
     # always lived in daggerctl.go, and the 2 A2A paths when CR_A2A_ENABLED).
-    # The probe measures main.go, so the count is 53.
-    quote: "53 core router paths"
-    expect: 53
+    # HARNESS-CRIER-001 added GET /harness/consumer-census, so the measured
+    # main.go registration count is now 54.
+    quote: "54 core router paths"
+    expect: 54
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count
