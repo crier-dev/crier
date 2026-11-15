@@ -10,7 +10,9 @@
   "slots": 4,
   "wave_size": 0,
   "mode": "owner-gated-verification-only",
-  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "selected_rows": [
+    "BOARDCTL-HOOK-001"
+  ],
   "workers": [],
   "landed": [],
   "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface for this row. No implementation worker was dispatched.",
@@ -21,5 +23,7 @@
     "evidence_commit": "pending:containing-commit-cannot-self-name",
     "reconciliation_commit": "pending:containing-commit-cannot-self-name"
   },
-  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-07-46-15.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-07-46-15-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=pending:containing-commit-cannot-self-name memory=none:deferred-wrapper-rejected-required-payload"
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-07-46-15.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-07-46-15-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=pending:containing-commit-cannot-self-name memory=4d7659b8-10db-4998-aa0b-fd2fba0e3597",
+  "memory": "4d7659b8-10db-4998-aa0b-fd2fba0e3597",
+  "closeout_commit": "pending:containing-commit-cannot-self-name"
 }
