@@ -1,0 +1,45 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-07-46-15",
+  "row": "BOARDCTL-HOOK-001",
+  "tested_commit": "7e316752d30ff03b43c0475d18195c26c47dde33",
+  "criterion_under_test": "The remaining acceptance requires CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, an approved restart, and a scratch-repository boardctl delivery proof of 202-to-inbox-to-doctor-depth-0.",
+  "implementation": {
+    "repository": "coding-hermes/boardctl",
+    "commit": "2667a63",
+    "status": "published in sibling repository; crier has no implementation diff for this row"
+  },
+  "live_probe": {
+    "version_command": "curl -sS -w '\\nHTTP_STATUS=%{http_code}\\n' http://127.0.0.1:8767/version",
+    "version_exit": 0,
+    "version_http": 200,
+    "version_body": {"version":"0.5.0-28-g83d28c13","commit":"83d28c13","build_time":"2026-11-09T04:55:55Z","modified":false},
+    "health_command": "curl -sS -w '\\nHTTP_STATUS=%{http_code}\\n' http://127.0.0.1:8767/health",
+    "health_exit": 0,
+    "health_http": 200,
+    "health_body": {"status":"ok"},
+    "ingress_sources_command": "curl -sS -w '\\nHTTP_STATUS=%{http_code}\\n' http://127.0.0.1:8767/ingress/sources",
+    "ingress_sources_exit": 0,
+    "ingress_sources_http": 401,
+    "ingress_sources_body": {"error":"missing Authorization header"},
+    "supervised_env_command": "grep -E 'CR_INGEST_WEBHOOK_ENABLED|CR_INGEST_STORE_FILE' /home/kara/.hermes/secrets/crier-fleet.env",
+    "supervised_env_exit": 0,
+    "supervised_env_observation": "No CR_INGEST_WEBHOOK_ENABLED or CR_INGEST_STORE_FILE keys were present."
+  },
+  "local_gate": {
+    "go_build": "PASS: go build ./... exit 0",
+    "go_vet": "PASS: go vet ./... exit 0",
+    "go_test": "PASS: go test ./... -count=1 exit 0"
+  },
+  "dispatch": {
+    "wave_size": 0,
+    "workers": [],
+    "reason": "Owner-controlled supervised-service configuration/restart is the only unmet acceptance. A crier worker cannot change the sibling boardctl implementation or safely restart the shared service."
+  },
+  "next_owner_action": "Configure the two CR_INGEST_* variables in the supervised service, perform the approved restart, then rerun the boardctl scratch-repository delivery loop and capture 202-to-inbox-to-doctor-depth-0.",
+  "verdict": "none:owner-external-gate",
+  "off_by_one": "none:verification-only no debugging",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-07-46-15.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-07-46-15-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=pending:containing-commit-cannot-self-name memory=none:deferred-wrapper-rejected-required-payload",
+  "STATUS": "blocked",
+  "TIER": "T3",
+  "EVIDENCE": "Fresh live probes and full local Go gates are passing; the named acceptance remains blocked on service-owner configuration and restart."
+}

@@ -1,0 +1,25 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-07-46-15",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "base_ref": "origin/main",
+  "base_sha": "7e316752d30ff03b43c0475d18195c26c47dde33",
+  "wave_budget": 4,
+  "nproc": 16,
+  "loadavg_1m": 8.26,
+  "slots": 4,
+  "wave_size": 0,
+  "mode": "owner-gated-verification-only",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "landed": [],
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface for this row. No implementation worker was dispatched.",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "sha_roles": {
+    "source_sha": "7e316752d30ff03b43c0475d18195c26c47dde33",
+    "verified_code_commit": "2667a63 sibling repository coding-hermes/boardctl",
+    "evidence_commit": "pending:containing-commit-cannot-self-name",
+    "reconciliation_commit": "pending:containing-commit-cannot-self-name"
+  },
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-07-46-15.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-07-46-15-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=pending:containing-commit-cannot-self-name memory=none:deferred-wrapper-rejected-required-payload"
+}
