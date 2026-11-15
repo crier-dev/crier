@@ -1,0 +1,23 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-04-41-03",
+  "row": "BOARDCTL-HOOK-001",
+  "block": "BOARDCTL-HOOK-001",
+  "source_sha": "9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+  "implementation_owner": "coding-hermes/boardctl@2667a63",
+  "status": "blocked",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun scratch-repository boardctl delivery and verify 202-to-inbox-to-doctor-depth-0.",
+  "live_probe": {
+    "version": "HTTP 200 {version:0.5.0-28-g83d28c13,commit:83d28c13,modified:false}",
+    "health": "HTTP 200 {status:ok}",
+    "ingress_sources": "HTTP 401 {error:missing Authorization header}",
+    "configured_ingest_names": []
+  },
+  "local_gate": "PASS: read-only premise verification; no crier source changed",
+  "remote_ci": "observed-only: top three crier-dev/crier runs are completed success, pending, completed success; no completed failure",
+  "remote_parity": "origin/main=9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+  "verdict": "none:owner-external-gate",
+  "commit": "none:verification-only",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-04-41-03.json#verification-only test=none:owner-deployment-gate doc=none evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-04-41-03-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=none:pending-write",
+  "tier": "T3",
+  "evidence": "Fresh live service probes, exact origin parity, and read-only premise verification; unmet acceptance belongs to service owner."
+}

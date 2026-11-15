@@ -1,0 +1,25 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-04-41-03",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "base_ref": "origin/main",
+  "base_sha": "9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 0,
+  "mode": "owner-gated-verification-only",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface for this row. No coding worker was dispatched because the remaining acceptance is an external supervised-service configuration/restart and live 202-to-inbox-to-doctor-depth-0 dogfood.",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "live_probe": "http://127.0.0.1:8767/version=200 commit=83d28c13 modified=false; /health=200; /ingress/sources=401 missing Authorization header; no CR_INGEST_* names found in /home/kara/.hermes/secrets/crier-fleet.env",
+  "local_gate": "PASS: read-only premise verification; no crier source changed",
+  "remote_ci": "observed-only: crier-dev/crier top three include completed success, pending, completed success; no completed failure",
+  "remote_parity": "origin/main=9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+  "sha_roles": {
+    "source_sha": "9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+    "evidence_commit": "pending:containing-commit-cannot-self-name",
+    "first_published_bookkeeping_sha": "pending:containing-commit-cannot-self-name"
+  },
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-04-41-03.json#verification-only test=none:owner-deployment-gate doc=none evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-04-41-03-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=none:pending-write"
+}
