@@ -1,0 +1,30 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-03-58-08",
+  "row": "UI-CRIER-001",
+  "block": "HARDEN-LOOP-001",
+  "source_sha": "c40a545d845a9f91ea8e6dc65417f03f265c3af6",
+  "verified_code_commit": "180e02bed3a39201663fd8e0e59af2e55f4eeb53",
+  "gitreins": {
+    "task_id": "UI-CRIER-001-V4",
+    "run_directory": ".gitreins/history/2026-11-15/44a5ca97",
+    "verdict": "PASS",
+    "evaluated_commit": "c40a545d845a9f91ea8e6dc65417f03f265c3af6",
+    "fingerprint": "8955fecdc3fe05b2c760e0b4a5e7dc146e0ae17cf74883bd964eab67e57848dc"
+  },
+  "local_gate": {
+    "focused": "env -u CR_LOG_FORMAT -u CR_PIDFILE -u CR_AUTH_TOKEN -u CR_DATABASE_URL -u CRIER_PORT go test ./cmd/server -run Test(UIAuth|AuthBrowser|DocsClaims) -count=1",
+    "focused_result": "PASS",
+    "build": "go build ./...: PASS",
+    "vet": "go vet ./...: PASS",
+    "full_test": "go test ./... -count=1: PASS"
+  },
+  "implementation": {
+    "posture": "API-only browser posture",
+    "files": ["README.md", "cmd/server/auth_browser_refusal_test.go", "cmd/server/chat.html", "cmd/server/ui_auth_posture_test.go", "docs/fronting-auth.md", "specs/CHAT-INTERFACE.md"],
+    "agreement": "Authenticated deployments refuse ordinary browser navigation to /chat with 401 and do not expose transcript data; docs and spec agree."
+  },
+  "external_unverified": ["browser screenshots", "live authenticated deployment witness"],
+  "remote_ci": "top three crier-dev/crier runs observed: completed success, pending, completed success; no completed failure",
+  "remote_parity": "origin/main=HEAD=c40a545d845a9f91ea8e6dc65417f03f265c3af6",
+  "trace": "ch:trace row=UI-CRIER-001 spec=README.md#ui-auth-posture;docs/fronting-auth.md;specs/CHAT-INTERFACE.md wave=.coding-hermes/waves/crier-foreman-2026-11-15-03-58-08.json#UI-CRIER-001 test=cmd/server/ui_auth_posture_test.go::TestUIAuthPostureAgreementAndUnauthenticatedTranscriptNoLeak evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-03-58-08-UI-CRIER-001.json witness=none:browser-screenshots-and-live-authenticated-deployment-external verdict=44a5ca97 commit=180e02bed3a39201663fd8e0e59af2e55f4eeb53 memory=none:deferred-wrapper-rejected-required-payload"
+}

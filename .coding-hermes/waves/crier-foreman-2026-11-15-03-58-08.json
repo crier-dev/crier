@@ -1,0 +1,25 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-03-58-08",
+  "project": "crier",
+  "block": "HARDEN-LOOP-001",
+  "base_ref": "origin/main",
+  "base_sha": "c40a545d845a9f91ea8e6dc65417f03f265c3af6",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 0,
+  "mode": "verification-only-reconciliation",
+  "selected_rows": ["UI-CRIER-001", "INBOX-CRIER-001", "HARNESS-CRIER-001"],
+  "workers": [],
+  "selection": "block_drive resumed HARDEN-LOOP-001. UI-CRIER-001 had a published implementation and a newly completed commit-bound verification task, so no coding worker was valid. INBOX-CRIER-001 remains owner-gated on the supervised crier restart and live dogfood. HARNESS-CRIER-001 has an existing in-progress worktree with dirty .gitreins/tasks.yaml, so a second worker would collide.",
+  "open": {
+    "INBOX-CRIER-001": "approved supervised restart and deployed TTL/expiry/stale-consumer dogfood",
+    "HARNESS-CRIER-001": "prior worker/worktree owner disposition and completion or recovery"
+  },
+  "sha_roles": {
+    "source_sha": "c40a545d845a9f91ea8e6dc65417f03f265c3af6",
+    "verified_code_commit": "180e02bed3a39201663fd8e0e59af2e55f4eeb53",
+    "gitreins_judged_commit": "c40a545d845a9f91ea8e6dc65417f03f265c3af6",
+    "first_published_bookkeeping_sha": "pending:containing-commit-cannot-self-name"
+  },
+  "trace": "ch:trace row=UI-CRIER-001 spec=README.md#ui-auth-posture;docs/fronting-auth.md;specs/CHAT-INTERFACE.md wave=.coding-hermes/waves/crier-foreman-2026-11-15-03-58-08.json#UI-CRIER-001 test=cmd/server/ui_auth_posture_test.go::TestUIAuthPostureAgreementAndUnauthenticatedTranscriptNoLeak evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-03-58-08-UI-CRIER-001.json witness=none:browser-screenshots-and-live-authenticated-deployment-external verdict=44a5ca97 commit=180e02bed3a39201663fd8e0e59af2e55f4eeb53 memory=none:deferred-wrapper-rejected-required-payload"
+}
