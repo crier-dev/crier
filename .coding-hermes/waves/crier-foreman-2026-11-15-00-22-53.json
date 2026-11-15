@@ -7,7 +7,9 @@
   "slots": 1,
   "wave_size": 0,
   "mode": "owner-gated-verification-only",
-  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "selected_rows": [
+    "BOARDCTL-HOOK-001"
+  ],
   "workers": [],
   "worktrees": [],
   "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is owned by sibling repository coding-hermes/boardctl at 2667a63; crier has no implementation surface for this row. The remaining acceptance is external supervised-service configuration, an approved restart, and live 202-to-inbox-to-doctor-depth-0 dogfood.",
@@ -15,10 +17,15 @@
   "live_probe": "http://127.0.0.1:8767/version=200 version=0.5.0-28-g83d28c13 commit=83d28c13 modified=false; /health=200; /ingress/sources=401 missing Authorization header; no CR_INGEST_* keys found in /home/kara/.hermes/secrets/crier-fleet.env",
   "local_gate": "PASS: read-only premise verification; no crier source changed",
   "remote_ci": "green: mandatory top three for crier-dev/crier show two completed success and one pending; no completed failure",
-  "remote_parity": "origin/main=HEAD=830d21c8b030e6f519345a5350b2d52b98dca107",
+  "remote_parity": "published closeout will be verified after push; evidence commit=594d0569023f060e458aec3b11470f13e945c0f2",
   "verdict": "none:owner-external-gate",
   "commit": "none:verification-only",
-  "memory": "pending:post-publication",
+  "memory": "f5133573-51a4-4a0a-b00b-b64ada985b1c",
   "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-00-22-53.json#BOARDCTL-HOOK-001 test=none:owner-deployment-gate doc=none evidence=none:verification-only witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=pending:post-publication",
-  "finished": false
+  "finished": true,
+  "memory_key": "/project/crier/foreman/ticks/crier-foreman-2026-11-15-00-22-53",
+  "sha_roles": {
+    "source_sha": "830d21c8b030e6f519345a5350b2d52b98dca107",
+    "evidence_commit": "594d0569023f060e458aec3b11470f13e945c0f2"
+  }
 }
