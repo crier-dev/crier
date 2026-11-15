@@ -623,3 +623,49 @@ Reader rules this gate assumes, and you should keep:
   `/health` 200 as soon as the container starts. If a compose stack refuses to
   bind, check for leftover stacks from earlier QA runs (`qa-crier-repro-*`,
   `qacrier*`) — they hold the alternate ports, not the product.
+
+## Expiry receipts + dead letters — the consumer's terminal-outcome surface (live-verified 2026-11-15 @ 9d0240f4)
+
+A message that expires unacknowledged (its own `ttl_seconds`, or the consumer
+contract's `contract_ttl_secs`) produces, in its **SENDER's** inbox, exactly one
+durable error notification — and one row in the recipient's dead-letter
+destination. Both were driven end to end against a scratch server
+(`CR_GUARD_ENABLED=false CR_REQUIRE_AGENT_SIG=false`), ttl 3 s, message claimed
+but never acked.
+
+The receipt (`.payload` is base64 JSON — decode before reading it):
+
+```bash
+curl -s "$BASE/agents/$SENDER/inbox?wait_seconds=0&limit=20" \
+  | jq -c '.messages[0].payload | @base64d | fromjson'
+# {"kind":"error","code":"MESSAGE_EXPIRED","message_id":"…","target":"worker-c",
+#  "sender":"boss-c","expires_at":"…","dead_lettered_at":"…","dead_lettered":true,
+#  "dead_letter_path":"/agents/worker-c/inbox/dead-letters",
+#  "reason":"ttl_expired_unacked"}
+```
+
+```bash
+curl -s "$BASE/agents/$RECIPIENT/inbox/dead-letters?limit=10" | jq -c .
+# {"count":1,"dead_letters":[{"message_id":"…","agent_id":"…","sender":"…",
+#   "created_at":"…","expires_at":"…","dead_lettered_at":"…",
+#   "reason":"ttl_expired_unacked"}]}
+```
+
+Rules the shape implies — each of these cost a false FAIL before it was read:
+
+- The discriminator is **`.code`** (`MESSAGE_EXPIRED`), never `.kind`: `kind` is
+  always `"error"`, the same envelope as `WEBHOOK_FAILED` / `FEDERATION_FAILED`
+  (README L126). Test `.code`, or you will report a passing receipt as missing.
+- `reason` on both sides is `ttl_expired_unacked` (dead-letter reason), not part
+  of the documented receipt contract — match on `code`, keep `reason` as detail.
+- Ack answers **204 with no body** on success (`skills/crier-usage` §pitfalls);
+  `200` is a wrong expectation, not a server bug.
+- Sweep granularity, not per-message latency: expired at `17:04:02.870Z` →
+  receipt at `17:04:29.826Z`. Budget for the sweep interval, not a tight poll.
+- The receipt is a direct store write (no webhook/federation hop), so it cannot
+  recurse and does not depend on any endpoint being reachable.
+
+Perf on this path, for sizing: cold boot to `/health` 200 = 43–71 ms (n=5+2);
+deliver / retrieve / ack p50 ≈ 11.6 / 11.8 / 11.6 ms per HTTP call including
+`curl` spawn; long-poll wake after a mid-park deliver ≈ 4–133 ms. Nothing a
+consumer would feel.
