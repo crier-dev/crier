@@ -121,6 +121,39 @@ func (s *AuthorityStore) PurgeExpiredReport(report func(agentID string, entry *I
 	}
 	return s.PurgeExpired()
 }
+
+// The production handler is built over AuthorityStore. Keep optional inbox
+// contract capabilities visible through that policy wrapper; otherwise the
+// underlying backend can implement the sweep and stats contract while the
+// composed handler silently falls back to the legacy count-only behavior.
+func (s *AuthorityStore) ExpireContractOverdue(now time.Time, defaultTTL time.Duration, report func(agentID string, entry *InboxEntry)) int {
+	if store, ok := s.Store.(ContractExpirer); ok {
+		return store.ExpireContractOverdue(now, defaultTTL, report)
+	}
+	return 0
+}
+
+func (s *AuthorityStore) StaleConsumers(now time.Time, defaultTTL time.Duration) ([]StaleConsumer, error) {
+	if store, ok := s.Store.(StaleConsumerReporter); ok {
+		return store.StaleConsumers(now, defaultTTL)
+	}
+	return nil, nil
+}
+
+func (s *AuthorityStore) OldestUnacked(agentID string) (int, time.Time, error) {
+	if store, ok := s.Store.(InboxAgingReporter); ok {
+		return store.OldestUnacked(agentID)
+	}
+	// RemoteStore already exposes the complete stats wire shape, but older
+	// optional stores may only implement Store. Preserve the legacy stats
+	// fallback rather than turning an otherwise readable inbox into a 500.
+	depth, _, age, err := s.Stats(agentID)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	return depth, time.Now().UTC().Add(-age), nil
+}
+
 func (s *AuthorityStore) AppendDeadLetter(dl *DeadLetter) (bool, error) {
 	if store, ok := s.Store.(DeadLetterStore); ok {
 		return store.AppendDeadLetter(dl)

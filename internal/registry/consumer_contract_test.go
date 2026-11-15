@@ -31,6 +31,36 @@ func contractInt(n int) *int { return &n }
 // an absent override both inherit the deployment default, an explicit override
 // is honoured to the second, and an explicit 0 is "never" — an opt-in, never a
 // default.
+func TestInboxTTL_AuthorityStorePreservesContractCapabilities(t *testing.T) {
+	t.Parallel()
+
+	base := NewMemoryStore()
+	wrapped := NewAuthorityStore(base, nil, "")
+	require.Implements(t, (*ContractExpirer)(nil), wrapped)
+	require.Implements(t, (*StaleConsumerReporter)(nil), wrapped)
+	require.Implements(t, (*InboxAgingReporter)(nil), wrapped)
+
+	handler := NewHandler(wrapped)
+	require.NoError(t, wrapped.Register(&Agent{ID: "authority-target", Consumer: &ConsumerContract{
+		Reader: ConsumerReaderHarness, TTLSeconds: contractInt(60),
+	}}))
+	require.NoError(t, wrapped.Register(&Agent{ID: "authority-sender"}))
+	require.NoError(t, wrapped.Deliver("authority-target", &InboxEntry{
+		ID: "authority-expired", Payload: []byte(`{"ok":true}`), Sender: "authority-sender",
+		CreatedAt: time.Now().UTC().Add(-time.Hour), TTLSeconds: contractInt(0),
+	}))
+
+	require.Equal(t, 1, handler.PurgeExpired(), "the policy wrapper must not disable the contract sweep")
+	dead, err := wrapped.ListDeadLetters("authority-target", 10)
+	require.NoError(t, err)
+	require.Len(t, dead, 1)
+	require.Equal(t, "authority-expired", dead[0].MessageID)
+	receipts, _, err := wrapped.Retrieve("authority-sender", time.Minute, 10)
+	require.NoError(t, err)
+	require.Len(t, receipts, 1)
+	require.Contains(t, string(receipts[0].Payload), CodeMessageExpired)
+}
+
 func TestInboxTTL_ContractTable(t *testing.T) {
 	t.Parallel()
 
@@ -250,6 +280,30 @@ func TestInboxTTL_DefaultContractBoundsNeverExpiringMessage(t *testing.T) {
 // contract → the sweep dead-letters it, receipts the sender, removes it from
 // the inbox, and leaves the delivery record's identity intact; an entry still
 // inside its contract is untouched.
+func TestInboxTTL_SweepDisabledLeavesExpiredEntry(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore()
+	target := &Agent{ID: "disabled-target", Consumer: &ConsumerContract{Reader: ConsumerReaderHarness, TTLSeconds: contractInt(60)}}
+	sender := &Agent{ID: "disabled-sender"}
+	require.NoError(t, store.Register(target))
+	require.NoError(t, store.Register(sender))
+	require.NoError(t, store.Deliver(target.ID, &InboxEntry{
+		ID: "disabled-expired", Payload: []byte(`{"expired":true}`), Sender: sender.ID,
+		CreatedAt: time.Now().UTC().Add(-time.Hour), TTLSeconds: contractInt(0),
+	}))
+
+	// Falsifier: no sweep call means expiry is not an inline timer. The entry
+	// remains claimable until the periodic worker runs.
+	depth, _, _, err := store.Stats(target.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, depth)
+	require.Empty(t, store.PurgeExpired(), "message-level TTL is never-expiring")
+	// The disabled arm is represented by not invoking Handler.PurgeExpired;
+	// direct Store.PurgeExpired is intentionally count-only and cannot enforce
+	// the consumer contract.
+}
+
 func TestInboxTTL_SweepExpiresSQLite(t *testing.T) {
 	t.Parallel()
 
