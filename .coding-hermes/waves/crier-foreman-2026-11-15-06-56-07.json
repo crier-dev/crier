@@ -1,0 +1,28 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-06-56-07",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "wave_budget": 1,
+  "slots": 1,
+  "wave_size": 0,
+  "mode": "owner-gated-verification-only",
+  "source_sha": "35ca5bf8f87254b1b24fd8750369ff719249c651",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "landed": [],
+  "selection": "The block driver ranked BOARDCTL-HOOK-001 first. Its implementation is published in sibling repository coding-hermes/boardctl at 2667a63; crier has no implementation surface for this row.",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "evidence": {
+    "live_probe_commands": [
+      "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8767/version",
+      "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8767/health",
+      "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8767/ingress/sources",
+      "grep -E 'CR_INGEST_WEBHOOK_ENABLED|CR_INGEST_STORE_FILE' /home/kara/.hermes/secrets/crier-fleet.env"
+    ],
+    "local_gate": "not run: verification-only owner gate; prior published event records full Go gates PASS",
+    "remote_ci": "observed-only top-three query: completed success, pending, completed success; no completed failure"
+  },
+  "verdict": "none:owner-external-gate",
+  "memory": "pending:write-after-publication",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-06-56-07.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-06-56-07-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=pending:write-after-publication"
+}
