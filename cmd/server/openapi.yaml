@@ -1360,6 +1360,9 @@ paths:
                 consumer:
                   $ref: "#/components/schemas/ConsumerContract"
                   description: "Optional inbox consumer contract (INBOX-CRIER-001): who reads this agent's inbox, the expected read cadence, and the per-agent TTL that bounds how long an unacknowledged message may sit before the expiry sweep dead-letters it and receipts the sender. Absent inherits CR_INBOX_CONTRACT_TTL_S (24h). Validated at registration (400 on violation)."
+                archived_reason:
+                  type: string
+                  description: "Explicit operator reason this registered consumer is archived and no longer expected to answer (HARNESS-CRIER-001)."
                 namespace:
                   type: string
                   description: |-
@@ -1455,6 +1458,9 @@ paths:
                 consumer:
                   $ref: "#/components/schemas/ConsumerContract"
                   description: "Optional inbox consumer contract (INBOX-CRIER-001) — same object and rules as POST /agents"
+                archived_reason:
+                  type: string
+                  description: "Explicit operator reason this registered consumer is archived and no longer expected to answer (HARNESS-CRIER-001)."
                 namespace:
                   type: string
                   description: "The namespace (realm) to register INTO (CR-FEAT-029). Absent — or `default` — is the implicit namespace; an undeclared name is 400 UNKNOWN_NAMESPACE, never a silent fallback."
@@ -1592,6 +1598,10 @@ paths:
                   $ref: "#/components/schemas/ConsumerContract"
                   nullable: true
                   description: "Inbox consumer contract (INBOX-CRIER-001) — an object replaces the whole contract (validated, 400 on violation); explicit null returns the agent to the deployment default (CR_INBOX_CONTRACT_TTL_S); absent leaves it unchanged"
+                archived_reason:
+                  type: string
+                  nullable: true
+                  description: "Explicit operator reason this registered consumer is archived; null clears the reason and absent leaves it unchanged (HARNESS-CRIER-001)."
       responses:
         "200":
           description: Agent updated — the full agent object is returned

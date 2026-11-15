@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -181,8 +182,11 @@ type ConsumerCensusEntry struct {
 }
 
 // ClassifyConsumerCensus applies the fail-closed registry census rule. A
-// configured consumer contract is only a repository proof of wiring; live
-// consumer liveness remains an owner-gated deployment check.
+// wired row must have both sides of the contract: a valid consumer declaration
+// and a valid webhook endpoint. Blocking endpoints additionally require the
+// per-run response token, which is the repository-owned proof that the reply
+// came from the endpoint that received this delivery. Live endpoint liveness
+// remains an owner/deployment check and is exercised by the harness-e2e loop.
 func ClassifyConsumerCensus(agents []*Agent) []ConsumerCensusEntry {
 	out := make([]ConsumerCensusEntry, 0, len(agents))
 	for _, agent := range agents {
@@ -193,13 +197,19 @@ func ClassifyConsumerCensus(agents []*Agent) []ConsumerCensusEntry {
 		if agent.ArchivedReason != "" {
 			entry.State = ConsumerArchived
 			entry.Reason = agent.ArchivedReason
-		} else if agent.Consumer != nil {
-			if err := agent.Consumer.Validate(); err == nil {
-				entry.State = ConsumerWired
-				entry.Reason = "verified consumer configuration"
-			} else {
-				entry.Reason = fmt.Sprintf("invalid consumer configuration: %v", err)
-			}
+		} else if agent.Consumer == nil {
+			entry.Reason = "missing consumer configuration"
+		} else if err := agent.Consumer.Validate(); err != nil {
+			entry.Reason = fmt.Sprintf("invalid consumer configuration: %v", err)
+		} else if agent.Webhook == nil {
+			entry.Reason = "consumer configuration has no webhook endpoint"
+		} else if err := agent.Webhook.Validate(); err != nil {
+			entry.Reason = fmt.Sprintf("invalid webhook configuration: %v", err)
+		} else if agent.Webhook.DeliveryMode == "blocking" && !agent.Webhook.RequireResponseToken {
+			entry.Reason = "blocking webhook must require a per-run response token"
+		} else {
+			entry.State = ConsumerWired
+			entry.Reason = "verified consumer and webhook configuration"
 		}
 		out = append(out, entry)
 	}
@@ -235,6 +245,14 @@ func (h *Handler) ConsumerCensus() []ConsumerCensusEntry {
 // ValidateConsumerCensus applies the strict census gate to the current registry.
 func (h *Handler) ValidateConsumerCensus() error {
 	return ValidateConsumerCensus(h.store.List())
+}
+
+// HandleConsumerCensus exposes the repository-owned registry census to the
+// harness-e2e leg and operators. It reports every row with its explicit state
+// and reason; callers must treat unclassified rows as a failed gate rather than
+// assuming the HTTP 200 means every consumer is wired.
+func (h *Handler) HandleConsumerCensus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.ConsumerCensus())
 }
 
 // ContractExpirer is the sweep capability: promote unacknowledged messages past
