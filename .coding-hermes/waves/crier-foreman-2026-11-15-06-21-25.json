@@ -10,7 +10,9 @@
   "slots": 4,
   "wave_size": 0,
   "mode": "owner-gated-verification-only",
-  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "selected_rows": [
+    "BOARDCTL-HOOK-001"
+  ],
   "workers": [],
   "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Implementation is published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface. The remaining acceptance is an external supervised-service configuration/restart and live 202-to-inbox-to-doctor-depth-0 dogfood, so no crier worker is valid.",
   "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
@@ -21,7 +23,8 @@
   "sha_roles": {
     "source_sha": "3f4e93ca5991b52a81114ff250d1e90de157240e",
     "verified_code_commit": "2667a63 sibling repository",
-    "evidence_commit": "pending:containing-commit-cannot-self-name"
+    "evidence_commit": "a4faa43f675f7151d59c8060ae9a835bc7d14b20",
+    "reconciliation_commit": "pending:containing-commit-cannot-self-name"
   },
-  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-06-21-25.json#none:verification-only test=none:owner-deployment-gate evidence=none:verification-only witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=pending:/project/crier/foreman/ticks/crier-foreman-2026-11-15-06-21-25"
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-06-21-25.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-06-21-25-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=a4faa43f675f7151d59c8060ae9a835bc7d14b20 memory=none:deferred-wrapper-rejected-required-payload"
 }
