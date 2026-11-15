@@ -58,6 +58,8 @@ crier-sessions.sqlite-shm
 # preflight P5), so it is untracked here and both files are ignored below.
 .vfs/.dirty
 .vfs/graph/edges.jsonl
+.vfs/graph/edges.jsonl.lock
+.vfs/graph/state.json
 .vfs/graph/.last_reconcile
 .vfs/graph/.parse_cache.json
 .vfs/graph/coverage.json
