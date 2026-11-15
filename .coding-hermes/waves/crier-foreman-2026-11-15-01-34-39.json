@@ -1,0 +1,21 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-01-34-39",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "base_sha": "56c0ec9a679c99f49f7d0df5685aa8ac873620b2",
+  "wave_budget": 12,
+  "slots": 12,
+  "wave_size": 0,
+  "eligible_independent": 0,
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "mode": "owner-gated-verification-only",
+  "blocker": "The implementation is in sibling repository coding-hermes/boardctl@2667a63; crier's remaining acceptance depends on external ingress configuration, an approved supervised-service restart, and a live 202-to-inbox-to-doctor-depth-0 dogfood.",
+  "owner_action": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE, perform the approved restart, then rerun the scratch-repository boardctl delivery loop.",
+  "criterion_probe": "Current service /version=200 commit=83d28c13 modified=false; /health=200; /ingress/sources=401 missing Authorization header; no CR_INGEST_* variables found.",
+  "local_gate": "PASS: read-only premise verification; no crier source changed",
+  "remote_ci": "green: two completed success and one pending in mandatory top-three; no completed failure",
+  "verdict": "none:owner-external-gate",
+  "finished": false,
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-01-34-39-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=56c0ec9a679c99f49f7d0df5685aa8ac873620b2 memory=/project/crier/foreman/ticks/crier-foreman-2026-11-15-01-34-39"
+}
