@@ -1,0 +1,102 @@
+time="2026-11-15T12:23:48-05:00" level=info msg="Using docker host 'unix:///var/run/docker.sock', and daemon socket 'unix:///var/run/docker.sock'"
+[REPRO/Repro build step] ⭐ Run Set up job
+[REPRO/Repro build step] 🚀  Start image=node:22-bookworm
+[REPRO/Repro build step]   🐳  docker pull image=node:22-bookworm platform=linux/amd64 username= forcePull=true
+[REPRO/Repro build step]   🐳  docker create image=node:22-bookworm platform=linux/amd64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[REPRO/Repro build step]   🐳  docker run image=node:22-bookworm platform=linux/amd64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[REPRO/Repro build step]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[REPRO/Repro build step]   ✅  Success - Set up job
+[REPRO/Repro build step]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v6
+[REPRO/Repro build step] Non-terminating error while running 'git clone': some refs were not updated
+[REPRO/Repro build step] ⭐ Run Main Checkout
+[REPRO/Repro build step]   🐳  docker cp src=/home/kara/.hermes/cache/scratch/crier-dogfood-20261115-155449/actrepro2/. dst=/home/kara/.hermes/cache/scratch/crier-dogfood-20261115-155449/actrepro2
+[REPRO/Repro build step]   ✅  Success - Main Checkout [475.058121ms]
+[REPRO/Repro build step] ⭐ Run Main Set up Go 1.26.10
+[REPRO/Repro build step]   🐳  docker cp src=/home/kara/.cache/act/actions-setup-go@v6/ dst=/var/run/act/actions/actions-setup-go@v6/
+[REPRO/Repro build step]   🐳  docker exec cmd=[/usr/local/bin/node /var/run/act/actions/actions-setup-go@v6/dist/setup/index.js] user= workdir=
+[REPRO/Repro build step]   | Setup go version spec 1.26.10
+[REPRO/Repro build step]   | Found in cache @ /opt/hostedtoolcache/go/1.26.10/x64
+[REPRO/Repro build step]   | Added go to the path
+[REPRO/Repro build step]   | Successfully set up Go version 1.26.10
+[REPRO/Repro build step]   | [command]/opt/hostedtoolcache/go/1.26.10/x64/bin/go env GOMODCACHE
+[REPRO/Repro build step]   | [command]/opt/hostedtoolcache/go/1.26.10/x64/bin/go env GOCACHE
+[REPRO/Repro build step]   | /root/go/pkg/mod
+[REPRO/Repro build step]   | /root/.cache/go-build
+[REPRO/Repro build step]   🚧  ::warning::Failed to restore: getCacheEntry failed: connect ENETUNREACH 192.168.123.147:34323 - Local (0.0.0.0:0)
+[REPRO/Repro build step]   | Cache is not found
+[REPRO/Repro build step]   ❓ add-matcher /run/act/actions/actions-setup-go@v6/matchers.json
+[REPRO/Repro build step]   | go version go1.26.10 linux/amd64
+[REPRO/Repro build step]   | 
+[REPRO/Repro build step]   ❓  ::group::go env
+[REPRO/Repro build step]   | AR='ar'
+[REPRO/Repro build step]   | CC='gcc'
+[REPRO/Repro build step]   | CGO_CFLAGS='-O2 -g'
+[REPRO/Repro build step]   | CGO_CPPFLAGS=''
+[REPRO/Repro build step]   | CGO_CXXFLAGS='-O2 -g'
+[REPRO/Repro build step]   | CGO_ENABLED='1'
+[REPRO/Repro build step]   | CGO_FFLAGS='-O2 -g'
+[REPRO/Repro build step]   | CGO_LDFLAGS='-O2 -g'
+[REPRO/Repro build step]   | CXX='g++'
+[REPRO/Repro build step]   | GCCGO='gccgo'
+[REPRO/Repro build step]   | GO111MODULE=''
+[REPRO/Repro build step]   | GOAMD64='v1'
+[REPRO/Repro build step]   | GOARCH='amd64'
+[REPRO/Repro build step]   | GOAUTH='netrc'
+[REPRO/Repro build step]   | GOBIN=''
+[REPRO/Repro build step]   | GOCACHE='/root/.cache/go-build'
+[REPRO/Repro build step]   | GOCACHEPROG=''
+[REPRO/Repro build step]   | GODEBUG=''
+[REPRO/Repro build step]   | GOENV='/root/.config/go/env'
+[REPRO/Repro build step]   | GOEXE=''
+[REPRO/Repro build step]   | GOEXPERIMENT=''
+[REPRO/Repro build step]   | GOFIPS140='off'
+[REPRO/Repro build step]   | GOFLAGS=''
+[REPRO/Repro build step]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build2314334161=/tmp/go-build -gno-record-gcc-switches'
+[REPRO/Repro build step]   | GOHOSTARCH='amd64'
+[REPRO/Repro build step]   | GOHOSTOS='linux'
+[REPRO/Repro build step]   | GOINSECURE=''
+[REPRO/Repro build step]   | GOMOD='/home/kara/.hermes/cache/scratch/crier-dogfood-20261115-155449/actrepro2/go.mod'
+[REPRO/Repro build step]   | GOMODCACHE='/root/go/pkg/mod'
+[REPRO/Repro build step]   | GONOPROXY=''
+[REPRO/Repro build step]   | GONOSUMDB=''
+[REPRO/Repro build step]   | GOOS='linux'
+[REPRO/Repro build step]   | GOPATH='/root/go'
+[REPRO/Repro build step]   | GOPRIVATE=''
+[REPRO/Repro build step]   | GOPROXY='https://proxy.golang.org,direct'
+[REPRO/Repro build step]   | GOROOT='/opt/hostedtoolcache/go/1.26.10/x64'
+[REPRO/Repro build step]   | GOSUMDB='sum.golang.org'
+[REPRO/Repro build step]   | GOTELEMETRY='local'
+[REPRO/Repro build step]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[REPRO/Repro build step]   | GOTMPDIR=''
+[REPRO/Repro build step]   | GOTOOLCHAIN='local'
+[REPRO/Repro build step]   | GOTOOLDIR='/opt/hostedtoolcache/go/1.26.10/x64/pkg/tool/linux_amd64'
+[REPRO/Repro build step]   | GOVCS=''
+[REPRO/Repro build step]   | GOVERSION='go1.26.10'
+[REPRO/Repro build step]   | GOWORK=''
+[REPRO/Repro build step]   | PKG_CONFIG='pkg-config'
+[REPRO/Repro build step]   | 
+[REPRO/Repro build step]   ❓  ::endgroup::
+[REPRO/Repro build step]   ✅  Success - Main Set up Go 1.26.10 [10.421173291s]
+[REPRO/Repro build step]   ⚙  ::set-env:: GOTOOLCHAIN=local
+[REPRO/Repro build step]   ⚙  ::set-output:: cache-hit=false
+[REPRO/Repro build step]   ⚙  ::set-output:: go-version=1.26.10
+[REPRO/Repro build step]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.26.10/x64/bin
+[REPRO/Repro build step]   ⚙  ::add-path:: /root/go/bin
+[REPRO/Repro build step] ⭐ Run Main Agent-ecosystem registration contract
+[REPRO/Repro build step]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[REPRO/Repro build step]   | go: downloading gopkg.in/yaml.v3 v3.0.1
+[REPRO/Repro build step]   | go: downloading go.opentelemetry.io/otel v1.46.0
+[REPRO/Repro build step]   | go: downloading go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.29.0
+[REPRO/Repro build step]   | go: downloading go.opentelemetry.io/otel/sdk v1.44.0
+[REPRO/Repro build step]   | go: downloading go.opentelemetry.io/otel/trace v1.46.0
+[REPRO/Repro build step]   | go: downloading github.com/gorilla/mux v1.8.1
+[REPRO/Repro build step]   | # github.com/crier-dev/crier/internal/ci
+[REPRO/Repro build step]   | internal/middleware/metrics.go:9:2: github.com/gorilla/mux@v1.8.1: Get "https://proxy.golang.org/github.com/gorilla/mux/@v/v1.8.1.zip": dial tcp: lookup proxy.golang.org on 8.8.4.4:53: dial udp 8.8.4.4:53: connect: network is unreachable
+[REPRO/Repro build step]   | FAIL	github.com/crier-dev/crier/internal/ci [setup failed]
+[REPRO/Repro build step]   | FAIL
+[REPRO/Repro build step]   ❌  Failure - Main Agent-ecosystem registration contract [126.635015ms]
+[REPRO/Repro build step] exitcode '1': failure
+[REPRO/Repro build step] ⭐ Run Complete job
+[REPRO/Repro build step]   ✅  Success - Complete job
+[REPRO/Repro build step] 🏁  Job failed
+Error: Job 'Repro build step' failed
