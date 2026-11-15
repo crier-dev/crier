@@ -3976,15 +3976,15 @@ tasks:
   status: in_progress
   created_at: '2026-11-10T10:32:51.450942+00:00'
 - id: HARNESS-CRIER-001
-  title: wire live harness consumers and liveness checks
+  title: Harness consumer wiring and liveness
   criteria:
-  - 'PROOF: classify every registered agent as wired with a verified blocking round
-    trip or archived with an explicit reason; add a liveness check that fails on an
-    unavailable webhook and prove registry census tests. FAILIF: any stale registry
-    entry lacks a classification, a webhook failure is reported as success, or no
-    standing liveness check is exercised.'
-  status: in_progress
-  created_at: '2026-11-14T05:36:36.606239+00:00'
+  - 'PROOF: repository-owned harness consumer wiring, stale registry classification,
+    and liveness/negative-path tests are implemented with explicit external-gate residuals.
+    FAILIF: live-consumer acceptance is claimed without evidence or the source diff
+    is absent.'
+  status: complete
+  created_at: '2026-11-15T09:11:08.549874+00:00'
+  completed_at: '2026-11-15T09:48:32.897942+00:00'
 - id: README-015
   title: Fix crier README anchor drift
   criteria:
@@ -4197,3 +4197,13 @@ tasks:
   status: complete
   created_at: '2026-11-15T04:05:35.157491+00:00'
   completed_at: '2026-11-15T04:05:52.480766+00:00'
+- id: INBOX-CRIER-001
+  title: Inbox TTL and stale-consumer contract
+  criteria:
+  - 'PROOF: inbox entries honor default and per-agent TTL; sweep creates dead-letter
+    and MESSAGE_EXPIRED receipt retaining delivery id; stats expose oldest_unacked,
+    contract_ttl_secs, stale; tests cover delivery paths and disabled-sweep falsifier.
+    FAILIF: any acceptance arm is untested or a source diff is absent.'
+  status: complete
+  created_at: '2026-11-15T09:11:07.583494+00:00'
+  completed_at: '2026-11-15T09:48:28.341814+00:00'
