@@ -1,0 +1,19 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-03-36-55",
+  "project": "crier",
+  "block": "HARDEN-LOOP-001",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 0,
+  "mode": "verification-only-reconciliation",
+  "status": "finished",
+  "source_sha": "c40a545d845a9f91ea8e6dc65417f03f265c3af6",
+  "selected_rows": ["UI-CRIER-001", "INBOX-CRIER-001", "HARNESS-CRIER-001", "RSS-CRIER-001"],
+  "workers": [],
+  "dispatch": [],
+  "rationale": "No implementation worker was dispatched. UI and INBOX have published implementation commits; HARNESS and RSS have existing implementation commits and dirty worktree-local .gitreins task stores requiring owner disposition. Remaining acceptance is external restart/live dogfood for INBOX and missing/failed evidence or additional implementation for HARNESS/RSS. A new wave would duplicate work or collide with existing ownership.",
+  "evidence": ".coding-hermes/evidence/crier-foreman-2026-11-15-03-36-55.json",
+  "local_gate": "PASS: go test ./... -count=1; go build ./...; go vet ./...; bash scripts/check-board.sh",
+  "remote_ci": "top three: two completed success, one pending; no completed failure",
+  "finished_at": "2026-11-15T03:36:55Z"
+}
