@@ -1,0 +1,30 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-01-34-39",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "source_sha": "0686bfa801863921e29db0cb54d63a381a5f6eec",
+  "mode": "owner-gated-verification-only",
+  "selected_rows": [
+    "BOARDCTL-HOOK-001"
+  ],
+  "wave_budget": 12,
+  "slots": 12,
+  "wave_size": 0,
+  "eligible_independent": 0,
+  "workers": [],
+  "selection": "The implementation is in sibling repository coding-hermes/boardctl@2667a63; crier's remaining acceptance depends on external ingress configuration, an approved supervised-service restart, and a live 202-to-inbox-to-doctor-depth-0 dogfood.",
+  "criterion_probe": {
+    "criterion": "The remaining acceptance requires INGRESS-CRIER-001 to land and a live scratch-repository delivery loop to prove 202-to-inbox-to-doctor-depth-0.",
+    "observed": "The current crier service is version 0.5.0-28-g83d28c13 at commit 83d28c13; /health returns 200, while /ingress/sources returns 401 missing Authorization header. No CR_INGEST_* variables are present in the supervised environment file.",
+    "classification": "owner-controlled external configuration, restart, and live dogfood remain unmet"
+  },
+  "live_probe": "curl -sS -i --max-time 10 http://127.0.0.1:8767/version => 200 version=0.5.0-28-g83d28c13 commit=83d28c13 modified=false; /health => 200 status=ok; /ingress/sources => 401 missing Authorization header; no CR_INGEST_* variables found in /home/kara/.hermes/secrets/crier-fleet.env",
+  "local_gate": "PASS: bash scripts/check-board.sh; go build ./...; go vet ./...; go test ./... -count=1",
+  "remote_ci": "pending/in_progress at published SHA 0686bfa801863921e29db0cb54d63a381a5f6eec; no completed failure in the mandatory top-three query",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE, perform the approved restart, then rerun the scratch-repository boardctl delivery loop.",
+  "verdict": "none:owner-external-gate",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-01-34-39.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-01-34-39-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=0686bfa801863921e29db0cb54d63a381a5f6eec memory=/project/crier/foreman/ticks/crier-foreman-2026-11-15-01-34-39",
+  "STATUS": "blocked",
+  "TIER": "T3",
+  "EVIDENCE": "Fresh live service probe, exact origin parity, and read-only premise verification; the unmet acceptance belongs to the service owner."
+}
