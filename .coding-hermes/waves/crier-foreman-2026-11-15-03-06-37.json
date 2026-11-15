@@ -1,0 +1,24 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-03-06-37",
+  "project": "crier",
+  "block": "HARDEN-LOOP-001",
+  "base_ref": "origin/main",
+  "base_sha": "cb96faa36a8f4b078929bf17dcd8a12b35ed043e",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 0,
+  "rows": [
+    {
+      "id": "INBOX-CRIER-001",
+      "status": "no worker: implementation commit d87ebdcc already reachable from origin/main; remaining live dogfood is owner-gated by supervised service restart"
+    },
+    {
+      "id": "HARNESS-CRIER-001",
+      "worktree": "/home/kara/worktrees/crier-harness-20261114-052252",
+      "branch": "wt/harness-20261114-052252",
+      "status": "no worker: existing in_progress worktree has dirty .gitreins/tasks.yaml and is owned by prior attempt; no overlapping dispatch"
+    }
+  ],
+  "selection": "HARDEN-LOOP-001 is the resumed block after BOARDCTL-HOOK-001 owner-gated verification. INBOX-CRIER-001 and HARNESS-CRIER-001 are independent pending feeders with no depends_on edges. UI-CRIER-001, RSS-CRIER-001, and DOCS-CRIER-001 were not selected because their existing worktrees/ownership require reconciliation before a new dispatch.",
+  "manifest_status": "prepared scratch-only; not published because selected rows were not dispatchable after live reconciliation"
+}
