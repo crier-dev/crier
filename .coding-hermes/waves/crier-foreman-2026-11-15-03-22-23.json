@@ -6,16 +6,37 @@
   "wave_budget": 12,
   "slots": 6,
   "base_sha": "c40a545d845a9f91ea8e6dc65417f03f265c3af6",
-  "selected_rows": ["INBOX-CRIER-001", "HARNESS-CRIER-001"],
+  "selected_rows": [
+    "INBOX-CRIER-001",
+    "HARNESS-CRIER-001"
+  ],
   "wave_size": 0,
   "workers": [],
   "worktree_reconciliation": {
-    "INBOX-CRIER-001": {"implementation_commit": "d87ebdcc", "reachable_from_origin_main": true, "remaining": "owner-approved supervised restart and live TTL/expiry/stale-consumer dogfood"},
-    "HARNESS-CRIER-001": {"existing_worktree": "/home/kara/worktrees/crier-harness-20261114-052252", "branch": "wt/harness-20261114-052252", "dirty_paths": [".gitreins/tasks.yaml"], "remaining": "prior worker owner disposition and completion/recovery"}
+    "INBOX-CRIER-001": {
+      "implementation_commit": "46c129e7",
+      "reachable_from_origin_main": true,
+      "remaining": "owner-approved supervised restart and live TTL/expiry/stale-consumer dogfood",
+      "implementation_commit_role": "published inbox TTL/expiry/stale-consumer implementation; d87ebdcc was board filing only"
+    },
+    "HARNESS-CRIER-001": {
+      "existing_worktree": "/home/kara/worktrees/crier-harness-20261114-052252",
+      "branch": "wt/harness-20261114-052252",
+      "dirty_paths": [
+        ".gitreins/tasks.yaml"
+      ],
+      "remaining": "prior worker owner disposition and completion/recovery"
+    }
   },
   "owner_gates": [
     "INBOX-CRIER-001: approved supervised crier restart and deployed live TTL/expiry/stale-consumer dogfood",
     "HARNESS-CRIER-001: disposition the existing worker/worktree before any redispatch"
   ],
-  "trace": "ch:trace row=INBOX-CRIER-001 spec=none:implementation-already-published wave=.coding-hermes/waves/crier-foreman-2026-11-15-03-22-23.json#INBOX-CRIER-001 test=none:owner-deployment-gate doc=none evidence=none:verification-only witness=live:http://127.0.0.1:8767/version verdict=none:verification-only-reconciliation commit=none:verification-only memory=none:pending; ch:trace row=HARNESS-CRIER-001 spec=none:existing-worker-reconciliation wave=.coding-hermes/waves/crier-foreman-2026-11-15-03-22-23.json#HARNESS-CRIER-001 test=none:existing-worker-owner-disposition doc=none evidence=none:verification-only witness=none:dirty-worktree-owner-disposition-required verdict=none:verification-only-reconciliation commit=none:verification-only memory=none:pending"
+  "trace": "ch:trace row=INBOX-CRIER-001 spec=none:implementation-already-published wave=.coding-hermes/waves/crier-foreman-2026-11-15-03-22-23.json#INBOX-CRIER-001 test=none:owner-deployment-gate doc=none evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-03-22-23.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-gated-reconciliation commit=46c129e7 memory=none:deferred-wrapper-rejected-required-payload; ch:trace row=HARNESS-CRIER-001 spec=none:existing-worker-reconciliation wave=.coding-hermes/waves/crier-foreman-2026-11-15-03-22-23.json#HARNESS-CRIER-001 test=none:existing-worker-owner-disposition doc=none evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-03-22-23.json witness=none:dirty-worktree-owner-disposition-required verdict=none:owner-gated-reconciliation commit=none:verification-only memory=none:deferred-wrapper-rejected-required-payload",
+  "evidence": ".coding-hermes/evidence/crier-foreman-2026-11-15-03-22-23.json",
+  "remote_parity": "origin/main=c40a545d845a9f91ea8e6dc65417f03f265c3af6 before bookkeeping publication",
+  "local_gate": "PASS: read-only reconciliation; origin/main ancestor check for 46c129e7; existing HARNESS worktree dirty-path check; live /version and /health probes",
+  "remote_ci": "observed-only: latest completed crier-dev/crier run success; two newer same-head runs pending/in_progress; no completed failure",
+  "verdict": "none:owner-gated-reconciliation; prior 51cb8768 FAIL preserved because the prior manifest used d87ebdcc, closed the synthetic task, and lacked evidence",
+  "memory": "none:deferred-wrapper-rejected-required-payload"
 }
