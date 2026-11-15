@@ -4207,3 +4207,13 @@ tasks:
   status: complete
   created_at: '2026-11-15T09:11:07.583494+00:00'
   completed_at: '2026-11-15T09:48:28.341814+00:00'
+- id: INBOX-CRIER-001-R2
+  title: Rework inbox TTL acceptance gaps
+  criteria:
+  - 'PROOF: focused inbox tests include a real disabled-sweep falsifier and Postgres-backed
+    coverage where the repository fixture supports it; direct gates pass. FAILIF:
+    disabled mode is untested, Postgres coverage is silently mocked or skipped, or
+    the source diff is absent.'
+  status: complete
+  created_at: '2026-11-15T12:22:23.755189+00:00'
+  completed_at: '2026-11-15T12:46:38.521574+00:00'

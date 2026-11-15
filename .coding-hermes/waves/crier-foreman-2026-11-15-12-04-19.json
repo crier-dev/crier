@@ -1,0 +1,38 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-12-04-19",
+  "project": "crier",
+  "block": "HARDEN-LOOP-001",
+  "path": "serial",
+  "slots_computed": 6,
+  "reason": "Block HARDEN-LOOP-001 had 4 ready rows, but the row under active rework (INBOX-CRIER-001) needed an acceptance-evidence rework pass before the block could advance; composing parallel siblings against the same internal/registry seam would have produced merge contention on one block. One worker was dispatched so the block could close its oldest claim.",
+  "rows": [
+    {
+      "id": "INBOX-CRIER-001",
+      "worktree": "/home/kara/worktrees/crier-INBOX-CRIER-001-R2",
+      "branch": "wt/INBOX-CRIER-001-R2",
+      "base": "9febf5d877c5e97b8b660be8f5ce9d4d57bd28ec",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-15-12-04-19-02/INBOX-CRIER-001-R2-brief.txt",
+      "worker_model": "openai/gpt-6.1-terra",
+      "worker_provider": "xkiro",
+      "commit": "9f6f8c8e4ad7e6564122f4bdbeaa01cde1276209",
+      "files": [
+        "internal/registry/consumer_contract_test.go",
+        "internal/registry/postgres_ttl_contract_integration_test.go"
+      ],
+      "gates": {
+        "gofmt": "clean",
+        "go_build": "pass",
+        "go_vet": "pass",
+        "go_vet_integration_tag": "pass",
+        "go_test_full": "pass",
+        "golangci_lint_diff_only_vs_9febf5d8": "0 issues",
+        "inbox_ttl_unit": "pass (incl. disabled-sweep falsifier both arms)",
+        "inbox_ttl_postgres_integration": "pass (testcontainers postgres:16-alpine)"
+      }
+    }
+  ],
+  "not_composed": [
+    "UI-CRIER-001",
+    "HARNESS-CRIER-001"
+  ]
+}

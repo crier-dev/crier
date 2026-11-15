@@ -1,0 +1,63 @@
+{
+  "task_id": "INBOX-CRIER-001-R2",
+  "task_title": "Rework inbox TTL acceptance gaps",
+  "task_criteria": [
+    "PROOF: focused inbox tests include a real disabled-sweep falsifier and Postgres-backed coverage where the repository fixture supports it; direct gates pass. FAILIF: disabled mode is untested, Postgres coverage is silently mocked or skipped, or the source diff is absent."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/crier",
+  "branch": "main",
+  "commit": "9f6f8c8e4ad7e6564122f4bdbeaa01cde1276209",
+  "pass_class": "tier1-only",
+  "tier2_skipped": true,
+  "working_tree_content_fingerprint": "9556eaa9affd4a4221f8eeadd9f4c1f52e6ce9f0135270f4ed6586dffa666b21",
+  "working_tree_dirty_path_count": 1,
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 th",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 this key is ignored\ngitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.api_key_env: unknown key \u2014 this key is ignored\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/crier/.gitreins/logs/guard-20261115T132351.506179Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/crier/.gitreins/logs/guard-20261115T132351.506179Z.log"
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Stage tier1: PASS\n    \u2713 guard: gitreins: WARNING: /home/kara/crier/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 th\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-15T13:23:51.887474",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-15T13:23:51.902664+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 8969,
+        "truncated": false,
+        "source": "git show 9f6f8c8e4ad7"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 792,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "INBOX-CRIER-001-R2"
+  }
+}
