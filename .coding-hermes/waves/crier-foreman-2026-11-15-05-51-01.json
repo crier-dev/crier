@@ -1,0 +1,27 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-05-51-01",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "base_ref": "origin/main",
+  "base_sha": "9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+  "wave_budget": 12,
+  "nproc": 16,
+  "loadavg_1m": 20.78,
+  "slots": 1,
+  "wave_size": 0,
+  "mode": "owner-gated-verification-only",
+  "selected_rows": ["BOARDCTL-HOOK-001"],
+  "workers": [],
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. Its implementation is published in sibling repository coding-hermes/boardctl@2667a63; crier has no implementation surface. The remaining acceptance is an external supervised-service configuration/restart and live 202-to-inbox-to-doctor-depth-0 dogfood, so no crier worker is valid.",
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "live_probe": "/version HTTP 200 version=0.5.0-28-g83d28c13 commit=83d28c13 modified=false; /health HTTP 200; /ingress/sources HTTP 401 missing Authorization header; no CR_INGEST_* keys in supervised env file.",
+  "local_gate": "PASS: read-only premise verification; canonical checkout clean and origin/main parity verified before this manifest.",
+  "remote_ci": "observed-only: top three crier-dev/crier runs include completed success, pending, completed success; no completed failure.",
+  "off_by_one": "none:verification-only no debugging",
+  "sha_roles": {
+    "source_sha": "9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+    "verified_code_commit": "2667a63 sibling repository",
+    "evidence_commit": "pending:containing-commit-cannot-self-name"
+  },
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-05-51-01.json#none:verification-only test=none:owner-deployment-gate evidence=none:verification-only witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=pending:/project/crier/foreman/ticks/crier-foreman-2026-11-15-05-51-01"
+}

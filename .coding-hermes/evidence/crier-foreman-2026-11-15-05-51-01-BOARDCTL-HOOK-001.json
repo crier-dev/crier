@@ -1,0 +1,39 @@
+{
+  "tick_id": "crier-foreman-2026-11-15-05-51-01",
+  "project": "crier",
+  "block": "BOARDCTL-HOOK-001",
+  "row": "BOARDCTL-HOOK-001",
+  "mode": "owner-gated-verification-only",
+  "source_sha": "9207e104723fb968d9c3c2b7d0a70421bc2ff0e0",
+  "implementation": {
+    "repository": "coding-hermes/boardctl",
+    "commit": "2667a63",
+    "status": "published in sibling repository; no crier implementation diff"
+  },
+  "selection": "block_drive ranked BOARDCTL-HOOK-001 first. The crier checkout has no implementation surface for this row, so dispatching a crier worker would be invalid. The remaining acceptance is an external supervised-service configuration/restart and live delivery witness.",
+  "wave": {
+    "budget": 12,
+    "nproc": 16,
+    "loadavg_1m": 20.78,
+    "slots": 1,
+    "size": 0,
+    "manifest": ".coding-hermes/waves/crier-foreman-2026-11-15-05-51-01.json"
+  },
+  "live_probe": {
+    "version_http": 200,
+    "version_body": {"version":"0.5.0-28-g83d28c13","commit":"83d28c13","build_time":"2026-11-09T04:55:55Z","modified":false},
+    "health_http": 200,
+    "health_body": {"status":"ok"},
+    "ingress_sources_http": 401,
+    "ingress_sources_body": {"error":"missing Authorization header"},
+    "supervised_env_keys": "CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE absent from /home/kara/.hermes/secrets/crier-fleet.env"
+  },
+  "owner_gate": "Configure CR_INGEST_WEBHOOK_ENABLED and CR_INGEST_STORE_FILE in the supervised crier service environment, perform the approved restart, then rerun the scratch-repository boardctl delivery loop and verify 202-to-inbox-to-doctor-depth-0.",
+  "local_gate": "PASS: go build ./... rc=0; go vet ./... rc=0; go test ./... -count=1 rc=0; bash scripts/check-board.sh rc=0 (RESULT OK, 449 pre-existing warnings)",
+  "remote_ci": "observed-only: top three crier-dev/crier runs include completed success, pending, completed success; no completed failure",
+  "verdict": "none:owner-external-gate",
+  "commit": "none:verification-only",
+  "memory": "none:deferred-wrapper-rejected-required-payload",
+  "off_by_one": "none:verification-only no debugging",
+  "trace": "ch:trace row=BOARDCTL-HOOK-001 spec=none:sibling-repo-implementation wave=.coding-hermes/waves/crier-foreman-2026-11-15-05-51-01.json#none:verification-only test=none:owner-deployment-gate evidence=.coding-hermes/evidence/crier-foreman-2026-11-15-05-51-01-BOARDCTL-HOOK-001.json witness=live:http://127.0.0.1:8767/version verdict=none:owner-external-gate commit=none:verification-only memory=none:deferred-wrapper-rejected-required-payload"
+}
