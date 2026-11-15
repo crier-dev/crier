@@ -133,3 +133,55 @@ func TestInboxTTL_ExpiresAndReceipts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, deadAgain, 1)
 }
+
+// TestInboxTTL_DefaultContractExpiresAndReceipts proves the deployment default
+// lane against the real PostgreSQL backend. No consumer JSON is stored on the
+// target, so the Handler must resolve the 24h default rather than silently
+// treating the absent contract as an opt-out.
+func TestInboxTTL_DefaultContractExpiresAndReceipts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	store := newTestStore(t)
+	db := openTestDB(ctx, t)
+	defer db.Close()
+
+	sender := newTestAgent(t, store, "ttl-default-sender")
+	target := newTestAgent(t, store, "ttl-default-target")
+
+	never := 0
+	overdue := &InboxEntry{
+		ID: "ttl-default-overdue", Payload: []byte(`{"task":"default"}`),
+		Sender: sender.ID, TTLSeconds: &never,
+	}
+	require.NoError(t, store.Deliver(target.ID, overdue))
+	require.NoError(t, db.QueryRowContext(ctx, `
+		UPDATE inbox_entries SET created_at = now() - interval '11 days'
+		WHERE id = $1 RETURNING created_at`, overdue.ID).Scan(&overdue.CreatedAt))
+
+	// The target has no consumer contract. The handler's documented default is
+	// therefore the only contract bound applied to this never-expiring row.
+	handler := NewHandler(store)
+	require.Equal(t, 1, handler.PurgeExpired())
+
+	dead, err := store.ListDeadLetters(target.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, dead, 1)
+	require.Equal(t, overdue.ID, dead[0].MessageID)
+	require.Equal(t, DeadLetterReasonContractExpired, dead[0].Reason)
+	require.JSONEq(t, `{"task":"default"}`, string(dead[0].Payload))
+	require.WithinDuration(t, dead[0].CreatedAt.Add(DefaultConsumerContractTTL), dead[0].ExpiredAt, 2*time.Second)
+
+	receipts, _, err := store.Retrieve(sender.ID, 30*time.Second, 10)
+	require.NoError(t, err)
+	require.Len(t, receipts, 1)
+	var body struct {
+		Code      string `json:"code"`
+		MessageID string `json:"message_id"`
+		Target    string `json:"target"`
+	}
+	require.NoError(t, json.Unmarshal(receipts[0].Payload, &body))
+	require.Equal(t, CodeMessageExpired, body.Code)
+	require.Equal(t, overdue.ID, body.MessageID)
+	require.Equal(t, target.ID, body.Target)
+}

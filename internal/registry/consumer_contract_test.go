@@ -280,28 +280,80 @@ func TestInboxTTL_DefaultContractBoundsNeverExpiringMessage(t *testing.T) {
 // contract → the sweep dead-letters it, receipts the sender, removes it from
 // the inbox, and leaves the delivery record's identity intact; an entry still
 // inside its contract is untouched.
-func TestInboxTTL_SweepDisabledLeavesExpiredEntry(t *testing.T) {
+// contractSweepDisabledStore deliberately exposes only the base Store
+// interface. The optional ContractExpirer capability is therefore hidden from
+// Handler, which gives the falsifier a real disabled-sweep arm instead of merely
+// omitting a call from the test.
+type contractSweepDisabledStore struct {
+	store Store
+}
+
+func (s contractSweepDisabledStore) Register(agent *Agent) error   { return s.store.Register(agent) }
+func (s contractSweepDisabledStore) Get(id string) (*Agent, error) { return s.store.Get(id) }
+func (s contractSweepDisabledStore) List() []*Agent                { return s.store.List() }
+func (s contractSweepDisabledStore) Unregister(id string) error    { return s.store.Unregister(id) }
+func (s contractSweepDisabledStore) Deliver(agentID string, entry *InboxEntry) error {
+	return s.store.Deliver(agentID, entry)
+}
+func (s contractSweepDisabledStore) Retrieve(agentID string, leaseDuration time.Duration, maxMessages int) ([]*InboxEntry, string, error) {
+	return s.store.Retrieve(agentID, leaseDuration, maxMessages)
+}
+func (s contractSweepDisabledStore) Ack(agentID, leaseID string, messageIDs []string) error {
+	return s.store.Ack(agentID, leaseID, messageIDs)
+}
+func (s contractSweepDisabledStore) Stats(agentID string) (int, int, time.Duration, error) {
+	return s.store.Stats(agentID)
+}
+func (s contractSweepDisabledStore) PurgeExpired() int { return s.store.PurgeExpired() }
+
+// ch:trace row=INBOX-CRIER-001 spec=board-acceptance wave=.coding-hermes/waves/crier-foreman-2026-11-15-12-04-19.json#INBOX-CRIER-001 test=TestInboxTTL_SweepDisabledFalsifier doc=none:implementation-row evidence=none:worker-local-until-foreman-publishes witness=none:live-postgres-and-deployed-service-not-worker-owned verdict=none:foreman-will-judge commit=none:worker-commit memory=none:foreman-memory
+// STATUS: partial
+// TIER: T2
+// EVIDENCE: go test -short -count=1 -run '^TestInboxTTL_SweepDisabledFalsifier$' ./internal/registry/
+func TestInboxTTL_SweepDisabledFalsifier(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	base := NewMemoryStore()
 	target := &Agent{ID: "disabled-target", Consumer: &ConsumerContract{Reader: ConsumerReaderHarness, TTLSeconds: contractInt(60)}}
 	sender := &Agent{ID: "disabled-sender"}
-	require.NoError(t, store.Register(target))
-	require.NoError(t, store.Register(sender))
-	require.NoError(t, store.Deliver(target.ID, &InboxEntry{
+	require.NoError(t, base.Register(target))
+	require.NoError(t, base.Register(sender))
+	require.NoError(t, base.Deliver(target.ID, &InboxEntry{
 		ID: "disabled-expired", Payload: []byte(`{"expired":true}`), Sender: sender.ID,
 		CreatedAt: time.Now().UTC().Add(-time.Hour), TTLSeconds: contractInt(0),
 	}))
 
-	// Falsifier: no sweep call means expiry is not an inline timer. The entry
-	// remains claimable until the periodic worker runs.
-	depth, _, _, err := store.Stats(target.ID)
+	// Disabled arm: the message-level TTL is never-expiring, and hiding the
+	// optional contract capability makes the Handler's periodic sweep absent.
+	disabled := NewHandler(contractSweepDisabledStore{store: base})
+	require.Zero(t, disabled.PurgeExpired(), "the disabled consumer sweep must remove nothing")
+	depth, _, _, err := base.Stats(target.ID)
 	require.NoError(t, err)
-	require.Equal(t, 1, depth)
-	require.Empty(t, store.PurgeExpired(), "message-level TTL is never-expiring")
-	// The disabled arm is represented by not invoking Handler.PurgeExpired;
-	// direct Store.PurgeExpired is intentionally count-only and cannot enforce
-	// the consumer contract.
+	require.Equal(t, 1, depth, "an expired contract entry remains in the inbox when the sweep is disabled")
+	dead, err := base.ListDeadLetters(target.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, dead, "disabled sweep must not create a dead letter")
+	require.Empty(t, senderInbox(t, base, sender.ID), "disabled sweep must not create a receipt")
+
+	// Enabled arm: the same entry is now visible to the real Handler sweep and
+	// must take the dead-letter plus receipt path.
+	enabled := NewHandler(base)
+	require.Equal(t, 1, enabled.PurgeExpired())
+	dead, err = base.ListDeadLetters(target.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, dead, 1)
+	require.Equal(t, "disabled-expired", dead[0].MessageID)
+	receipts := senderInbox(t, base, sender.ID)
+	require.Len(t, receipts, 1)
+	require.Equal(t, CodeMessageExpired, receipts[0].Code)
+	require.Equal(t, "disabled-expired", receipts[0].MessageID)
+}
+
+// TestInboxTTL_SweepDisabledLeavesExpiredEntry is retained as a compatibility
+// name for callers that used the original acceptance test; the falsifier above
+// now exercises both disabled and enabled Handler paths.
+func TestInboxTTL_SweepDisabledLeavesExpiredEntry(t *testing.T) {
+	t.Run("falsifier", TestInboxTTL_SweepDisabledFalsifier)
 }
 
 func TestInboxTTL_SweepExpiresSQLite(t *testing.T) {
