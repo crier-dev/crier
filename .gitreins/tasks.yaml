@@ -4217,3 +4217,15 @@ tasks:
   status: complete
   created_at: '2026-11-15T12:22:23.755189+00:00'
   completed_at: '2026-11-15T12:46:38.521574+00:00'
+- id: DF-CRIER-505
+  title: Publish harness consumer census contract and keep docs claims synchronized
+  criteria:
+  - 'PROOF: cmd/server/openapi.yaml and docs/openapi.yaml declare GET /harness/consumer-census
+    with response schema and bearer auth; the route-census parity test compares route
+    paths rather than only counts; served OpenAPI includes the path; docs-claims and
+    README inventory tests pass. FAILIF: either spec omits the path, route parity
+    is count-only, served OpenAPI omits it, README/docs counts are stale, or the named
+    test selector matches no test.'
+  status: complete
+  created_at: '2026-11-16T08:41:53.923455+00:00'
+  completed_at: '2026-11-16T08:41:55.104092+00:00'
