@@ -71,7 +71,7 @@ test("execution assertion rejects canned, errored, missing and invalid markers",
   assert.equal(check({ reply: live }).status, 0, "crier generic/raw reply envelope");
 });
 
-async function startConsumer(t, { key = "fixture-only", command, harness = "opencode", sdk, liveFlag = "1", budget = "250", observationStream = "?stream=stdout" } = {}) {
+async function startConsumer(t, { key = "fixture-only", command, harness = "opencode", sdk, liveFlag = "1", budget = "250", observationStream = "?stream=stdout", registryHandler } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "crier-execution-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await copyFile(consumer, join(dir, "consumer.mjs"));
@@ -84,7 +84,7 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
     await writeFile(join(pkg, "package.json"), JSON.stringify({ type: "module", exports: "./index.mjs" }));
     await writeFile(join(pkg, "index.mjs"), sdk);
   }
-  const registry = createServer((req, res) => { req.resume(); res.writeHead(200); res.end("{}"); });
+  const registry = createServer(registryHandler || ((req, res) => { req.resume(); res.writeHead(200); res.end("{}"); }));
   registry.listen(0, "127.0.0.1");
   await once(registry, "listening");
   t.after(() => new Promise((done) => registry.close(done)));
@@ -761,6 +761,38 @@ test("echo sink echoes the delivery token on every reply shape", async (t) => {
   const plain = await deliver({ payload: { text: "delivery without a token" } });
   assert.equal(plain.headers.get("x-crier-response-token"), null, "no request token ⇒ no response token");
   console.log(`sink echo: blocking=${deliveryToken} wrong-shape=${deliveryToken} plain=null`);
+});
+
+test("consumer replaces a stale registration instead of accepting its 409", async (t) => {
+  // INT-CI-039 determinism half: crier never overwrites a row, and its 409 also
+  // covers "same id, different public_key". Counting a 409 as success keeps the
+  // webhook config of whichever process registered first — the ambiguity that
+  // made one battery run green and the next red on the same sha. The consumer
+  // must replace the row and register itself.
+  const posts = []; let deletes = 0;
+  const registryHandler = (req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      if (req.method === "DELETE") {
+        deletes++;
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      const conflict = posts.length === 0;
+      posts.push(JSON.parse(raw || "{}"));
+      res.writeHead(conflict ? 409 : 201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(conflict ? { error: "agent already exists" } : {}));
+    });
+  };
+  await startConsumer(t, { registryHandler, command: "printf 'x'" });
+  for (let i = 0; i < 100 && posts.length < 2; i++) await new Promise((done) => setTimeout(done, 20));
+  assert.equal(posts.length, 2, `expected the 409 to be replaced by a second POST, saw ${posts.length}`);
+  assert.equal(deletes, 1, "the stale row must be deleted before re-registering");
+  assert.equal(posts[1].webhook.delivery_mode, "blocking");
+  assert.equal(posts[1].webhook.require_response_token, true, "the re-registration carries the checked-in contract");
+  console.log(`stale 409 replaced: posts=${posts.length} deletes=${deletes} require_response_token=${posts[1].webhook.require_response_token}`);
 });
 
 test("observer selector is additive and rejects unknown modes", async (t) => {
