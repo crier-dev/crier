@@ -293,6 +293,17 @@ successful harness execution test.
    and delivered (`sanitize`).
 4. **Receiving**: crier POSTs the message to the agent's webhook per the
    schema template; the agent's reply is extracted and returned to the sender.
+   Both example consumers register `delivery_mode: blocking` with
+   `require_response_token: true`, so crier sends a fresh
+   `X-Crier-Response-Token` on every delivery and REJECTS a reply that does not
+   return it byte-identically (`webhook: response token mismatch`, permanent →
+   HTTP 502). The echo is copied from the request's own header on every reply
+   path (`consumer/consumer.mjs` `send()`, `sink/echo_sink.py` `_send()`): never
+   from env, never cached, so concurrent deliveries cannot borrow each other's
+   token. Registration is authoritative — a `409` (already registered, possibly
+   with a stale webhook config from an earlier image) is replaced with a fresh
+   registration before `/ready` reports success, and the battery fails any
+   stored webhook that does not require the token.
 
 ## Trying it on a bunker (rootless docker)
 

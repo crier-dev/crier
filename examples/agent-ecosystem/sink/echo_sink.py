@@ -36,13 +36,36 @@ def register():
     body = json.loads(json.dumps(REGISTRATION_TEMPLATE))
     body["public_key"] = pub
     body["webhook"]["url"] = f"http://sink:{PORT}/hook"
-    for _ in range(30):
-        try:
+
+    def attempt():
+        r = requests.post(f"{CRIER}/agents", json=body, timeout=3)
+        with LOCK:
+            REG["last_status"] = r.status_code
+            REG["last_body"] = r.text[:300]
+        if r.status_code == 409:
+            # crier never overwrites a registration, and its 409 also covers
+            # "same id, different public_key". Accepting it would preserve
+            # whatever webhook config an EARLIER process registered — on
+            # 2026-11-16 that stale row is what let one battery run pass and
+            # the next fail on the SAME sha (INT-CI-039). Replace the row so
+            # the contract crier delivers through is always this payload.
+            try:
+                drop = requests.delete(f"{CRIER}/agents/{body['id']}", timeout=3)
+                if drop.status_code not in (204, 404):
+                    print(f"sink stale registration could not be replaced: "
+                          f"HTTP {drop.status_code} — {drop.text[:200]}", flush=True)
+            except Exception as e:
+                print(f"sink stale registration replace error: {type(e).__name__}: {e}", flush=True)
             r = requests.post(f"{CRIER}/agents", json=body, timeout=3)
             with LOCK:
                 REG["last_status"] = r.status_code
                 REG["last_body"] = r.text[:300]
-            if r.status_code in (200, 201, 409):
+        return r
+
+    for _ in range(30):
+        try:
+            r = attempt()
+            if r.status_code in (200, 201):
                 with LOCK:
                     REG["registered"] = True
                 print(f"sink registered with crier: {r.status_code}", flush=True)
@@ -67,6 +90,15 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        # INT-CI-039: echo the per-delivery token crier sent, byte-identically.
+        # crier's blocking driver rejects a reply that does not return it
+        # (internal/webhook/driver.go → ErrResponseTokenMismatch, permanent →
+        # 502). The single source is THIS request's header — never env, never a
+        # cached "last token", so concurrent deliveries each answer with their
+        # own proof. Absent header ⇒ absent response header.
+        token = self.headers.get("X-Crier-Response-Token")
+        if token:
+            self.send_header("X-Crier-Response-Token", token)
         self.end_headers()
         self.wfile.write(body)
 

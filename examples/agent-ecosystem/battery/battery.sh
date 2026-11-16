@@ -55,13 +55,40 @@ wait_ready() { # name url
 wait_registered() { # agent-id — gate the round-trips on REGISTRATION, not on a
   # process that merely answers /ready: a round-trip against an id crier does
   # not know is a 404, not a bus failure (INT-CI-007).
+  #
+  # INT-CI-039: "registered" means registered with the CHECKED-IN webhook
+  # contract — blocking + require_response_token — not merely present. A row
+  # left behind by an earlier image carries THAT image's payload; crier then
+  # delivers without a token, the consumers trivially "pass", and every
+  # blocking arm measures a stack nobody configured (2026-11-16: the same sha
+  # was green at 16:07 and red at 16:17). Contract drift is a NAMED failure,
+  # never a silent pass.
   local id="$1" i status body t0 t1
   t0=$(date +%s)
   for i in $(seq 1 60); do
     status="$(curl -s -o "/tmp/wait_registered.$id" -w '%{http_code}' "$CRIER/agents/$id")"
     if [[ "$status" == "200" ]]; then
       t1=$(date +%s)
-      echo "registered: $id (HTTP $status, $((t1-t0))s)"
+      if ! python3 - "/tmp/wait_registered.$id" "$id" <<'PY'
+import json, sys
+path, agent = sys.argv[1], sys.argv[2]
+try:
+    row = json.load(open(path))
+except Exception as err:
+    print(f"unreadable registration for {agent}: {err}")
+    raise SystemExit(1)
+webhook = (row or {}).get("webhook") or {}
+if webhook.get("delivery_mode") != "blocking" or webhook.get("require_response_token") is not True:
+    print(f"stale registration for {agent}: webhook={json.dumps(webhook)}")
+    raise SystemExit(1)
+PY
+      then
+        FAIL=$((FAIL+1))
+        echo "FAIL  registration contract $id (stored webhook is not the checked-in blocking + require_response_token payload)"
+        echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"registration_contract\",\"agent\":\"$id\",\"http\":$status,\"stale\":true}" >> "$EVIDENCE"
+        return 1
+      fi
+      echo "registered: $id (HTTP $status, webhook blocking + require_response_token, $((t1-t0))s)"
       echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"registered\",\"agent\":\"$id\",\"http\":$status,\"seconds\":$((t1-t0))}" >> "$EVIDENCE"
       return 0
     fi

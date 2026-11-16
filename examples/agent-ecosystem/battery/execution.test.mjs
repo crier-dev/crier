@@ -122,15 +122,18 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
     await new Promise((done) => setTimeout(done, 20));
   }
   assert.ok(ready, log);
-  const hook = async (text = "hello", requestNonce = nonce) => {
+  const hook = async (text = "hello", requestNonce = nonce, responseToken = undefined) => {
     const started = performance.now();
     const observed = await fetch(`${url}/battery-output/${requestNonce}${observationStream}${observationStream ? "&" : "?"}battery_id=${batteryId}`);
     assert.equal(observed.status,200);
     const output = observed.text();
-    const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { text, battery_id: batteryId } }) });
+    const response = await fetch(`${url}/hook`, { method: "POST",
+      headers: responseToken === undefined ? {} : { "X-Crier-Response-Token": responseToken },
+      body: JSON.stringify({ payload: { text, battery_id: batteryId } }) });
     const body = await response.json();
     captures.set(body,{output:await output,text,batteryId});
-    return { status: response.status, body, elapsed: performance.now() - started };
+    return { status: response.status, body, elapsed: performance.now() - started,
+      responseToken: response.headers.get("x-crier-response-token") };
   };
   return { ...await hook(), dir, hook, url };
 }
@@ -239,6 +242,13 @@ elif url.endswith('/stats'):
     except FileNotFoundError: n = 0
     with open(path, 'w') as f: f.write(str(n + 1))
     body = {'deliveries': n}
+elif '/agents/' in url and '-d' not in args and not url.endswith('/inbox'):
+    # Registration row read (INT-CI-039): the battery now gates round-trips on
+    # the stored webhook contract, so the fixture reports the checked-in one —
+    # except in the stale-registration mode, which proves drift FAILS.
+    stale = os.environ.get('HARNESS_MODE') == 'stale-registration'
+    body = {'id': url.rsplit('/', 1)[-1], 'webhook': {'url': 'http://fixture/hook',
+        'delivery_mode': 'blocking', 'require_response_token': not stale}}
 elif url.endswith('/inbox'):
     data = args[args.index('-d') + 1]
     if '/guarded/' in url:
@@ -275,7 +285,9 @@ elif url.endswith('/inbox'):
         pending.write_bytes(output.encode())
         pending.rename(Path(os.environ['STATS_FILE'] + '.' + capture_nonce))
         body = {'reply': result}
-if '-o' not in args: print(json.dumps(body, separators=(',', ':')), end='')
+if '-o' in args:
+    open(args[args.index('-o') + 1], 'w').write(json.dumps(body, separators=(',', ':')))
+else: print(json.dumps(body, separators=(',', ':')), end='')
 if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(code)).replace('\\\\n', '\\n'), end='')
 `, { mode: 0o755 });
   await writeFile(join(dir, "not-a-directory"), "copy must fail loudly");
@@ -283,6 +295,7 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
     ["canned-with-key", "fixture-only", canned, "7 pass / 6 fail / 0 skip"],
     ["live-with-key", "fixture-only", live, "13 pass / 0 fail / 0 skip"],
     ["live-without-guard-key", "", live, "11 pass / 0 fail / 1 skip"],
+    ["stale-registration", "fixture-only", live, "13 pass / 7 fail / 0 skip"],
     ["echo-without-run", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
     ["replayed", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
     ["missing", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
@@ -298,7 +311,17 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
     assert.equal(run.status, !["live-with-key", "live-without-guard-key"].includes(name) ? 1 : 0, run.stdout + run.stderr);
     assert.ok(run.stdout.includes(expected), run.stdout + run.stderr);
     console.log(`fixture ${name}: ${expected}; exit ${run.status}`);
-    if (["live-with-key", "live-without-guard-key"].includes(name)) {
+    if (name === "stale-registration") {
+      // INT-CI-039: a stored webhook that does not require the response token is
+      // exactly the stale-row state that made one run green and the next red on
+      // the same sha. It must FAIL the battery, naming the contract.
+      const stale = run.stdout.split("\n").filter((line) => line.startsWith("FAIL  registration contract "));
+      assert.deepEqual(stale.map((line) => line.match(/^FAIL {2}registration contract (\S+) /)[1]).sort(),
+        ["aider", "claude-code", "codex", "goose", "opencode", "pi-agent", "sink"], run.stdout);
+      for (const line of stale) assert.match(line, /stored webhook is not the checked-in blocking \+ require_response_token payload/);
+      console.log(stale[0]);
+    }
+    if (["live-with-key", "live-without-guard-key", "stale-registration"].includes(name)) {
       const qualifier = "SUPPORTED means the capture bytes reported by the consumer equal its reply, hashed before decode; it is not attestation against a consumer fabricating both channels.";
       const lines = run.stdout.split("\n").filter((line) => line.startsWith("PASS  round-trip ") && line.includes(" prompt "));
       assert.equal(lines.length, 12, "every supported prompt must declare the ceiling");
@@ -337,7 +360,7 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
       assert.equal(new Set(harnessRows.map((r) => r.nonce)).size, 12, "unique nonce for EVERY request");
       assert.equal(new Set(harnessRows.map((r) => r.run_nonce)).size, 1);
       assert.ok(harnessRows.every((r) => r.run_started_at && r.request_started_at));
-      if (["live-with-key", "live-without-guard-key"].includes(name)) {
+      if (["live-with-key", "live-without-guard-key", "stale-registration"].includes(name)) {
         assert.ok(harnessRows.every((r) => r.result === "PASS" && r.nonce_matched === true && r.nonce_echo === r.nonce));
         for (let i = 0; i < harnessRows.length; i += 2) {
           assert.notEqual(harnessRows[i].prompt, harnessRows[i + 1].prompt);
@@ -654,6 +677,90 @@ test("stdout-only observer excludes stderr and binds exact UTF-8 pipe bytes", as
   assert.equal(proof.outcome, "SUPPORTED", JSON.stringify(proof));
   assert.equal(proof.captured_runtime_sha256, body.stdout_raw_sha256);
   assert.equal(proof.captured_runtime_bytes, body.stdout_bytes);
+});
+
+// INT-CI-039: crier's blocking driver requires the reply to echo the per-delivery
+// X-Crier-Response-Token byte-identically; a mismatch is a PERMANENT failure
+// (internal/webhook/driver.go:444 → ErrResponseTokenMismatch → HTTP 502). These
+// arms drive the SHIPPED consumer and sink, so dropping the echo fails here.
+const deliveryToken = "9f2a1c4e5b6d7e8f90a1b2c3d4e5f607";
+
+test("consumer echoes the delivery's response token verbatim, and only when sent", async (t) => {
+  const { hook, url } = await startConsumer(t, { command: `printf 'héllo\\n${marker}\\n${digestMarker}'` });
+  const withToken = await hook("What is the capital of France?", nonce, deliveryToken);
+  assert.equal(withToken.status, 200);
+  assert.equal(withToken.body.status, "OK");
+  assert.equal(withToken.responseToken, deliveryToken, "reply must echo X-Crier-Response-Token byte-identically");
+  // Absent on the request ⇒ absent on the reply: the echo is not a constant and
+  // never carried over from the previous delivery.
+  const withoutToken = await hook("What is two plus three?");
+  assert.equal(withoutToken.responseToken, null, "no request token ⇒ no response token");
+  // A delivery that ends in the consumer's error reply still carries it: crier
+  // verifies the reply of a delivery it made, whatever the consumer decided.
+  const broken = await fetch(`${url}/hook`, { method: "POST",
+    headers: { "X-Crier-Response-Token": deliveryToken }, body: "{not json" });
+  assert.equal(broken.status, 200);
+  assert.equal(broken.headers.get("x-crier-response-token"), deliveryToken);
+  assert.match((await broken.json()).error, /JSON|Unexpected/);
+  console.log(`consumer echo: ok=${withToken.responseToken} plain=${withoutToken.responseToken} error-reply=${deliveryToken}`);
+});
+
+test("concurrent deliveries each echo their own token (no shared last-token state)", async (t) => {
+  const { url } = await startConsumer(t, { key: "" }); // refusal path: no runtime spawn
+  const tokens = ["0".repeat(31) + "1", "0".repeat(31) + "2", "a".repeat(32)];
+  const responses = await Promise.all(tokens.map((token) => fetch(`${url}/hook`, { method: "POST",
+    headers: { "X-Crier-Response-Token": token }, body: JSON.stringify({ payload: { text: "hello" } }) })));
+  for (let i = 0; i < tokens.length; i++) {
+    assert.equal(responses[i].status, 200);
+    assert.equal(responses[i].headers.get("x-crier-response-token"), tokens[i], `delivery ${i} echoed another delivery's token`);
+  }
+});
+
+test("echo sink echoes the delivery token on every reply shape", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "crier-sink-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  // Same layout the sink image ships: the script reads its registration
+  // template from its own directory (sink/Dockerfile copies both to /srv).
+  await copyFile(resolve(here, "../sink/echo_sink.py"), join(dir, "echo_sink.py"));
+  await copyFile(resolve(here, "../registration-payloads.json"), join(dir, "registration-payloads.json"));
+  const registry = createServer((req, res) => { req.resume(); res.writeHead(200, { "Content-Type": "application/json" }); res.end("{}"); });
+  registry.listen(0, "127.0.0.1");
+  await once(registry, "listening");
+  t.after(() => new Promise((done) => registry.close(done)));
+  const reserve = createServer();
+  reserve.listen(0, "127.0.0.1");
+  await once(reserve, "listening");
+  const port = reserve.address().port;
+  await new Promise((done) => reserve.close(done));
+  const child = spawn("python3", [join(dir, "echo_sink.py")], { env: { ...process.env,
+    PORT: String(port), CRIER_URL: `http://127.0.0.1:${registry.address().port}` }, stdio: ["ignore", "pipe", "pipe"] });
+  let log = "";
+  child.stdout.on("data", (b) => { log += b; });
+  child.stderr.on("data", (b) => { log += b; });
+  t.after(async () => { if (child.exitCode === null) { child.kill(); await once(child, "exit"); } });
+  const url = `http://127.0.0.1:${port}`;
+  let ready = false;
+  for (let i = 0; i < 100; i++) {
+    if (child.exitCode !== null) break;
+    try { if ((await fetch(`${url}/health`)).ok) { ready = true; break; } } catch {}
+    await new Promise((done) => setTimeout(done, 50));
+  }
+  assert.ok(ready, log);
+  const deliver = (payload, token) => fetch(`${url}/hook`, { method: "POST",
+    headers: { "Content-Type": "application/json", ...(token === undefined ? {} : { "X-Crier-Response-Token": token }) },
+    body: JSON.stringify(payload) });
+  const ok = await deliver({ payload: { text: "What vegetable is in plot B?" } }, deliveryToken);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("x-crier-response-token"), deliveryToken, "sink echo must be byte-identical");
+  assert.equal((await ok.json()).reply, "ECHO: What vegetable is in plot B?");
+  // The documented wrong-shape trap answers 200 ECHO: no text — and still echoes.
+  const shape = await deliver({ payload: { task: "wrong shape" } }, deliveryToken);
+  assert.equal(shape.status, 200);
+  assert.equal(shape.headers.get("x-crier-response-token"), deliveryToken);
+  assert.equal((await shape.json()).reply, "ECHO: no text");
+  const plain = await deliver({ payload: { text: "delivery without a token" } });
+  assert.equal(plain.headers.get("x-crier-response-token"), null, "no request token ⇒ no response token");
+  console.log(`sink echo: blocking=${deliveryToken} wrong-shape=${deliveryToken} plain=null`);
 });
 
 test("observer selector is additive and rejects unknown modes", async (t) => {

@@ -77,6 +77,19 @@ let registered = false;
 let lastStatus = null;
 let lastBody = "";
 
+// One registration attempt. Kept separate so a stale 409 can be replaced and
+// retried without duplicating the payload construction.
+async function postRegistration(body) {
+  const r = await fetch(`${CRIER}/agents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  lastStatus = r.status;
+  lastBody = (await r.text()).slice(0, 300);
+  return r;
+}
+
 async function register() {
   const pub = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
   // `POST /agents` decodes the `webhook` object STRICTLY — an unknown key is a
@@ -92,19 +105,27 @@ async function register() {
   body.id = AGENT_ID;
   body.public_key = pub;
   body.webhook.url = `http://${AGENT_ID}:${PORT}/hook`;
-  const r = await fetch(`${CRIER}/agents`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  lastStatus = r.status;
-  lastBody = (await r.text()).slice(0, 300);
-  registered = r.ok || r.status === 409;
+  let r = await postRegistration(body);
+  if (r.status === 409) {
+    // crier never overwrites a registration, and its 409 also covers "same id,
+    // different public_key". Accepting it would keep whatever webhook config an
+    // EARLIER process registered — on 2026-11-16 a row registered before this
+    // payload required a response token is exactly what let one battery run
+    // pass and the next fail on the SAME sha (INT-CI-039). Replace the row, so
+    // the contract crier delivers through is always this checked-in payload.
+    const drop = await fetch(`${CRIER}/agents/${AGENT_ID}`, { method: "DELETE" });
+    if (!drop.ok && drop.status !== 404) {
+      console.log(`${AGENT_ID} stale registration could not be replaced: HTTP ${drop.status}`);
+    }
+    r = await postRegistration(body);
+  }
+  registered = r.ok;
   if (registered) {
     console.log(`${AGENT_ID} registered: ${r.status}`);
   } else {
     // A rejected registration must be impossible to miss: the response body
-    // names the exact field the server refused.
+    // names the exact field the server refused. Never claim readiness on a row
+    // this process did not write (INT-CI-039).
     console.log(`${AGENT_ID} registration REJECTED: HTTP ${r.status} — ${lastBody}`);
   }
 }
@@ -312,9 +333,20 @@ if (process.argv[2] === "--pi-runtime") {
     process.exitCode = 1;
   }
 } else createServer(async (req, res) => {
+  // INT-CI-039: a blocking delivery carries ONE per-request token in
+  // X-Crier-Response-Token, and crier rejects the reply unless it comes back
+  // byte-identically (internal/webhook/driver.go verifies it; a mismatch is a
+  // permanent, non-retryable failure → 502). The single source is THIS
+  // request's header: read once per request, never from env, never cached from
+  // a previous delivery — so concurrent deliveries cannot answer with each
+  // other's proof. Absent header ⇒ absent response header.
+  const responseToken = req.headers["x-crier-response-token"];
+  const echoToken = typeof responseToken === "string" && responseToken !== "";
   const send = (code, obj) => {
     const b = JSON.stringify(obj);
-    res.writeHead(code, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(b) });
+    const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(b) };
+    if (echoToken) headers["X-Crier-Response-Token"] = responseToken;
+    res.writeHead(code, headers);
     res.end(b);
   };
   if (req.method === "GET" && req.url.startsWith("/battery-output/")) {
