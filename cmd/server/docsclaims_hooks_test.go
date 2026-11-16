@@ -102,7 +102,9 @@ func TestDocsClaimsBehaviors(t *testing.T) {
 	// then runs its subprocesses under post-storm cache pressure — measured
 	// 18s past a 60s package alarm (make2, three-run floor). In the serial
 	// phase it is uncontended and finishes inside the phase every time.
+	parallelBoot(t)
 	root := resolveRepoRoot(t)
+
 	set := loadClaimsFile(t, root)
 	// Removing or relabeling the claim must not make the behavioral gate vacuous.
 	found := 0

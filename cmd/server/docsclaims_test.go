@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -193,41 +194,140 @@ func defaultScanPaths(docText string) []string {
 // the route EXISTS; (b) kind=status claims run their id-keyed live probe; (c) every
 // path-looking token a doc prints is either a live route, on ignore_paths, or a
 // failure — nothing is silently skipped.
+type routeProbeJob struct {
+	path  string
+	claim *docClaim
+	doc   string
+}
+
+type routeProbeResult struct {
+	status int
+	err    error
+}
+
+// probeRoutes runs independent GET probes with a bounded worker pool. Results stay
+// in input order so diagnostics are deterministic even though requests overlap.
+func probeRoutes(probe func(string) (int, error), jobs []routeProbeJob) []routeProbeResult {
+	results := make([]routeProbeResult, len(jobs))
+	if len(jobs) == 0 {
+		return results
+	}
+	// Claims and scanned paths often name the same route. Probe each unique path
+	// once, then fan its result back out: this preserves every assertion while
+	// avoiding duplicate concurrent hits on stateful GET handlers such as /metrics.
+	unique := make([]string, 0, len(jobs))
+	indices := make(map[string][]int, len(jobs))
+	for i, job := range jobs {
+		if _, ok := indices[job.path]; !ok {
+			unique = append(unique, job.path)
+		}
+		indices[job.path] = append(indices[job.path], i)
+	}
+	probed := make([]routeProbeResult, len(unique))
+	// /metrics renders mutable process-wide series while ordinary requests update
+	// them. Keep that endpoint out of the worker batch; all other route probes are
+	// independent GETs and remain bounded-concurrent.
+	var parallelPaths []int
+	var metricsPaths []int
+	for i, path := range unique {
+		if path == "/metrics" {
+			metricsPaths = append(metricsPaths, i)
+		} else {
+			parallelPaths = append(parallelPaths, i)
+		}
+	}
+	const workers = 8
+	count := workers
+	if len(parallelPaths) < count {
+		count = len(parallelPaths)
+	}
+	var next atomic.Int32
+	var wg sync.WaitGroup
+	if count > 0 {
+		wg.Add(count)
+		for i := 0; i < count; i++ {
+			go func() {
+				defer wg.Done()
+				for {
+					position := int(next.Add(1)) - 1
+					if position >= len(parallelPaths) {
+						return
+					}
+					idx := parallelPaths[position]
+					probed[idx].status, probed[idx].err = probe(unique[idx])
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	for _, idx := range metricsPaths {
+		probed[idx].status, probed[idx].err = probe(unique[idx])
+	}
+	for idx, path := range unique {
+		for _, jobIndex := range indices[path] {
+			results[jobIndex] = probed[idx]
+		}
+	}
+	return results
+}
+
+func TestProbeRoutesPreservesOrderAndBoundedConcurrency(t *testing.T) {
+	const total = 24
+	jobs := make([]routeProbeJob, total)
+	for i := range jobs {
+		jobs[i] = routeProbeJob{path: fmt.Sprintf("/route/%02d", i)}
+	}
+	var active, maxActive atomic.Int32
+	results := probeRoutes(func(path string) (int, error) {
+		current := active.Add(1)
+		for {
+			previous := maxActive.Load()
+			if current <= previous || maxActive.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		time.Sleep(time.Millisecond)
+		active.Add(-1)
+		return len(path), nil
+	}, jobs)
+	if got := len(results); got != total {
+		t.Fatalf("probe result count = %d, want %d", got, total)
+	}
+	if got := maxActive.Load(); got < 2 || got > 8 {
+		t.Fatalf("maximum concurrent probes = %d, want bounded concurrency in [2, 8]", got)
+	}
+	for i, result := range results {
+		want := len(jobs[i].path)
+		if result.err != nil || result.status != want {
+			t.Fatalf("result[%d] = (%d, %v), want (%d, nil)", i, result.status, result.err, want)
+		}
+	}
+}
+
 func (p probeSet) verifyRoutesAndScanned(set claimsFile) []claimResult {
 	var res []claimResult
-	for _, c := range set.Claims {
+	var routeJobs []routeProbeJob
+	for i := range set.Claims {
+		c := &set.Claims[i]
 		switch c.Kind {
 		case "route":
 			path, ok := c.Expect.(string)
 			if !ok {
-				res = append(res, claimResult{claim: c, kind: "route", msg: fmt.Sprintf(
+				res = append(res, claimResult{claim: *c, kind: "route", msg: fmt.Sprintf(
 					"claim %s: expect must be a path string, got %T (%v)", c.ID, c.Expect, c.Expect)})
 				continue
 			}
-			status, err := p.probeRoute(path)
-			if err != nil {
-				res = append(res, claimResult{claim: c, kind: "route", msg: fmt.Sprintf(
-					"claim %s [route]: doc=%s quote=%q expected=non-404 observed=probe error: %v",
-					c.ID, c.Doc, c.Quote, err)})
-				continue
-			}
-			// Gate rule: only 404 is failure. 401/403/405/400/415 — or any other
-			// status — all mean the route is registered.
-			if status == http.StatusNotFound {
-				res = append(res, claimResult{claim: c, kind: "route", msg: fmt.Sprintf(
-					"claim %s [route]: doc=%s quote=%q expected=non-404 observed=404 (route %s is not registered)",
-					c.ID, c.Doc, c.Quote, path)})
-			}
+			routeJobs = append(routeJobs, routeProbeJob{path: path, claim: c})
 		case "status":
 			status, err := p.probeStatus(c.ID)
 			if err != nil {
-				res = append(res, claimResult{claim: c, kind: "status", msg: fmt.Sprintf(
+				res = append(res, claimResult{claim: *c, kind: "status", msg: fmt.Sprintf(
 					"claim %s [status]: doc=%s quote=%q expected=%v observed=probe error: %v",
 					c.ID, c.Doc, c.Quote, c.Expect, err)})
 				continue
 			}
 			if fmt.Sprint(status) != fmt.Sprint(c.Expect) {
-				res = append(res, claimResult{claim: c, kind: "status", msg: fmt.Sprintf(
+				res = append(res, claimResult{claim: *c, kind: "status", msg: fmt.Sprintf(
 					"claim %s [status]: doc=%s quote=%q expected=%v observed=%d",
 					c.ID, c.Doc, c.Quote, c.Expect, status)})
 			}
@@ -239,22 +339,19 @@ func (p probeSet) verifyRoutesAndScanned(set claimsFile) []claimResult {
 	// route line (e.g. a curl example pointing at an endpoint that does not exist).
 	if p.scanPaths != nil && p.probeRoute != nil {
 		ignored := map[string]bool{}
-		for _, p := range set.IgnorePaths {
-			ignored[p] = true
-		}
-		claimed := map[string]bool{}
-		for _, c := range set.Claims {
-			if c.Kind == "route" {
-				if s, ok := c.Expect.(string); ok {
-					claimed[s] = true
-				}
-			}
+		for _, path := range set.IgnorePaths {
+			ignored[path] = true
 		}
 		docs := map[string]bool{}
 		for _, c := range set.Claims {
 			docs[c.Doc] = true
 		}
+		var docNames []string
 		for doc := range docs {
+			docNames = append(docNames, doc)
+		}
+		sort.Strings(docNames)
+		for _, doc := range docNames {
 			text, err := p.readDoc(doc)
 			if err != nil {
 				continue
@@ -264,24 +361,41 @@ func (p probeSet) verifyRoutesAndScanned(set claimsFile) []claimResult {
 				continue
 			}
 			for _, cand := range cands {
-				if ignored[cand] {
-					continue
+				if !ignored[cand] {
+					routeJobs = append(routeJobs, routeProbeJob{path: cand, doc: doc})
 				}
-				status, err := p.probeRoute(cand)
-				if err == nil && status != http.StatusNotFound {
-					continue // live route (exists) — fine
-				}
-				var observe string
-				if err != nil {
-					observe = "probe error: " + err.Error()
-				} else {
-					observe = fmt.Sprintf("%d", status)
-				}
-				res = append(res, claimResult{kind: "route", msg: fmt.Sprintf(
-					"scanned path %q in %s is neither a live route nor on ignore_paths: expected=live-or-ignored observed=%s (add it to ignore_paths only if it is NOT an API route)",
-					cand, doc, observe)})
 			}
 		}
+	}
+
+	probed := probeRoutes(p.probeRoute, routeJobs)
+	for i, job := range routeJobs {
+		status, err := probed[i].status, probed[i].err
+		if job.claim != nil {
+			c := job.claim
+			if err != nil {
+				res = append(res, claimResult{claim: *c, kind: "route", msg: fmt.Sprintf(
+					"claim %s [route]: doc=%s quote=%q expected=non-404 observed=probe error: %v",
+					c.ID, c.Doc, c.Quote, err)})
+				continue
+			}
+			if status == http.StatusNotFound {
+				res = append(res, claimResult{claim: *c, kind: "route", msg: fmt.Sprintf(
+					"claim %s [route]: doc=%s quote=%q expected=non-404 observed=404 (route %s is not registered)",
+					c.ID, c.Doc, c.Quote, job.path)})
+			}
+			continue
+		}
+		if err == nil && status != http.StatusNotFound {
+			continue
+		}
+		observe := fmt.Sprintf("%d", status)
+		if err != nil {
+			observe = "probe error: " + err.Error()
+		}
+		res = append(res, claimResult{kind: "route", msg: fmt.Sprintf(
+			"scanned path %q in %s is neither a live route nor on ignore_paths: expected=live-or-ignored observed=%s (add it to ignore_paths only if it is NOT an API route)",
+			job.path, job.doc, observe)})
 	}
 	return res
 }
