@@ -331,10 +331,16 @@ func startRunScopedServerWithEnv(args []string, getenv config.Getenv) *runScoped
 // parallel tests each booting a real server, UNBOUNDED concurrency meant
 // hundreds of goroutine sets fighting for GOMAXPROCS cores (the -count=5
 // thrash), while a tiny bound turns the batch into a near-serial queue whose
-// makespan brushes the 60s package budget. 64 live IO-bound servers leaves
-// enough headroom for the package's parallel batch while still bounding server
-// resources (INT-CI-014).
-var bootSlots = make(chan struct{}, 64)
+// makespan brushes the 60s package budget. 24 live IO-bound servers on a
+// 16-core host keeps both bounded: parallel tests queue for a slot at
+// t.Parallel time and hold it until their cleanup runs (INT-CI-014).
+//
+// DF-CRIER-506 A/B on 16 cores, -short -count=1, load 16.7 vs 17.6: cap 64
+// gave REAL 33.32s (USER 58.85s, CPU 223%), cap 24 gave REAL 33.27s (USER
+// 65.52s, CPU 246%). Raising this does not shorten the wall, so the bound
+// stays at 24; the win has to come from the tests' own work, not from more
+// live servers.
+var bootSlots = make(chan struct{}, 24)
 
 // parallelBoot enables test-level parallelism iff the suite is NOT running in
 // the process-env serial regime. Tests that call t.Setenv anywhere in their
@@ -2235,8 +2241,8 @@ func TestParallelBootOptsIntoParallelBatch(t *testing.T) {
 // closed) channel would deadlock the entire parallel batch into the package
 // timeout instead of failing a single test.
 func TestBootSlotsBoundAndRoundTrip(t *testing.T) {
-	if cap(bootSlots) != 64 {
-		t.Fatalf("bootSlots capacity = %d, want 64", cap(bootSlots))
+	if cap(bootSlots) != 24 {
+		t.Fatalf("bootSlots capacity = %d, want 24", cap(bootSlots))
 	}
 	saturated := make([]struct{}, 0, cap(bootSlots))
 	for i := 0; i < cap(bootSlots); i++ {
