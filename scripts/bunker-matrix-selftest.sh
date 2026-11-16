@@ -386,33 +386,51 @@ JSON
   fi
   FAKE_PORT="$(cat "$TMP/fake.port")"
   # Bounded readiness wait, NOT an immediate json.load. The counters document is
-  # rewritten on every fake-crier hit, and a read that landed before the first
-  # write (or inside a non-atomic rewrite window) returned an empty string; bash
-  # then compared `"" -ge 1`, the arm fell to its FAIL branch and reported the
-  # fake crier as never probed while the probes HAD hit it (INT-CI-026). Retry
-  # until the document parses, and report 0 only after the deadline so a genuine
-  # routing failure still fails the arm with a number instead of a traceback.
-  counters() {
-    local key="$1"
-    local val=""
-    local deadline=$((SECONDS + 5))
-    while :; do
-      if val="$(python3 -c '
+  # rewritten on every fake-crier hit, so each attempt reads one complete,
+  # atomic snapshot and keeps those values for both the assertion and its
+  # diagnostic (INT-CI-038). A genuine routing failure reports the last
+  # snapshot after the bounded deadline instead of looking too early.
+  probe_snapshot() {
+    local snapshot=""
+    if ! snapshot="$(python3 - "$TMP/counters.json" <<'PY'
 import json, sys
 try:
-    print(json.load(open(sys.argv[1])).get(sys.argv[2], 0))
-except (OSError, ValueError):
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+    values = [int(data.get(key, 0)) for key in ("status", "agents", "inbox")]
+except (OSError, TypeError, ValueError):
     raise SystemExit(1)
-' "$TMP/counters.json" "$key" 2>/dev/null)"; then
-        break
+print(*values)
+PY
+)"; then
+      return 1
+    fi
+    read -r SNAPSHOT_STATUS SNAPSHOT_AGENTS SNAPSHOT_INBOX <<< "$snapshot"
+    [[ "$SNAPSHOT_STATUS" =~ ^[0-9]+$ \
+      && "$SNAPSHOT_AGENTS" =~ ^[0-9]+$ \
+      && "$SNAPSHOT_INBOX" =~ ^[0-9]+$ ]]
+  }
+
+  probe_snapshot_until_ready() {
+    local deadline=$((SECONDS + 5))
+    SNAPSHOT_STATUS=0
+    SNAPSHOT_AGENTS=0
+    SNAPSHOT_INBOX=0
+    while :; do
+      if probe_snapshot; then
+        if (( SNAPSHOT_STATUS >= 1 && SNAPSHOT_AGENTS >= 1 && SNAPSHOT_INBOX >= 2 )); then
+          return 0
+        fi
+      else
+        SNAPSHOT_STATUS=0
+        SNAPSHOT_AGENTS=0
+        SNAPSHOT_INBOX=0
       fi
       if (( SECONDS >= deadline )); then
-        val=0
-        break
+        return 1
       fi
       sleep 0.05
     done
-    printf '%s\n' "${val:-0}"
   }
 
   # ── 7+8+9: --local never deploys, routes to the supplied host/port, skips
@@ -436,12 +454,26 @@ except (OSError, ValueError):
     bad "LOCAL-NO-BUNKER: poison bunker log present or POISON-BUNKER in output"
   fi
 
-  if [[ "$(counters status)" -ge 1 && "$(counters agents)" -ge 1 && "$(counters inbox)" -ge 2 ]]; then
-    ok "LOCAL-ROUTES-PROBES: probes hit the SUPPLIED --host/--port (status=$(counters status) agents=$(counters agents) inbox=$(counters inbox) on the fake crier)"
+  if probe_snapshot_until_ready; then
+    ok "LOCAL-ROUTES-PROBES: probes hit the SUPPLIED --host/--port (status=$SNAPSHOT_STATUS agents=$SNAPSHOT_AGENTS inbox=$SNAPSHOT_INBOX on the fake crier)"
   else
-    bad "LOCAL-ROUTES-PROBES: the fake crier was not really probed (status=$(counters status) agents=$(counters agents) inbox=$(counters inbox))"
+    bad "LOCAL-ROUTES-PROBES: the fake crier was not really probed (status=$SNAPSHOT_STATUS agents=$SNAPSHOT_AGENTS inbox=$SNAPSHOT_INBOX)"
   fi
 
+  # Regression guard: LOCAL-ROUTES-PROBES must use the snapshot variables for
+  # both its assertion and diagnostic, never read counters a second time.
+  local local_probe_block
+  local_probe_block="$(sed -n '/^  if probe_snapshot_until_ready; then$/,/^  # Regression guard: LOCAL-ROUTES-PROBES-SNAPSHOT$/p' "$SELFTEST_DIR/bunker-matrix-selftest.sh")"
+  if grep -q '\$(counters[[:space:]]' <<< "$local_probe_block" \
+    || ! grep -q 'SNAPSHOT_STATUS' <<< "$local_probe_block" \
+    || ! grep -q 'SNAPSHOT_AGENTS' <<< "$local_probe_block" \
+    || ! grep -q 'SNAPSHOT_INBOX' <<< "$local_probe_block"; then
+    bad "LOCAL-ROUTES-PROBES-SNAPSHOT: assertion and diagnostic do not share one snapshot"
+  else
+    ok "LOCAL-ROUTES-PROBES-SNAPSHOT: assertion and diagnostic share one snapshot"
+  fi
+
+  # Regression guard: LOCAL-ROUTES-PROBES-SNAPSHOT
   if grep -q "^SKIP  guard-on" "$TMP/local.out" \
     && grep -q "^SKIP  guard-off" "$TMP/local.out" \
     && grep -q "^SKIP  blocking" "$TMP/local.out" \
