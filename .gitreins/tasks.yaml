@@ -4240,3 +4240,22 @@ tasks:
     or the speedup is not reproduced on a clean -count=1 run.'
   status: in_progress
   created_at: '2026-11-16T10:54:17.900720+00:00'
+- id: DF-CRIER-507
+  title: Sync OpenAPI docs-claims count pins
+  criteria:
+  - docs/claims.yaml COUNT-OPENAPI-PATHS/OPERATIONS match docs/openapi.yaml (71 paths
+    / 90 operations) and README states the same 71/90; go test ./cmd/server -run 'TestDocsClaims|TestREADMEOpenAPIInventoryMatchesSpec'
+    -count=1 and bash scripts/check-readme-api-count.sh pass without relaxing any
+    test.
+  status: complete
+  created_at: '2026-11-16T13:51:19.912799+00:00'
+  completed_at: '2026-11-16T13:51:21.090842+00:00'
+- id: INT-CI-038
+  title: bunker-matrix-selftest LOCAL-ROUTES-PROBES single-snapshot assertion
+  criteria:
+  - LOCAL-ROUTES-PROBES uses ONE counter snapshot for both assertion and failure message,
+    bounded probe-visibility wait, regression guard, 19/19 checks behave, 5 consecutive
+    runs exit 0, only scripts/bunker-matrix-selftest.sh changed
+  status: complete
+  created_at: '2026-11-16T14:17:31.755853+00:00'
+  completed_at: '2026-11-16T14:17:59.427104+00:00'
