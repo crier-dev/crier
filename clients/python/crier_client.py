@@ -900,11 +900,20 @@ class Crier:
         request = urllib.request.Request(
             url, data=encoded if encoded else None, headers=headers, method=method.upper()
         )
-        opener = (
-            urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # Ambient proxies are consulted for EVERY host, loopback included: the
+        # QA battery's network cut exports a dead HTTP_PROXY, which would send a
+        # request for the local server to a port nobody listens on. So the
+        # opener is built per request — proxy-free for a loopback host,
+        # environment-honouring otherwise. Building it here (rather than reusing
+        # urllib's module-global opener) keeps the proxy lookup at call time and
+        # out of local traffic, and passing an explicit ProxyHandler stops
+        # build_opener from adding the environment one twice.
+        proxy = (
+            urllib.request.ProxyHandler({})
             if _is_loopback_url(url)
-            else urllib.request
+            else urllib.request.ProxyHandler()
         )
+        opener = urllib.request.build_opener(proxy)
         try:
             with opener.open(request, timeout=self.timeout) as response:
                 return response.status, _parse_body(response.read())

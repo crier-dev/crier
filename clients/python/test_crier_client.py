@@ -35,14 +35,17 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.util
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -446,6 +449,263 @@ class TestClientSurface(unittest.TestCase):
             key=self.key,
         )
         self.assertEqual(client.request("GET", "/health"), {"ok": True})
+
+    # -- ambient proxy environment (QA-CRIER-53-R2) -------------------------
+    #
+    # The clean-machine QA battery cuts the network by exporting HTTP_PROXY and
+    # HTTPS_PROXY pointing at a dead port. urllib consults those variables for
+    # EVERY host, loopback included, so a Python round-trip against a local
+    # crier server dies with "connection refused" on a port nobody dialled, and
+    # the disconnect cell reads as a client failure while the server is fine.
+    # The client answers that by building a proxy-free opener for loopback
+    # URLs. The tests below prove that bypass in BOTH directions: loopback
+    # reaches the server, non-loopback traffic still uses the proxy, and
+    # removing the bypass makes the identical setup fail.
+
+    _PROXY_ENV_VARS = (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    )
+    _DEAD_PROXY = "http://127.0.0.1:1"  # nothing listens; refusal is immediate
+
+    def _use_proxy_environment(self, proxy: str) -> None:
+        """Point HTTP(S)_PROXY at proxy for this test."""
+        self._clear_proxy_environment()
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            os.environ[name] = proxy
+            self.addCleanup(os.environ.pop, name, None)
+
+    def _clear_proxy_environment(self) -> None:
+        """Remove ambient proxy/no_proxy vars, restoring them afterwards."""
+        for name in self._PROXY_ENV_VARS:
+            previous = os.environ.pop(name, None)
+            if previous is not None:
+                self.addCleanup(os.environ.__setitem__, name, previous)
+
+    def _start_json_server(self, hits: list, host: str = "127.0.0.1") -> int:
+        """Serve 200 {"ok": true} on host; record every request path in hits."""
+
+        class _Json(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                hits.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+
+            def log_message(self, *_args: object) -> None:
+                pass
+
+        if host == "::1":
+            # An IPv4 socket cannot accept an IPv6 client, so the address
+            # family has to be set on the class before the server binds.
+            class _IPv6(ThreadingHTTPServer):
+                address_family = socket.AF_INET6
+
+            server = _IPv6((host, 0), _Json)
+        else:
+            server = ThreadingHTTPServer((host, 0), _Json)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_port
+
+    def test_loopback_bypass_is_load_bearing_under_a_dead_proxy(self) -> None:
+        """GREEN then RED in one setup: removing the bypass makes it fail.
+
+        Same server, same dead HTTP_PROXY, same client. With the loopback
+        bypass in place the request lands on the local server. With the bypass
+        patched off — exactly the pre-fix code path, where the opener is plain
+        urllib.request and the environment proxies are consulted — the request
+        goes to the dead proxy, raises, and the server records no second hit.
+        """
+        hits: list = []
+        port = self._start_json_server(hits)
+        self._use_proxy_environment(self._DEAD_PROXY)
+        client = Crier("http://127.0.0.1:%d" % port, agent_id="alice", key=self.key)
+
+        self.assertEqual(client.request("GET", "/health"), {"ok": True})
+        self.assertEqual(hits, ["/health"])
+
+        with mock.patch.object(crier_client, "_is_loopback_url", return_value=False):
+            with self.assertRaises(CrierError) as ctx:
+                client.request("GET", "/health")
+
+        self.assertEqual(ctx.exception.status, 0)
+        self.assertIn("cannot reach the crier server", str(ctx.exception))
+        self.assertEqual(
+            hits,
+            ["/health"],
+            "the retry reached the loopback server, so the dead proxy was never consulted",
+        )
+
+    def test_pre_patch_client_module_fails_under_the_same_dead_proxy(self) -> None:
+        """The REAL pre-fix module (derived from git) fails the identical setup.
+
+        The revision is derived rather than hardcoded: the commit that
+        introduced the bypass is found with `git log -S`, and its parent is
+        loaded as a separate module and driven through a real request.
+        Provenance is asserted before use — if the derived source already
+        carries the bypass this arm would test fixed code and pass vacuously —
+        and every path that cannot reach git history skips loudly.
+        """
+        repo = subprocess.run(
+            [
+                "git",
+                "-C",
+                os.path.dirname(os.path.abspath(__file__)),
+                "rev-parse",
+                "--show-toplevel",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if repo.returncode != 0:
+            self.skipTest("no git checkout: cannot derive the pre-patch client module")
+        root = repo.stdout.strip()
+        relative = "clients/python/crier_client.py"
+        introduced = subprocess.run(
+            [
+                "git",
+                "-C",
+                root,
+                "log",
+                "-S_is_loopback_url",
+                "--format=%H",
+                "--",
+                relative,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        revisions = [line for line in introduced.stdout.split() if line]
+        if introduced.returncode != 0 or not revisions:
+            self.skipTest("cannot find the commit that introduced the loopback bypass")
+        source = subprocess.run(
+            ["git", "-C", root, "show", "%s^:%s" % (revisions[-1], relative)],
+            capture_output=True,
+            text=True,
+        )
+        if source.returncode != 0 or not source.stdout:
+            self.skipTest("cannot read the pre-bypass revision %s^" % revisions[-1][:12])
+        if "_is_loopback_url" in source.stdout or "ProxyHandler" in source.stdout:
+            self.skipTest("the derived revision already carries the bypass; RED would be vacuous")
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        module_path = os.path.join(directory, "crier_client_prefix.py")
+        with open(module_path, "w", encoding="utf-8") as handle:
+            handle.write(source.stdout)
+        spec = importlib.util.spec_from_file_location("crier_client_prefix", module_path)
+        if spec is None or spec.loader is None:
+            self.skipTest("cannot load the pre-bypass revision as a module")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(module)
+
+        hits: list = []
+        port = self._start_json_server(hits)
+        self._use_proxy_environment(self._DEAD_PROXY)
+        client = module.Crier(
+            "http://127.0.0.1:%d" % port, agent_id="alice", key=RFC8032_VECTORS[0][0]
+        )
+        with self.assertRaises(module.CrierError) as ctx:
+            client.request("GET", "/health")
+        self.assertEqual(ctx.exception.status, 0)
+        self.assertIn("cannot reach the crier server", str(ctx.exception))
+        self.assertEqual(
+            hits, [], "the pre-fix module reached the server, so RED is not proven"
+        )
+
+    def test_every_loopback_spelling_reaches_the_server_under_a_dead_proxy(self) -> None:
+        """127.0.0.1, localhost and ::1 each complete a real request.
+
+        The ::1 arm needs its own IPv6 listener and is reported loudly, not
+        silently dropped, when the host cannot bind one.
+        """
+        self._use_proxy_environment(self._DEAD_PROXY)
+        hits: list = []
+        port = self._start_json_server(hits, "127.0.0.1")
+        targets = [
+            ("127.0.0.1", "http://127.0.0.1:%d" % port),
+            ("localhost", "http://localhost:%d" % port),
+        ]
+        try:
+            v6_port = self._start_json_server(hits, "::1")
+        except OSError as exc:
+            print(
+                "\nNOTE: no ::1 arm — this host cannot bind an IPv6 loopback socket: %s" % exc
+            )
+        else:
+            targets.append(("::1", "http://[::1]:%d" % v6_port))
+        for host, url in targets:
+            with self.subTest(host=host):
+                client = Crier(url, agent_id="alice", key=self.key)
+                self.assertEqual(client.request("GET", "/health"), {"ok": True})
+
+    def test_non_loopback_request_still_honours_the_ambient_proxy(self) -> None:
+        """The bypass is scoped: a remote URL is still sent through the proxy.
+
+        The proxy records the request line, so a stray 200 cannot be mistaken
+        for the proxy being used — the recorded absolute URI IS the proof that
+        urllib proxied the call. crier.invalid never resolves, so no DNS
+        traffic leaves the test.
+        """
+        seen: list = []
+
+        class _Proxy(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                seen.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"via":"proxy"}')
+
+            def log_message(self, *_args: object) -> None:
+                pass
+
+        proxy = ThreadingHTTPServer(("127.0.0.1", 0), _Proxy)
+        thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(proxy.server_close)
+        self.addCleanup(proxy.shutdown)
+
+        self._use_proxy_environment("http://127.0.0.1:%d" % proxy.server_port)
+        client = Crier("http://crier.invalid:8767", agent_id="alice", key=self.key)
+        self.assertEqual(client.request("GET", "/health"), {"via": "proxy"})
+        self.assertEqual(seen, ["http://crier.invalid:8767/health"])
+
+    def test_loopback_detection_covers_every_local_spelling_and_port(self) -> None:
+        """Supporting unit for the request-level proofs above, not a substitute."""
+        for url in (
+            "http://127.0.0.1:8767",
+            "http://127.0.0.1:1",
+            "http://127.0.0.5:8767",  # the whole 127/8 is loopback
+            "http://[::1]:8767",
+            "http://localhost:8767",
+            "http://LOCALHOST:8767",
+            "http://localhost",
+        ):
+            with self.subTest(loopback=url):
+                self.assertTrue(crier_client._is_loopback_url(url))
+        for url in (
+            "http://crier.invalid:8767",
+            "http://10.0.0.1:8767",
+            "http://localhost.example.test:8767",
+            "http://[2001:db8::1]:8767",
+        ):
+            with self.subTest(remote=url):
+                self.assertFalse(crier_client._is_loopback_url(url))
 
     def test_rejects_a_non_http_url(self) -> None:
         with self.assertRaises(ValueError):
