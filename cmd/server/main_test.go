@@ -1635,6 +1635,25 @@ func TestOpenAPIServed(t *testing.T) {
 		if doc["openapi"] != "3.1.0" {
 			t.Fatalf("GET /openapi.json: openapi = %v, want %q", doc["openapi"], "3.1.0")
 		}
+		paths, ok := doc["paths"].(map[string]any)
+		if !ok {
+			t.Fatalf("GET /openapi.json: paths has type %T, want object", doc["paths"])
+		}
+		harnessPath, ok := paths["/harness/consumer-census"].(map[string]any)
+		if !ok {
+			t.Fatal("GET /openapi.json: missing /harness/consumer-census")
+		}
+		getOperation, ok := harnessPath["get"].(map[string]any)
+		if !ok {
+			t.Fatal("GET /openapi.json: /harness/consumer-census has no GET operation")
+		}
+		responses, ok := getOperation["responses"].(map[string]any)
+		if !ok {
+			t.Fatal("GET /openapi.json: harness census GET has no responses")
+		}
+		if _, ok := responses["200"]; !ok {
+			t.Fatal("GET /openapi.json: harness census GET has no 200 response")
+		}
 	})
 
 	t.Run("openapi.yaml matches the embedded spec without auth", func(t *testing.T) {

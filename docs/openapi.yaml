@@ -22,6 +22,8 @@ tags:
     description: Server liveness, build identity and effective runtime posture.
   - name: registry
     description: Agent registration, lookup, update and removal.
+  - name: harness
+    description: Repository-owned harness consumer classification and contract posture.
   - name: inbox
     description: Durable per-agent inboxes — deliver to an agent id, or to a CAPABILITY (round-robin over its live holders, CR-FEAT-026), with an optional sender idempotency key; retrieve with lease, ack, stats, transfer/reassign between inboxes, and the dead-letter destination for messages that expired unacknowledged.
   - name: relay
@@ -2878,6 +2880,31 @@ paths:
           description: "`idempotency_key` already has a delivery in flight — nothing was stored by this request, exactly as on the by-id path."
         "502":
           description: "Blocking webhook delivery to the resolved holder was permanently rejected (non-retryable status, or a reply the holder's schema cannot map), or a federation failure for a holder id that vanished after selection — the same `502` contract as the by-id operation."
+  /harness/consumer-census:
+    get:
+      operationId: harnessConsumerCensus
+      tags: [harness]
+      summary: Classify registered consumers for the harness contract
+      description: >-
+        Returns the repository-owned classification of every registered agent.
+        `wired` requires a valid consumer declaration and webhook configuration;
+        `archived` carries the explicit operator reason; `unclassified` is
+        fail-closed and names the missing or invalid configuration. This is a
+        configuration census, not a live reachability check for the remote
+        consumer.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Consumer classifications in stable agent-id order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConsumerCensusEntry"
+        "401":
+          description: Missing or invalid bearer token when CR_AUTH_TOKEN is configured.
   /namespaces:
     get:
       operationId: listNamespaces
@@ -6575,6 +6602,21 @@ components:
           type: integer
           minimum: 0
           description: "Per-agent override of the maximum time an unacknowledged message may sit. Absent → CR_INBOX_CONTRACT_TTL_S (default 86400 = 24h). 0 → NO contract bound (explicit opt-out; contract_ttl_secs reports 0 and the agent can never be `stale`), so only each message's own ttl_seconds/expires_at applies. n > 0 → n seconds."
+    ConsumerCensusEntry:
+      type: object
+      required: [agent_id, state, reason]
+      description: "One registered agent's repository-owned harness consumer classification (HARNESS-CRIER-001)."
+      properties:
+        agent_id:
+          type: string
+          description: Registered agent identifier.
+        state:
+          type: string
+          enum: [wired, archived, unclassified]
+          description: "Classification state: wired, archived, or fail-closed unclassified."
+        reason:
+          type: string
+          description: Explanation of the classification, including the missing or invalid configuration when unclassified.
     GuardAgentConfig:
       type: object
       required: [policies]

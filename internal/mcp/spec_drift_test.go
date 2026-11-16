@@ -121,6 +121,7 @@ var toolsWithNoSpecOperation = map[string]string{
 // Each justification is grounded in the repo (the operation's own summary/tag
 // description in docs/openapi.yaml, or the bridge's own comments), never invented.
 var excludedOperations = map[string]string{
+	"harnessConsumerCensus": "GET /harness/consumer-census — repository-owned operator/configuration census; crier-mcp exposes delivery and session tools, not administrative harness registry inspection.",
 	"setSessionState":       "POST /sessions/{id}/state (DF-CRIER-446): internal/session lifecycle; RemoteStore has no session calls, so no MCP bridge tool can execute this operation.",
 	"listPrincipals":        "DF-CRIER-315 permissions-management read: same operator admin gate as mintPrincipal; bridge holds the message token, not an admin credential.",
 	"listBindings":          "DF-CRIER-315 permissions-management read: same operator admin gate as mintPrincipal; bridge holds the message token, not an admin credential.",

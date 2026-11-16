@@ -2534,11 +2534,11 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **70 paths** and **89 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **71 paths** and **90 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 70 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 89 operations
+grep -c '^  /' docs/openapi.yaml                                    # 71 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 90 operations
 grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 54 core router paths (the five protocol surfaces mount through registerProtocols)
 grep -oE 'HandleFunc\("[^"]+"' cmd/server/protocols.go | sort -u | wc -l # 15 protocol paths (relay 3 + mesh 2 + federation 1 + dagger 9, INT-007)
 ```

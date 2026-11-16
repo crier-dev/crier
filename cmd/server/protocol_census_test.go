@@ -62,6 +62,9 @@ type censusPath struct {
 // censusPaths is the route universe a boot can mount. Detection (CR_DETECT),
 // pprof and the peer-records management surface (CR_FED_RECORDS_FILE) are
 // scrubbed in every census combo, so their routes are absent by construction.
+// The route list is compared entry-by-entry with the live boot and the committed
+// profiles; it must never be reduced to a count, because an omission can be
+// masked by an unrelated extra route.
 var censusPaths = []censusPath{
 	// Core (NOT protocols, decision D-P1) — pinned so the golden is the
 	// whole-server census R-A1 asks to be byte-identical.
@@ -73,7 +76,13 @@ var censusPaths = []censusPath{
 	{methods: []string{"GET"}, path: "/chat", probeURL: "/chat"},
 	{methods: []string{"GET"}, path: "/status", probeURL: "/status"},
 	{methods: []string{"GET"}, path: "/namespaces", probeURL: "/namespaces"},
+	// Harness consumer census is a core registry route. Keeping it in the
+	// concrete route list means every census profile compares the route itself,
+	// not merely a total that could stay unchanged after an omission.
+	{methods: []string{"GET"}, path: "/harness/consumer-census", probeURL: "/harness/consumer-census"},
 	{methods: []string{"GET", "POST"}, path: "/agents", probeURL: "/agents"},
+	// ch:trace row=DF-CRIER-505 spec=cmd/server/protocol_census_test.go#TestProtocolRouteCensusParity wave=none:worker-branch test=TestProtocolRouteCensusParity doc=cmd/server/openapi.yaml,docs/openapi.yaml evidence=none:foreman-readback witness=none:local-contract-test verdict=none:foreman-judge commit=worker-sha-after-commit memory=none:foreman-write
+
 	{methods: []string{"POST", "GET", "DELETE", "PATCH"}, path: "/agents/{id}", probeURL: "/agents/probe-agent"},
 	{methods: []string{"POST", "GET"}, path: "/agents/{id}/inbox", probeURL: "/agents/probe-agent/inbox"},
 	{methods: []string{"POST"}, path: "/agents/{id}/inbox/ack", probeURL: "/agents/probe-agent/inbox/ack"},
