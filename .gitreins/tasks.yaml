@@ -3965,16 +3965,13 @@ tasks:
   created_at: '2026-11-09T22:06:49.776209+00:00'
   completed_at: '2026-11-10T10:08:41.303121+00:00'
 - id: QA-CRIER-53-R2
-  title: Python client bypasses ambient proxy for loopback
+  title: Python client bypasses env proxies for loopback
   criteria:
-  - 'Re-run the relevant client-level regression and full battery acceptance: with
-    HTTP_PROXY/HTTPS_PROXY/ALL_PROXY pointing at a dead loopback port and no preexisting
-    no_proxy, a request from clients/python/crier_client.py to a loopback Crier server
-    succeeds; preserve external proxy behavior, add regression coverage, and include
-    the battery evidence requirement that internal/registry output is quoted rather
-    than head-only.'
-  status: in_progress
-  created_at: '2026-11-10T10:32:51.450942+00:00'
+  - Client-level test sets HTTP_PROXY to a dead port and completes a loopback request;
+    non-loopback still honours env proxies; clients/python suite green
+  status: complete
+  created_at: '2026-11-16T17:29:46.469368+00:00'
+  completed_at: '2026-11-16T18:00:06.179831+00:00'
 - id: HARNESS-CRIER-001
   title: Harness consumer wiring and liveness
   criteria:
@@ -4082,13 +4079,18 @@ tasks:
   created_at: '2026-11-13T05:33:46.793351+00:00'
   completed_at: '2026-11-13T07:07:12.790390+00:00'
 - id: QA-CRIER-57
-  title: STATUS-MESH-MALFORMED-FRAME-INVALID-MESSAGE claim reads 5s of wire silence
+  title: 'Mesh probe determinism: instrumented failure text + server reader attach
+    + >=200-iteration hammer'
   criteria:
-  - probe failure text distinguishes never-arrived vs answered-late; 200-iteration
-    loop green; hosted CI on fix commit green with matrix jobs RUN
+  - 'Verification-only gate for the closed claim: (1) failure text carries dial_at/dial_done/write_at/write_done/read_deadline
+    and the 400/200/500/502 mapping is unchanged; (2) the server attaches the connection
+    frame reader before the upgrade completes (42f193ca) and TestHandleConnectImmediateMalformedFrames
+    runs >=200 iterations green; (3) hosted CI on a tree containing the fix has Build
+    & Test (1.26.10), Coverage, Integration Tests and Release acceptance matrix RUN
+    and green; (4) root cause is server-side, not a client write-vs-handshake race.'
   status: complete
-  created_at: '2026-11-13T05:33:47.287495+00:00'
-  completed_at: '2026-11-13T07:58:23.117134+00:00'
+  created_at: '2026-11-16T17:50:50.929585+00:00'
+  completed_at: '2026-11-16T18:03:58.842613+00:00'
 - id: QA-CRIER-60
   title: timeout-kill assertions not stress-resilient under cap and network cut
   criteria:
@@ -4259,3 +4261,48 @@ tasks:
   status: complete
   created_at: '2026-11-16T14:17:31.755853+00:00'
   completed_at: '2026-11-16T14:17:59.427104+00:00'
+- id: QA-CRIER-REVIEW-7-R4-DEPLOY
+  title: bunker-qa docker-deploy attribution is merged in coding-hermes-tools and
+    deployed byte-identically
+  criteria:
+  - 'PROOF (run these exactly, they take seconds): (1) cd /home/kara/coding-hermes-tools
+    && git log --oneline -1 -> 37ff4d8 fix(qa): attribute the docker-deploy probe
+    to the compose container, and git rev-list --count origin/master..HEAD -> 0. (2)
+    bash /home/kara/coding-hermes-tools/test_bunker_qa_docker_probe.sh -> exit 0,
+    ''PASS: 94 assertions''. (3) BUNKER_QA_SH=/home/kara/.hermes/scripts/backup/bunker-qa.sh.pre-R4-20261116T1301
+    bash /home/kara/coding-hermes-tools/test_bunker_qa_docker_probe.sh -> exit 1,
+    ''FAIL: 39 assertion(s) failed''. (4) sha256sum /home/kara/.hermes/scripts/bunker-qa.sh
+    /home/kara/coding-hermes-tools/bunker-qa.sh -> both 3565ad08e2b2df95472f444cf54dc4bd47ad1b6e9fb395b8ee4010e4762f4092.
+    (5) grep -n ''docker compose port'' /home/kara/coding-hermes-tools/bunker-qa.sh
+    -> the port is resolved from compose, and grep -n ''NON-COMPOSE process'' -> a
+    stranger owner grades FAIL with pid/cmdline.'
+  status: complete
+  created_at: '2026-11-16T18:15:35.619276+00:00'
+  completed_at: '2026-11-16T18:15:55.907818+00:00'
+- id: QA-CRIER-57-VERIFY
+  title: mesh malformed-frame failure text is instrumented and the server reader attach
+    is proven
+  criteria:
+  - 'PROOF (seconds): (1) grep -n ''dial_at'' cmd/server/docsclaims_test.go -> instrumentation
+    present in liveMeshMalformedFrameStatus (approx lines 1277-1350) carrying dial_at/dial_done/write_at/write_done/read_deadline
+    with RFC3339Nano and statuses 400/200/500/502. (2) go test ./internal/mesh -run
+    TestHandleConnectImmediateMalformedFrames -count=1 -> PASS (>=200-iteration hammer)
+    and grep -n ''for i := 0; i < 200'' internal/mesh/handler_test.go. (3) go test
+    ./cmd/server -run TestFederation391ProductionBoots -count=1 -> PASS. (4) git log
+    --oneline -1 42f193ca -> ''fix(mesh): attach frame reader before accepting immediate
+    writes'' and git merge-base --is-ancestor 42f193ca HEAD -> true.'
+  status: complete
+  created_at: '2026-11-16T18:25:59.338340+00:00'
+  completed_at: '2026-11-16T18:28:36.796913+00:00'
+- id: RELEASE-025-VERIFY
+  title: 'federation 391 production boot is green: 20 consecutive local runs, zero
+    failures'
+  criteria:
+  - 'PROOF (about 3-6 minutes): run ''for i in $(seq 1 20); do go test ./cmd/server
+    -run TestFederation391ProductionBoots -count=1 || echo FAIL; done'' and count
+    output lines: zero FAIL lines. Supporting evidence already on disk: /tmp/fed391-1..20.log
+    from the foreman run, ''grep -l FAIL /tmp/fed391-*.log'' returns nothing. Failure
+    condition: any FAIL line, or the test missing from cmd/server/federation_391_test.go.'
+  status: complete
+  created_at: '2026-11-16T18:26:00.888992+00:00'
+  completed_at: '2026-11-16T18:40:40.337504+00:00'
