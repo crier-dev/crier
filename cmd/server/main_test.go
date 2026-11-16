@@ -331,10 +331,10 @@ func startRunScopedServerWithEnv(args []string, getenv config.Getenv) *runScoped
 // parallel tests each booting a real server, UNBOUNDED concurrency meant
 // hundreds of goroutine sets fighting for GOMAXPROCS cores (the -count=5
 // thrash), while a tiny bound turns the batch into a near-serial queue whose
-// makespan brushes the 60s package budget. 24 live IO-bound servers on a
-// 16-core host keeps both bounded: parallel tests queue for a slot at
-// t.Parallel time and hold it until their cleanup runs (INT-CI-014).
-var bootSlots = make(chan struct{}, 24)
+// makespan brushes the 60s package budget. 64 live IO-bound servers leaves
+// enough headroom for the package's parallel batch while still bounding server
+// resources (INT-CI-014).
+var bootSlots = make(chan struct{}, 64)
 
 // parallelBoot enables test-level parallelism iff the suite is NOT running in
 // the process-env serial regime. Tests that call t.Setenv anywhere in their
@@ -1486,7 +1486,7 @@ func TestStopRunningServer(t *testing.T) {
 	// DF-CRIER-260: build from an isolated snapshot, never the live package
 	// directory. A sibling worker mid-edit in cmd/server is one syntax error
 	// away from making this package fail to compile, and the test would
-	// report that as its own failure for a reason that has nothing to do
+	// report that as its failure for a reason that has nothing to do
 	// with the code under test (the same race DF-CRIER-253/259 closed for
 	// the version tests).
 	buildDir := testsupport.SnapshotBuildDir(t, ".")
@@ -2002,16 +2002,41 @@ func TestServerVersionCLIFlags(t *testing.T) {
 	// land inside.
 	snapshotHead := gitHead(t, buildDir)
 
+	injectedLDFlags := "-X github.com/crier-dev/crier/internal/buildinfo.Version=9.9.9"
 	buildUnstamped := exec.Command("go", "build", "-o", plainBin, ".")
 	buildUnstamped.Dir = buildDir
-	if out, err := buildUnstamped.CombinedOutput(); err != nil {
-		t.Fatalf("build unstamped crier from %s: %v\n%s", buildDir, err, out)
-	}
-	injectedLDFlags := "-X github.com/crier-dev/crier/internal/buildinfo.Version=9.9.9"
 	buildInjected := exec.Command("go", "build", "-ldflags", injectedLDFlags, "-o", injectedBin, ".")
 	buildInjected.Dir = buildDir
-	if out, err := buildInjected.CombinedOutput(); err != nil {
-		t.Fatalf("build stamped crier from %s: %v\n%s", buildDir, err, out)
+	// The two artifacts read the same frozen snapshot but have independent output
+	// paths. Build them concurrently: separate ldflags prevent cache reuse, while
+	// serializing the invocations needlessly makes this acceptance test pay both
+	// link times end-to-end.
+	type buildResult struct {
+		name string
+		out  []byte
+		err  error
+	}
+	buildResults := make(chan buildResult, 2)
+	go func() {
+		out, err := buildUnstamped.CombinedOutput()
+		buildResults <- buildResult{name: "unstamped", out: out, err: err}
+	}()
+	go func() {
+		out, err := buildInjected.CombinedOutput()
+		buildResults <- buildResult{name: "stamped", out: out, err: err}
+	}()
+	var buildFailures []buildResult
+	for i := 0; i < 2; i++ {
+		result := <-buildResults
+		if result.err != nil {
+			buildFailures = append(buildFailures, result)
+		}
+	}
+	for _, result := range buildFailures {
+		if result.name == "unstamped" {
+			t.Fatalf("build unstamped crier from %s: %v\n%s", buildDir, result.err, result.out)
+		}
+		t.Fatalf("build stamped crier from %s: %v\n%s", buildDir, result.err, result.out)
 	}
 
 	t.Run("unstamped build reports the commit it was built from", func(t *testing.T) {
@@ -2210,8 +2235,8 @@ func TestParallelBootOptsIntoParallelBatch(t *testing.T) {
 // closed) channel would deadlock the entire parallel batch into the package
 // timeout instead of failing a single test.
 func TestBootSlotsBoundAndRoundTrip(t *testing.T) {
-	if cap(bootSlots) != 24 {
-		t.Fatalf("bootSlots capacity = %d, want 24", cap(bootSlots))
+	if cap(bootSlots) != 64 {
+		t.Fatalf("bootSlots capacity = %d, want 64", cap(bootSlots))
 	}
 	saturated := make([]struct{}, 0, cap(bootSlots))
 	for i := 0; i < cap(bootSlots); i++ {
