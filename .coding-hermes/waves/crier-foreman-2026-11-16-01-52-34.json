@@ -1,0 +1,27 @@
+{
+  "tick_id": "crier-foreman-2026-11-16-01-52-34",
+  "project": "crier",
+  "block": "HARDEN-LOOP-001",
+  "base_sha": "3612d975",
+  "wave_budget": 5,
+  "slots": 1,
+  "wave_size": 1,
+  "rows": [
+    {
+      "task_id": "HARNESS-CRIER-001",
+      "worktree": "/home/kara/worktrees/crier-HARNESS-CRIER-001-R2",
+      "branch": "wt/HARNESS-CRIER-001-R2",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-HARNESS-CRIER-001-R2-brief.txt"
+    }
+  ],
+  "excluded_rows": [
+    {
+      "task_id": "UI-CRIER-001",
+      "reason": "owner-gated browser/live deployment witness; deferred until owner ruling"
+    },
+    {
+      "task_id": "RSS-CRIER-001",
+      "reason": "implementation already landed; remaining live-feed/verdict closeout is verification-only, not worker implementation"
+    }
+  ]
+}
