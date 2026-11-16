@@ -4229,3 +4229,14 @@ tasks:
   status: complete
   created_at: '2026-11-16T08:41:53.923455+00:00'
   completed_at: '2026-11-16T09:18:42.740064+00:00'
+- id: DF-CRIER-506
+  title: crier cmd/server suite must fit inside gitreins' 30s judge command ceiling
+  criteria:
+  - 'PROOF: on the merged tree, ''go test -short -count=1 ./cmd/server'' completes
+    in under 20s wall clock at host load >= 10 with the whole suite passing, and a
+    falsified docs/claims.yaml count still reds the suite (no coverage bought with
+    skips or weakened assertions). FAILIF: any test is deleted, skipped, or has an
+    assertion loosened to buy the time; or the package still exceeds 20s at load 10;
+    or the speedup is not reproduced on a clean -count=1 run.'
+  status: in_progress
+  created_at: '2026-11-16T10:54:17.900720+00:00'
