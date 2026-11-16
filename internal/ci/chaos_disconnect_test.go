@@ -8,7 +8,15 @@ import (
 	"testing"
 )
 
+// chaosFixtureTools are the external commands .qa/chaos-probes/chaos-disconnect.sh itself
+// invokes. The fixture resolves them from the same PATH it hands the script, so a host
+// missing any of them must skip with that tool named rather than fail unattributed
+// (DF-CRIER-497-R2).
+var chaosFixtureTools = []string{"bash", "awk", "grep", "timeout"}
+
 func TestChaosDisconnectEvidenceContract(t *testing.T) {
+	requireTools(t, chaosFixtureTools...)
+
 	script, err := filepath.Abs(repoPath(".qa", "chaos-probes", "chaos-disconnect.sh"))
 	if err != nil {
 		t.Fatal(err)
