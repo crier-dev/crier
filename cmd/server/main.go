@@ -534,6 +534,17 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		regStore = registry.NewMemoryStore()
 		logMemoryBackendWarning()
 	}
+	// CR_REGISTRY_SEED_IDENTITIES (INT-021): an operator-declared identity is
+	// what makes the allowlist's pre-provisioning requirement satisfiable on
+	// the in-memory backend, whose store starts empty by definition. The
+	// declaration is applied FIRST and the guard is then validated against the
+	// resulting store, so a pair naming an identity the operator did not
+	// declare still fails the boot with the same "not pre-provisioned" error.
+	regStore, err = applyRegistrySeedIdentities(cfg, regStore)
+	if err != nil {
+		slog.Error("apply CR_REGISTRY_SEED_IDENTITIES", "error", err)
+		return 1
+	}
 	regStore, registryHandler, err := composeRegistryDelivery(cfg, regStore)
 	if err != nil {
 		slog.Error("configure service delivery authorization", "error", err)
@@ -1889,4 +1900,5 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 	_, _ = fmt.Fprintln(out, "  CR_REGISTRY_BACKEND         memory | sqlite | postgres (unset: URL selects postgres, else memory)")
 	_, _ = fmt.Fprintln(out, "  CR_REGISTRY_SQLITE_PATH     SQLite registry file (required for sqlite)")
+	_, _ = fmt.Fprintln(out, "  CR_REGISTRY_SEED_IDENTITIES id=<hex ed25519 public key>,... identities seeded at boot into the EMPTY in-memory store, before CR_SERVICE_DELIVERY_ALLOWLIST is validated (default: none seeded; refused on a durable backend)")
 }

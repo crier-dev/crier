@@ -43,6 +43,33 @@ that this process is the scheduler. Protect registration/API access with
 `CR_AUTH_TOKEN` and network controls. A shared bearer token alone is NOT proof
 of an individual sender's identity; it remains an additional reach gate.
 
+### Declaring identities at boot (the in-memory backend)
+
+A durable backend keeps registrations across restarts, so the ordering above
+works there. The DEFAULT in-memory backend does not: it starts with an EMPTY
+store, and the allowlist is startup-only — registering the identities first and
+restarting to enable the allowlist clears the store again, so the boot refuses
+with `service identity "<id>" is not pre-provisioned: agent not found`. Declare
+the identities instead, in the same boot:
+
+```bash
+export CR_REGISTRY_SEED_IDENTITIES='lane-scheduler=<64-hex ed25519 public key>,bunker-router=<64-hex ed25519 public key>'
+```
+
+`crier keygen -id <id> -out <file>` prints each public key. The declaration is
+applied to the store BEFORE the allowlist is validated, so the guard's question
+("does this identity already exist?") is answered by a real row with a real key
+— it is not skipped, and it is not relaxed: a declared identity gains no
+delivery authority (only the allowlist entry does), and a pair naming an
+identity the operator did not declare still refuses the boot with the same
+error. The declaration is per identity and explicit — no wildcard, no "seed
+everything on the allowlist". Only PUBLIC keys are given (the private half stays
+with the service). On a DURABLE backend the declaration is refused rather than
+honoured, so seeding can never resurrect rows an operator deleted.
+
+A runnable recipe, including the measured output and the negative controls, is
+in the README: [Service delivery on the in-memory backend (dev recipe)](../README.md#service-delivery-on-the-in-memory-backend-dev-recipe).
+
 ## Signed HTTP contract
 
 For every delivery to ANY recipient appearing on the right side of the list:

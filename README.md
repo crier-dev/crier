@@ -1999,6 +1999,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` — see `internal/middleware/auth.go`) require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_SERVICE_DELIVERY_ALLOWLIST` | _(unset — legacy delivery)_ | Exact directed `sender>recipient,...` pairs. Every listed recipient mandates registered-sender Ed25519 proof over method/path/time plus the exact raw-body SHA-256, within ±30s. Body sender must match signed X-Agent-ID; human fields/reply_to cannot grant service authority. See [signed service deliveries](docs/service-delivery-auth.md). |
 | `CR_SERVICE_DELIVERY_AUDIENCE` | _(unset — required iff the allowlist is nonempty)_ | Relay audience for [signed service deliveries](docs/service-delivery-auth.md) — **required when `CR_SERVICE_DELIVERY_ALLOWLIST` is nonempty** (startup fails without it) and ignored when the allowlist is empty/unset. Clients send it as the `X-Crier-Audience` header on every protected delivery; a missing or mismatched value is refused `401` before the allowlist pair is consulted, and signing clients (crier-mcp bridge, Python client) fold it into the signature transcript. Pick one stable opaque name per relay and share it with every service client, e.g. `internal` or `partner-integrators` — it identifies the intended relay, it is not a secret. |
+| `CR_REGISTRY_SEED_IDENTITIES` | _(unset — nothing seeded)_ | The operator's boot-time identity declaration: comma-separated `id=<64-hex ed25519 public key>` entries seeded into the registry store **before** the service-delivery policy is validated, so `CR_SERVICE_DELIVERY_ALLOWLIST` can be exercised on the default in-memory backend, whose store otherwise starts empty and makes the boot refuse with `service identity "<id>" is not pre-provisioned`. It is a DECLARATION, not auto-registration: each identity is named explicitly (no wildcards, no "seed the allowlist"), only PUBLIC keys are given, the delivery guard is unchanged — a pair naming an identity the operator did not declare still refuses the boot with that same error — and the declaration is refused outright on a durable backend (`sqlite`/`postgres`), which keeps its own agents across restarts. Malformed entries (missing id, non-hex or wrong-length key, duplicate id, empty entry) fail the boot. Dev recipe: [Service delivery on the in-memory backend](#service-delivery-on-the-in-memory-backend-dev-recipe). |
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |
 | `CR_REQUIRE_MESH_AUTH` | `false` | Require the ed25519 challenge/response handshake on `GET /mesh/connect/{agentID}` (DF-CRIER-287): a connecting peer must sign a single-use nonce with the private key whose public half the registry holds for that agent id, and is not admitted (and not listed by `GET /mesh/peers`) until the signature verifies. **Default off, deliberately** — existing single-host clients do no handshake, and turning it on requires every connecting agent to hold its key. With it on, a `REQUEST` whose `source.agent_id` is not the authenticated peer is refused `FORBIDDEN` and a reply may only come from the peer the request was addressed to. See [Authentication (opt-in)](#authentication-opt-in) for the migration note. |
 | `CR_MESH_AUTH_TIMEOUT_S` | `10` | How long a mesh connect challenge stays valid — the client must answer with `AUTH_RESPONSE` inside this window, after which the server answers `AUTH_FAILED` and closes the socket. Only read when `CR_REQUIRE_MESH_AUTH=true`. |
@@ -2078,6 +2079,83 @@ All configuration is via environment variables (defaults shown):
 | `CR_DAGGER_TARGET_<NAME>` | _(unset — no named remote targets)_ | Named **remote execution targets** (CR-CHAT-035): each variable of the form `CR_DAGGER_TARGET_<NAME>=<url>` adds one — e.g. `CR_DAGGER_TARGET_BUNKER_1=http://bunker.local:8765`. A run created with `"target":"<name>"` (case-insensitive) is sent to that URL, and the resolved name is **recorded on the run at create time and never re-resolved**. Absent/empty target on a create = the local target (`CR_DAGGER_URL` itself, recorded as `local`). A create naming a target the table does not hold is refused (`unknown dagger execution target`) before any bridge is touched. Evidence stays opaque string references regardless of target — no bytes ever cross the bus. |
 | `CR_DAGGER_TRIGGER_ON_TASK` | _(unset — no task trigger)_ | Opt-in **task-created DAG trigger** (CR-CHAT-034): the DAG **prompt** fired once through the bridge every time a crier TASK is created — the task's payload is appended to it as data (the prompt names WHAT the pipeline does; the payload is what it works on). Requires `CR_DAGGER_URL`. Every fire — and every named failure — is recorded in `<CR_DAGGER_STORE_DIR>/triggers.jsonl`, and a firing failure **never fails the task creation**. |
 | `CR_DAGGER_TRIGGER_AGENT` | _(unset — the task's author)_ | Optional agent whose inbox a triggered run's terminal outcome is delivered to (CR-CHAT-034). Only read when `CR_DAGGER_TRIGGER_ON_TASK` is set. |
+
+### Service delivery on the in-memory backend (dev recipe)
+
+`CR_SERVICE_DELIVERY_ALLOWLIST` refuses to boot until every identity it names
+already exists in the registry — and the default in-memory backend starts with
+an **empty** store, while the policy itself is startup-only. Registering the
+identities over `POST /agents` therefore cannot help: the restart that would
+enable the allowlist also clears the store. `CR_REGISTRY_SEED_IDENTITIES`
+closes that gap by DECLARING the identities (id + public key) at boot; the
+server seeds them *before* the allowlist is validated. The guard is not
+relaxed — an identity that is neither in the store nor in the declaration still
+refuses the boot with `service identity "<id>" is not pre-provisioned`, and only
+the allowlist grants delivery authority.
+
+The recipe below is copy-pasteable from the repo root after `make build`. It
+uses port **18421** (never the default 8767), registers **nothing** over HTTP —
+the two agents exist only because the boot declaration named them — and proves
+the protected send path end to end:
+
+```bash
+export D=$(mktemp -d)
+# 1. two identities, each with its own key (no openssl, no xxd)
+PUB_A=$(./bin/crier keygen -id agent-a -out "$D/agent-a.key" | sed -n 's/.*public key (hex) *: *//p')
+PUB_B=$(./bin/crier keygen -id agent-b -out "$D/agent-b.key" | sed -n 's/.*public key (hex) *: *//p')
+
+# 2. boot the DEFAULT in-memory backend, declaring both identities
+CRIER_PORT=18421 \
+CR_PIDFILE="$D/crier.pid" \
+CR_GUARD_ENABLED=false \
+CR_REGISTRY_SEED_IDENTITIES="agent-a=$PUB_A,agent-b=$PUB_B" \
+CR_SERVICE_DELIVERY_ALLOWLIST='agent-a>agent-b' \
+CR_SERVICE_DELIVERY_AUDIENCE=crier-demo \
+./bin/crier > "$D/crier.log" 2>&1 &
+
+sleep 2
+curl -s localhost:18421/health   # {"status":"ok"}
+curl -s localhost:18421/agents   # agent-a and agent-b, both seeded at boot
+
+# 3. one signed service delivery over the allowlist, then read + ack it as the
+#    recipient. Reads are self-only, NOT protected deliveries, so the receiving
+#    client is built without an audience; only the protected POST carries one.
+python3 - "$D" <<'PY'
+import sys
+sys.path.insert(0, "clients/python")
+from crier_client import Crier
+d = sys.argv[1]
+sender = Crier("http://localhost:18421", agent_id="agent-a", key_path=d + "/agent-a.key", audience="crier-demo")
+print("deliver:", sender.deliver("agent-b", {"task": "dispatch"}, sender="agent-a", idempotency_key="recipe-1"))
+receiver = Crier("http://localhost:18421", agent_id="agent-b", key_path=d + "/agent-b.key", audience="")
+print("agent-b inbox:", [m.payload for m in receiver.retrieve()])
+PY
+
+./bin/crier -stop -pidfile "$D/crier.pid"   # port freed, pidfile removed
+```
+
+Measured on this tree: `deliver` answers `{"expires_at":…,"id":…,"transport":"inbox"}`,
+`agent-b inbox` prints `[{'task': 'dispatch'}]`, and the server log carries
+`msg="registry identities seeded from CR_REGISTRY_SEED_IDENTITIES" count=2
+ids="[agent-a agent-b]"`.
+
+Two negative controls, same tree:
+
+```bash
+# a. the declaration is what boots it — omit it and the SAME command still refuses:
+CRIER_PORT=18422 CR_GUARD_ENABLED=false \
+CR_SERVICE_DELIVERY_ALLOWLIST='agent-a>agent-b' CR_SERVICE_DELIVERY_AUDIENCE=crier-demo \
+./bin/crier
+# exit 1, level=ERROR msg="configure service delivery authorization"
+#   error="service identity \"agent-b\" is not pre-provisioned: agent not found: \"agent-b\""
+
+# b. a durable store keeps its own agents, so seeding it is refused:
+CR_REGISTRY_BACKEND=sqlite CR_REGISTRY_SQLITE_PATH="$D/x.sqlite" \
+CR_REGISTRY_SEED_IDENTITIES="agent-a=$PUB_A" ./bin/crier
+# exit 1, level=ERROR msg="apply CR_REGISTRY_SEED_IDENTITIES"
+#   error="CR_REGISTRY_SEED_IDENTITIES applies only to the in-memory registry
+#   backend ... provision new identities with POST /agents"
+```
 
 ### Delivery ACL — principals, roles and grants (CR-CHAT-003)
 
