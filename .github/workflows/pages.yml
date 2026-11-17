@@ -34,10 +34,20 @@ jobs:
           for ex in demo.sh; do cp examples/$ex site/examples/ 2>/dev/null || true; done
       - name: Setup Pages
         uses: actions/configure-pages@v6
+      # The artifact name carries the run attempt on purpose (INT-CI-040). A re-run
+      # of this workflow reuses the SAME run id, and deploy-pages looks its artifact
+      # up by name within the run, not within the attempt: with the stock
+      # "github-pages" name a second attempt finds TWO artifacts and hard-fails with
+      # "Multiple artifacts named github-pages were unexpectedly found" — so every
+      # retry of this workflow was guaranteed to fail even after the original
+      # transient cleared. Attempt-scoped names keep each attempt unambiguous.
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: github-pages-${{ github.run_attempt }}
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

@@ -4357,3 +4357,18 @@ tasks:
   status: complete
   created_at: '2026-11-17T03:33:51.418020+00:00'
   completed_at: '2026-11-17T03:33:53.072375+00:00'
+- id: INT-CI-040
+  title: Explain the unattributable Pages deploy failure at 366eb952 and remove the
+    re-run artifact collision
+  criteria:
+  - 'The commit changes .github/workflows/pages.yml so the Pages artifact name is
+    unique per run attempt (upload-pages-artifact name and deploy-pages artifact_name
+    both use the run attempt), and .coding-hermes/evidence/INT-CI-040.md records the
+    recovered job logs naming both failure causes. Verify: grep -c ''run_attempt''
+    .github/workflows/pages.yml returns at least 2; the committed evidence file .coding-hermes/evidence/INT-CI-040.md
+    exists and quotes the exact deploy-pages errors ''No artifacts named'' and ''Multiple
+    artifacts named''; actionlint .github/workflows/pages.yml exits 0. This commit
+    is the workflow hardening only, it is not expected to change Go code or fix the
+    pending board rows.'
+  status: in_progress
+  created_at: '2026-11-17T06:05:14.268002+00:00'
