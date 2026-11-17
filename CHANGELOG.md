@@ -13,22 +13,63 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-11-12
+## [0.7.0] - 2026-11-17
 
-Range: `v0.6.1`..`v0.7.0` — 52 commits including this release entry (2 merges, 50 non-merge: 1 `feat`, 4 `fix`, 4 `perf`; no breaking change).
+Range: `v0.6.1`..`v0.7.0` — 269 commits including this release entry (15 merges,
+254 non-merge: 3 `feat`, 16 `fix`, 4 `perf`; the remaining 231 are `chore`,
+`docs`, `board`, `foreman`, `test`, `dogfood`, `qa`, `audit`, `ops`, `ci` and
+release bookkeeping). No `BREAKING CHANGE` footer and no `!` type token appear
+in the range, so this is a minor release: the three `feat` commits add
+harness-consumer enforcement and MCP capability documentation, and every other
+behaviour change in the range is one of the fixes or measurements below.
 
 ### Added
 
-- **MCP capability unlock documentation** (`a99aada3`). Documents the supported capability unlocks and remote-mode usage.
+- **Harness consumer liveness contracts** (`8a5622a3`, `d2c28cb0`). Enforces
+  harness consumer liveness contracts, and wires the consumer census plus the
+  liveness gate that reports on them (HARNESS-CRIER-001).
+- **MCP capability unlock documentation** (`a99aada3`). Documents the supported
+  capability unlocks and remote-mode usage (REV-CRIER-2).
 
 ### Fixed
 
-- **MCP identity mismatch reporting** (`812a3333`, `e9c5df02`). Corrects the two dogfood-reproduced identity/error-reporting paths.
-- **OpenAPI release-version alignment** (`70f5a0cd`, `93a5a877`). Keeps both OpenAPI copies synchronized with the release tag.
+- **Mesh frame reader attach (QA-CRIER-57, `42f193ca`, `615169b9`).** The frame
+  reader is attached BEFORE the listener accepts immediate writes, so a client
+  that writes on connect cannot have its first frame dropped; the rework
+  (`615169b9`) keeps that ordering.
+- **Loopback requests and ambient proxies** (`1525cddd`). The Python client
+  keeps loopback targets proxy-free and non-loopback targets proxied, with a
+  test that proves both arms.
+- **Delivery response token in both example consumers** (`2f31c214`). Both
+  example consumers echo the delivery response token instead of a re-generated
+  one, so the stale-409 replacement path stays provable.
+- **Inbox consumer contract through the authority wrapper** (`d8966427`,
+  INBOX-CRIER-001).
+- **OpenAPI release-version alignment (REV-CRIER-1, `70f5a0cd`, `93a5a877`,
+  `d080ba21`).** Both OpenAPI copies carry the release `info.version`, the
+  served spec matches the tracked one, and the version is kept in sync with the
+  tag rather than hand-edited per release.
+- **Harness census route published in OpenAPI** (`24408414`, DF-CRIER-505).
+- **MCP identity mismatch and error reporting** (`812a3333`, `e9c5df02`).
+  Corrects the two dogfood-reproduced identity/error-reporting paths
+  (DF-CRIER-503, DF-CRIER-504).
+- **Chaos disconnect classification** (`325fd6c6`, QA-CRIER-61). Classifies
+  chaos disconnect failures from the failure set rather than the exit status.
+- **ws-mesh scratch-port bind races** (`3daffaed`). The examples recover from a
+  scratch-port bind race instead of failing the run.
+- **Federation posture boot assertions** (`7ddca544`, RELEASE-025). The boot
+  assertions are synchronized so the posture check cannot read a half-started
+  federation.
+- **bunker-matrix selftest snapshot claim** (`c8d42d4c`, INT-CI-038). The probe
+  check asserts a single snapshot, so a second sample can no longer satisfy it.
+- **Board rows dropped by a colliding write** (`14304830`). Restores the
+  RELEASE-027/028/029 rows dropped by `5794c008`.
 
 ### Performance
 
-- **Session and thread query costs** (`db5d7939`, `f214a07f`, `6e799aea`, `ea2d9b4f`). Bounds session summary work and measures/indexes thread loading.
+- **Session and thread query costs** (`db5d7939`, `f214a07f`, `6e799aea`,
+  `ea2d9b4f`). Bounds the `GET /sessions` summary aggregate, indexes thread
+  loads by session, and measures the chat thread index write cost.
 
 ### Known issues
 
