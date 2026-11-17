@@ -56,7 +56,7 @@ Two consequences you should act on before anything else:
 | needs root | no | no (no-root recipe in §2.2) |
 | installs to | `$HOME/.local/bin` | anywhere you choose |
 | ships checksums | yes, verified against `SHA256SUMS` | no — you built it from the source you cloned |
-| **works on the public release today** | **no — no assets published (§3)** | **yes (§4)** |
+| **works on the public release today** | **yes (§3)** | **yes (§4)** |
 | best for | testers, and any box without a compiler | anyone who wants it running now |
 
 ---
@@ -165,31 +165,17 @@ apt-get install -y git make        # with root
 
 ## 3. Path A — install the prebuilt binaries (no toolchain)
 
-> ### ⚠️ This path fails closed on the release that exists today
->
-> `crier-dev/crier` currently has exactly one release, `v0.1.0-rc2`, and its
-> asset list is **empty** (`gh release view v0.1.0-rc2 --json assets` →
-> `{"assets":[]}`). The installer fetches `SHA256SUMS` first and refuses to
-> install anything it cannot verify, so on a fresh box the documented one-liner
-> ends like this — measured, exit status 1, **nothing installed**:
->
-> ```
-> ==> download
-> curl: (22) The requested URL returned error: 404
-> install.sh: FAIL: download failed: https://github.com/crier-dev/crier/releases/latest/download/SHA256SUMS
->        (a 404 here means the tag has no such asset, or the release is a
->        prerelease and so is not 'latest' — pass --version <tag> explicitly;
->        see https://github.com/crier-dev/crier/releases)
-> ```
->
-> That is the installer working as designed — but it means **there is no
-> prebuilt install to be had on the public release right now**. Use §4.
-> A release manager publishes the assets with
-> `make release-upload VERSION=<tag>` ([docs/releases.md](docs/releases.md) §4);
-> the acceptance drive for the whole front door is
-> `make install-path-selftest`, which passes.
+The public release carries a complete asset set and the install path below is
+verified against it — measured on 2026-11-17:
 
-Once a release carries its assets, the documented command is:
+> `gh release view v0.6.1 --repo crier-dev/crier --json
+> tagName,isDraft,isPrerelease,assets` (exit 0) → `tagName: "v0.6.1"`,
+> `isDraft: false`, `isPrerelease: false`, **8 uploaded assets**: `crier` +
+> `crier-mcp` for linux/amd64, linux/arm64 and darwin/arm64, plus `install.sh`
+> and `SHA256SUMS`. `v0.6.1` is the release `releases/latest` serves, so a
+> one-liner run with no `--version` installs **v0.6.1** today.
+
+The documented command is:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh
@@ -214,11 +200,45 @@ nothing and exit non-zero: a missing `SHA256SUMS`, a manifest with no line for
 your binary, a digest that does not match, or a box with neither `sha256sum` nor
 `shasum`.
 
+Measured end-to-end on 2026-11-17, linux/amd64, with the install target
+redirected to a scratch directory (`/home/kara/.hermes/cache/scratch/crier-a`).
+Both commands exited 0: `curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh -o install.sh`
+(fetched the script above) and `sh install.sh --dir "$PWD"` — the documented
+one-liner minus the pipe. Verbatim output:
+
+```
+==> crier latest installer (CR-FEAT-028) — no Go toolchain needed
+    platform : linux/amd64 (uname: Linux/x86_64)
+    source   : https://github.com/crier-dev/crier/releases
+    fetch    : curl 8.18.0
+    checksum : sha256sum
+    install  : /home/kara/.hermes/cache/scratch/crier-a
+
+==> download
+    SHA256SUMS                   <- https://github.com/crier-dev/crier/releases/latest/download/SHA256SUMS
+    crier_linux_amd64            <- https://github.com/crier-dev/crier/releases/latest/download/crier_linux_amd64
+    crier-mcp_linux_amd64        <- https://github.com/crier-dev/crier/releases/latest/download/crier-mcp_linux_amd64
+
+==> verify against SHA256SUMS
+    crier_linux_amd64            sha256 c298a2e7c9ad413d4d1ea8163801cd55159dbfbf3ca7bc0b581053a20283fdd3 (matches SHA256SUMS)
+    crier-mcp_linux_amd64        sha256 e37af237231d443959ab9224d07384f3af8430d8692ecdbb8d17c9df822bbc8c (matches SHA256SUMS)
+
+==> install
+    crier        -> /home/kara/.hermes/cache/scratch/crier-a/crier
+    crier-mcp    -> /home/kara/.hermes/cache/scratch/crier-a/crier-mcp
+
+==> run
+    crier v0.6.1-d7a68d01
+    crier-mcp v0.6.1-d7a68d01
+
+install.sh: OK — crier and crier-mcp are installed in /home/kara/.hermes/cache/scratch/crier-a
+```
+
 The release publishes **bare static executables** — `crier_linux_amd64`,
 `crier-mcp_linux_amd64`, and so on — plus `install.sh` and `SHA256SUMS`. There is
-no archive to extract: nothing is tarred, and the README's description of the
-asset set as "archives" is inaccurate. (The only tarball in either install path
-is the Go toolchain's, in §2.2.)
+no archive to extract: nothing is tarred or zipped, the same shape README.md's
+Quick Start documents ("bare static executables, not archives").
+(The only tarball in either install path is the Go toolchain's, in §2.2.)
 
 ---
 
@@ -454,7 +474,7 @@ Everything else needs an agent identity — start with
 
 | symptom | cause | fix |
 | --- | --- | --- |
-| `install.sh: FAIL: download failed … SHA256SUMS` (HTTP 404) | the release has no assets published | Path B (§4), or `--version <tag>` if only the latest is missing |
+| `install.sh: FAIL: download failed … SHA256SUMS` (HTTP 404) | the tag being fetched has no `SHA256SUMS` asset — e.g. a release published without its manifest, or a prerelease, which `releases/latest` does not serve | `--version <tag>` against a release known to carry the full asset set, or Path B (§4) |
 | `curl: command not found` on the documented one-liner | a fresh box has no `curl` **and no `wget`** | §2.1 |
 | checksum mismatch | a truncated download, or you are fetching from a mirror that changed the file | retry; if it persists the mirror is not the release |
 | `crier: -stop needs a pidfile` | you started it without `-pidfile`/`CR_PIDFILE` | always pass `-pidfile`; §6's units do |
@@ -480,9 +500,9 @@ for t in curl wget tar gzip sha256sum git make go; do
 done
 ```
 
-For Path A against a *served* release tree (which is how the prebuilt path was
-verified end-to-end, since the public release has no assets), build the asset set
-and serve it in the shape GitHub uses:
+For Path A against a *served* release tree — the offline/no-network variant of
+the install (the public release itself is verified directly in §3) — build the
+asset set and serve it in the shape GitHub uses:
 
 ```sh
 make release-artifacts VERSION=v0.1.0-rc2 RELEASE_OUTDIR=/tmp/dist
@@ -507,9 +527,10 @@ make install-path-selftest
 
 Stated so nobody reads more into it than was measured:
 
-- **The public release cannot install anything today** (§3). The prebuilt path is
-  verified against a locally served asset set; whether it works against GitHub
-  depends on a release manager publishing the assets.
+- **Only linux/amd64 was executed against the public release** (§3). The
+  2026-11-17 Path A measurement ran the linux/amd64 pair; the linux/arm64 and
+  darwin/arm64 assets are covered by the same `SHA256SUMS` but were not run on
+  those platforms.
 - **The system unit was not started on a live system** (§6.4) — only structurally
   verified. The user unit was run in full.
 - **PostgreSQL-backed durability was not exercised here.** The guide tells you to
