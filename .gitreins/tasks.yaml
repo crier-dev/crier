@@ -4489,3 +4489,17 @@ tasks:
   status: complete
   created_at: '2026-11-17T13:09:23.392669+00:00'
   completed_at: '2026-11-17T13:09:27.303523+00:00'
+- id: QA-CRIER-068
+  title: TestFederation391ProductionBoots must wait for the child's own bound port
+    instead of freePort() rebind
+  criteria:
+  - TestFederation391ProductionBoots and its sibling TestFederation391BootChild handshake
+    use CRIER_PORT=0 plus waitForChildBoundPort(t, pidPath, cmd.Process.Pid, logPath)
+    so the parent can never grade a foreign listener; a red-first subtest holds the
+    port while the child boots and asserts a named bind error instead of grading a
+    stranger's server; go build ./... and go vet ./... exit 0, go test -count=1 -short
+    -run 'TestFederation391' ./cmd/server exits 0, and grep proves no bind-close-rebind
+    remains in federation_posture_test.go
+  status: complete
+  created_at: '2026-11-17T15:39:51.405883+00:00'
+  completed_at: '2026-11-17T16:14:18.400093+00:00'
