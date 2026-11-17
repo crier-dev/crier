@@ -16,6 +16,32 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// spanAttributeAllowlist is the closed set of attribute keys crier may emit on
+// a span, from specs/OBSERVABILITY-TRACING.md §4 ("never message payloads,
+// prompt text, auth headers, or URL query strings"). It lives here so both the
+// end-to-end span-tree test and the per-site coverage test below are checked
+// against ONE list instead of two drifting copies.
+var spanAttributeAllowlist = map[string]bool{
+	"http.request.method":       true,
+	"http.route":                true,
+	"http.response.status_code": true,
+	"crier.agent_id":            true,
+	// §4's instrumentation table also names these, and the sites that emit
+	// them are live (handler.go:1929, relay/handler.go:228+340,
+	// harness/registry.go:226-243, webhook/webhook.go:354). A gate that only
+	// admitted the first four would reject real traffic's spans the moment it
+	// was extended beyond the two sites the span-tree test happens to drive.
+	"crier.message_count":   true,
+	"crier.topic":           true,
+	"crier.harness.adapter": true,
+	"crier.harness.state":   true,
+	"crier.webhook.outcome": true,
+}
+
+// spanAttrAllowed reports whether the exported attribute key is in the §4
+// allowlist.
+func spanAttrAllowed(key string) bool { return spanAttributeAllowlist[key] }
+
 func TestASetupDisabledDoesNotStartSDK(t *testing.T) {
 	before := runtime.NumGoroutine()
 	shutdown, err := Setup(context.Background(), Config{})
@@ -158,7 +184,7 @@ func TestHTTPMiddlewareExportsRouteAndChildSpanAndHonorsTraceparent(t *testing.T
 	for _, span := range spans {
 		byName[span.Name] = span
 		for _, attr := range span.Attributes {
-			if attr.Key != "http.request.method" && attr.Key != "http.route" && attr.Key != "http.response.status_code" && attr.Key != "crier.agent_id" {
+			if !spanAttrAllowed(attr.Key) {
 				t.Errorf("attribute key %q is outside the tracing allowlist", attr.Key)
 			}
 		}
@@ -173,5 +199,60 @@ func TestHTTPMiddlewareExportsRouteAndChildSpanAndHonorsTraceparent(t *testing.T
 	}
 	if child.Span.TraceID != traceID || child.Parent.SpanID != server.Span.SpanID {
 		t.Errorf("registry span is not a child of the HTTP span: server=%#v child=%#v", server, child)
+	}
+}
+
+// TestSpanAttributeAllowlistCoversEveryInstrumentedSite is R-T4's "for every
+// instrumented site" clause (specs/OBSERVABILITY-TRACING.md §7 test 4). The
+// span-tree test above only ever observes two sites (POST /ingress/messages and
+// registry.deliver), so an allowlist that forgot the keys the OTHER instrumented
+// sites emit would pass it and then reject real traffic's spans.
+//
+// Each case below emits the span the production site emits, with the attributes
+// transcribed from the call site named in the comment.
+func TestSpanAttributeAllowlistCoversEveryInstrumentedSite(t *testing.T) {
+	sites := []struct {
+		name  string
+		site  string
+		attrs []attribute.KeyValue
+	}{
+		// internal/registry/handler.go:1122 (HandleDeliver)
+		{"registry.deliver", "registry handler deliver", []attribute.KeyValue{attribute.String("crier.agent_id", "agent-1")}},
+		// internal/registry/handler.go:1825 + :1929 (retrieve sets the count after the lease)
+		{"registry.retrieve", "registry handler retrieve", []attribute.KeyValue{
+			attribute.String("crier.agent_id", "agent-1"), attribute.Int("crier.message_count", 2)}},
+		// internal/registry/handler.go:1951 (ack)
+		{"registry.ack", "registry handler ack", []attribute.KeyValue{attribute.String("crier.agent_id", "agent-1")}},
+		// internal/relay/handler.go:228 and :340
+		{"relay.publish", "relay publish", []attribute.KeyValue{attribute.String("crier.topic", "demo")}},
+		{"relay.subscribe", "relay subscribe", []attribute.KeyValue{attribute.String("crier.topic", "demo")}},
+		// internal/harness/registry.go:226 + :243, and :228 for the state
+		{"harness.dispatch", "harness registry dispatch", []attribute.KeyValue{
+			attribute.String("crier.harness.adapter", "hermes"), attribute.String("crier.harness.state", "delivered")}},
+		// internal/webhook/webhook.go:351 + :354
+		{"webhook.deliver", "webhook driver", []attribute.KeyValue{attribute.String("crier.webhook.outcome", "delivered")}},
+		// internal/federation/federation.go:484 + :525
+		{"federation.forward", "federation forward", []attribute.KeyValue{
+			attribute.String("crier.agent_id", "agent-1"), attribute.Int("http.response.status_code", 202)}},
+	}
+
+	for _, tc := range sites {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			for _, attr := range tc.attrs {
+				if !spanAttrAllowed(string(attr.Key)) {
+					t.Errorf("%s: attribute key %q is outside the tracing allowlist (§4) — either the site must stop emitting it or the allowlist must adopt it",
+						tc.site, attr.Key)
+				}
+			}
+		})
+	}
+
+	// The allowlist is closed in the other direction too: a payload-shaped key
+	// must never be admitted, so a future "just allow everything" edit fails.
+	for _, forbidden := range []string{"crier.payload", "crier.message.body", "http.request.header.authorization", "http.url.query"} {
+		if spanAttrAllowed(forbidden) {
+			t.Errorf("allowlist admits payload/credential-shaped attribute %q", forbidden)
+		}
 	}
 }
