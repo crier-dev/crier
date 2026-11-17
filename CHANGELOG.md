@@ -15,10 +15,14 @@ procedure, the gate requirements and the publish step are in
 
 ## [0.7.0] - 2026-11-17
 
-Range: `v0.6.1`..`v0.7.0` — 269 commits including this release entry (15 merges,
-254 non-merge: 3 `feat`, 16 `fix`, 4 `perf`; the remaining 231 are `chore`,
-`docs`, `board`, `foreman`, `test`, `dogfood`, `qa`, `audit`, `ops`, `ci` and
-release bookkeeping). No `BREAKING CHANGE` footer and no `!` type token appear
+Range: `v0.6.1`..`v0.7.0` — 3 `feat`, 16 `fix`, 4 `perf`; the rest are
+`chore`, `docs`, `board`, `foreman`, `test`, `dogfood`, `qa`, `audit`, `ops`,
+`ci` and release bookkeeping. No total commit count is stated on purpose: it
+changes with every commit pushed after this section is written, so re-derive
+the census at the tag commit with
+`git log v0.6.1..<tag> --no-merges --pretty=%s | sed -E 's/^([a-z]+)[(:!].*/\1/' | sort | uniq -c`.
+The material-type counts above are likewise re-derived at the tag commit.
+No `BREAKING CHANGE` footer and no `!` type token appear
 in the range, so this is a minor release: the three `feat` commits add
 harness-consumer enforcement and MCP capability documentation, and every other
 behaviour change in the range is one of the fixes or measurements below.
