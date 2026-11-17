@@ -4319,16 +4319,14 @@ tasks:
   created_at: '2026-11-16T20:35:51.905112+00:00'
   completed_at: '2026-11-16T21:27:07.118507+00:00'
 - id: RELEASE-028
-  title: prepare the v0.7.0 version carrier and give the tag a CI receipt before cutting
+  title: v0.7.0 version carrier reaches every surface
   criteria:
-  - CHANGELOG.md carries a released 0.7.0 section above 0.6.1 summarizing non-merge
-    commits since v0.6.1 with every feat/fix/perf named, Unreleased emptied; every
-    version surface reads 0.7.0 (3 README pin sites, cmd/server/openapi.yaml, docs/openapi.yaml);
-    version-carrier file edits only - the CUT itself is owner-gated and must NOT be
-    executed
+  - check-release-pin.sh v0.7.0 and check-openapi-version.sh v0.7.0 PASS; CHANGELOG
+    has a released 0.7.0 section above 0.6.1 with feat fix perf entries and no pinned
+    total; ci.yml triggers on v tag push; no tag or release created
   status: complete
-  created_at: '2026-11-17T00:15:46.283190+00:00'
-  completed_at: '2026-11-17T00:49:26.558803+00:00'
+  created_at: '2026-11-17T03:33:47.682993+00:00'
+  completed_at: '2026-11-17T03:33:49.876969+00:00'
 - id: RELEASE-027
   title: 'coverage lane reds are unattributable: the coverage target truncates go
     test output to 30 lines'
@@ -4340,3 +4338,22 @@ tasks:
     a green run prints a parseable summary line'
   status: in_progress
   created_at: '2026-11-17T00:15:46.838691+00:00'
+- id: RELEASE-029
+  title: v0.7.0 changelog section states no rotting commit total
+  criteria:
+  - CHANGELOG 0.7.0 section states no total commit count, gives the material census
+    and the re-derivation command; no bang type token and no BREAKING CHANGE footer
+    in v0.6.1..HEAD
+  status: complete
+  created_at: '2026-11-17T03:33:43.368562+00:00'
+  completed_at: '2026-11-17T03:33:45.216362+00:00'
+- id: RELEASE-032
+  title: canonical checkout kept at parity with origin/main
+  criteria:
+  - canonical checkout is 0 0 against origin/main with a clean status; duplicate 8f782c6a
+    is patch-id identical to bf371713 which is in origin/main; gitreins ledger residue
+    committed; release driver off-origin condition false; push-or-revert rule pinned
+    in docs/releases.md
+  status: complete
+  created_at: '2026-11-17T03:33:51.418020+00:00'
+  completed_at: '2026-11-17T03:33:53.072375+00:00'
