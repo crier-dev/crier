@@ -4,10 +4,11 @@
 //
 //  1. TestProtocolRouteCensusParity — the route-census parity gate (§7.1).
 //     For every gate combination of {a2a on/off} × {dagger url set/unset} ×
-//     {fed links set/unset} it boots the REAL server and asserts the set of
-//     (method, path) pairs it mounts is byte-identical to the committed
-//     golden census (cmd/server/testdata/protocol-census.json), taken at
-//     pre-refactor HEAD. A flag that flips without the census updating, or a
+//     {fed links set/unset}, plus the INT-022 relay/mesh gate combinations,
+//     it boots the REAL server and asserts the set of (method, path) pairs it
+//     mounts is byte-identical to the committed golden census
+//     (cmd/server/testdata/protocol-census.json), taken at pre-refactor HEAD.
+//     A flag that flips without the census updating, or a
 //     protocol route that moves, fails here. Regenerate with
 //     `go test ./cmd/server -run TestProtocolRouteCensusParity -census-update`
 //     — and read the diff before committing it: the golden is the contract.
@@ -178,6 +179,16 @@ var censusCombos = []struct {
 		"CR_A2A_ENABLED": "true", "CR_DAGGER_URL": "http://127.0.0.1:1", "CR_FED_LINKS": ""}},
 	{"a2a=on,dagger=on,fed=on", map[string]string{
 		"CR_A2A_ENABLED": "true", "CR_DAGGER_URL": "http://127.0.0.1:1", "CR_FED_LINKS": "http://127.0.0.1:1"}},
+	// INT-022: the relay and mesh gates are two more axes. They are proved on
+	// the baseline (a2a/dagger/fed all off) rather than multiplied into the
+	// eight above, because each combo is a real server boot; the ON position
+	// of both gates is already pinned by every other combo (their default).
+	{"relay=off,mesh=on,a2a=off,dagger=off,fed=off", map[string]string{
+		"CR_RELAY_ENABLED": "false", "CR_MESH_ENABLED": "", "CR_A2A_ENABLED": "", "CR_DAGGER_URL": "", "CR_FED_LINKS": ""}},
+	{"relay=on,mesh=off,a2a=off,dagger=off,fed=off", map[string]string{
+		"CR_RELAY_ENABLED": "", "CR_MESH_ENABLED": "false", "CR_A2A_ENABLED": "", "CR_DAGGER_URL": "", "CR_FED_LINKS": ""}},
+	{"relay=off,mesh=off,a2a=off,dagger=off,fed=off", map[string]string{
+		"CR_RELAY_ENABLED": "false", "CR_MESH_ENABLED": "false", "CR_A2A_ENABLED": "", "CR_DAGGER_URL": "", "CR_FED_LINKS": ""}},
 }
 
 // censusBaseEnv pins every config axis the combos do not vary so a census
@@ -191,6 +202,11 @@ var censusBaseEnv = map[string]string{
 	"CR_HARNESS_CONFIG":   "",
 	"CR_DAGGER_STORE_DIR": "", // replaced per boot when dagger is on
 	"CR_DAGGER_POLL_S":    "0",
+	// INT-022: the relay/mesh gates are scrubbed to unset here (their default,
+	// ON) so ambient process env cannot flip a surface under a combo that does
+	// not name the axis; the combos that DO name it override this entry.
+	"CR_RELAY_ENABLED": "",
+	"CR_MESH_ENABLED":  "",
 }
 
 // bootCensus boots the real server under extra and returns the sorted
@@ -334,6 +350,53 @@ func TestA2AOffRegistersZeroA2ARoutes(t *testing.T) {
 			if mounted != enabled.want {
 				t.Errorf("CR_A2A_ENABLED=%q: GET %s status %d, mounted=%v, want mounted=%v",
 					enabled.env, p, resp.StatusCode, mounted, enabled.want)
+			}
+		}
+	}
+}
+
+// TestRelayAndMeshGatesRemoveTheirRoutes is INT-022's direct gate proof, the
+// shape TestA2AOffRegistersZeroA2ARoutes has for A2A: each surface's own
+// switch, unset (= its documented default, ON) mounts its routes and set
+// false removes them — the router's own 404, no error, and no other surface
+// disturbed. Route-level proof, not a config readback: the request is served
+// by the REAL mounted router.
+func TestRelayAndMeshGatesRemoveTheirRoutes(t *testing.T) {
+	surfaces := []struct {
+		name  string
+		env   string
+		paths []string
+	}{
+		{name: "relay", env: "CR_RELAY_ENABLED", paths: []string{"/relay/topics"}},
+		{name: "mesh", env: "CR_MESH_ENABLED", paths: []string{"/mesh/peers"}},
+	}
+
+	for _, surface := range surfaces {
+		for _, gated := range []struct {
+			value string
+			want  bool
+		}{
+			{value: "", want: true},       // unset: the default, ON
+			{value: "false", want: false}, // explicit off: zero routes
+		} {
+			base := startTestServerWithEnv(t, map[string]string{
+				surface.env:      gated.value,
+				"CR_A2A_ENABLED": "",
+				"CR_DAGGER_URL":  "",
+				"CR_FED_LINKS":   "",
+			})
+			for _, p := range surface.paths {
+				resp, err := http.Get(base + p)
+				if err != nil {
+					t.Fatalf("GET %s: %v", p, err)
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				mounted := resp.StatusCode != http.StatusNotFound
+				if mounted != gated.want {
+					t.Errorf("%s=%q: GET %s status %d, mounted=%v, want mounted=%v",
+						surface.env, gated.value, p, resp.StatusCode, mounted, gated.want)
+				}
 			}
 		}
 	}

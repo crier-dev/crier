@@ -74,16 +74,17 @@ func swapConstructor(t *testing.T, name string, build func(protocol.Deps) protoc
 }
 
 // testDeps builds wiring values sufficient to register every real adapter:
-// relay/mesh services are real, A2A and dagger gates are off, federation is
-// in its default posture (records mode off, no links — the listing still
-// mounts, exactly as a bare boot does).
+// relay/mesh services are real and both of their gates are ON (their default
+// posture — INT-022), A2A and dagger gates are off, federation is in its
+// default posture (records mode off, no links — the listing still mounts,
+// exactly as a bare boot does).
 func testDeps(t *testing.T) protocol.Deps {
 	t.Helper()
 	return protocol.Deps{
 		RegistryHandler: registry.NewHandler(registry.NewMemoryStore()),
 		Store:           registry.NewMemoryStore(),
 		Relay:           relay.New(0),
-		Config:          &config.Config{},
+		Config:          &config.Config{RelayEnabled: true, MeshEnabled: true},
 		Mesh:            mesh.NewMesh(mesh.DefaultMeshConfig("crier")),
 	}
 }
@@ -190,6 +191,10 @@ func TestRegisterProtocolsCensusWalk(t *testing.T) {
 		t.Run(combo.name, func(t *testing.T) {
 			deps := testDeps(t)
 			deps.Config.A2AEnabled = strings.Contains(combo.name, "a2a=on")
+			// INT-022: the relay and mesh gates are the combo's own axes here;
+			// testDeps' default is both ON, so only an explicit "off" flips.
+			deps.Config.RelayEnabled = !strings.Contains(combo.name, "relay=off")
+			deps.Config.MeshEnabled = !strings.Contains(combo.name, "mesh=off")
 			if strings.Contains(combo.name, "fed=on") {
 				deps.Config.Federation.Links = []string{"http://127.0.0.1:1"}
 				deps.FedClient = federation.NewClient(deps.Config.Federation.Links, 0, "")

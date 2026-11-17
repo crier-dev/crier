@@ -38,15 +38,19 @@ import (
 // The five first-wave adapters.
 // ---------------------------------------------------------------------------
 
-// relayProtocol mounts the relay pub/sub surface. Always on today (spec §3):
-// the relay has no gate boolean, so Enabled is the constant true it always
-// behaved as.
+// relayProtocol mounts the relay pub/sub surface. Its gate is
+// CR_RELAY_ENABLED (INT-022, spec §3), DEFAULT TRUE: the three relay routes
+// were mounted unconditionally before the protocol layer existed, so an unset
+// flag keeps the served route set byte-identical. With the gate off the relay
+// registers nothing and the registerProtocols loop logs one "protocol
+// disabled" line — the same contract a2a/dagger already have.
 type relayProtocol struct {
+	cfg *config.Config
 	svc *relay.Relay
 }
 
 func (p relayProtocol) Name() string  { return "relay" }
-func (p relayProtocol) Enabled() bool { return true }
+func (p relayProtocol) Enabled() bool { return p.cfg.RelayEnabled }
 
 func (p relayProtocol) RegisterRoutes(r *mux.Router, _ protocol.Deps) error {
 	if p.svc == nil {
@@ -58,14 +62,18 @@ func (p relayProtocol) RegisterRoutes(r *mux.Router, _ protocol.Deps) error {
 	return nil
 }
 
-// meshProtocol mounts the P2P mesh request/response surface. Always on today
-// (spec §3): the mesh has no gate boolean either.
+// meshProtocol mounts the P2P mesh request/response surface. Its gate is
+// CR_MESH_ENABLED (INT-022, spec §3), DEFAULT TRUE for the same reason: both
+// mesh routes were always mounted. The gate is the surface, not the handshake
+// — CR_REQUIRE_MESH_AUTH and CR_MESH_ALLOWED_ORIGINS keep constraining a
+// mounted mesh and are untouched by it.
 type meshProtocol struct {
+	cfg *config.Config
 	svc *mesh.Mesh
 }
 
 func (p meshProtocol) Name() string  { return "mesh" }
-func (p meshProtocol) Enabled() bool { return true }
+func (p meshProtocol) Enabled() bool { return p.cfg.MeshEnabled }
 
 func (p meshProtocol) RegisterRoutes(r *mux.Router, _ protocol.Deps) error {
 	if p.svc == nil {
@@ -196,10 +204,10 @@ func (p federationProtocol) RegisterRoutes(r *mux.Router, _ protocol.Deps) error
 // Tests swap entries to inject bogus, failing and throwaway protocols.
 var protocolConstructors = map[string]func(protocol.Deps) protocol.Protocol{
 	"relay": func(d protocol.Deps) protocol.Protocol {
-		return relayProtocol{svc: d.Relay}
+		return relayProtocol{cfg: d.Config, svc: d.Relay}
 	},
 	"mesh": func(d protocol.Deps) protocol.Protocol {
-		return meshProtocol{svc: d.Mesh}
+		return meshProtocol{cfg: d.Config, svc: d.Mesh}
 	},
 	"a2a": func(d protocol.Deps) protocol.Protocol {
 		return a2aProtocol{cfg: d.Config}

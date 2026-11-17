@@ -427,6 +427,11 @@ var deterministicTestEnv = map[string]string{
 	"DATABASE_URL":       "",
 	"CRIER_DATABASE_URL": "",
 	"CR_GUARD_ENABLED":   "false",
+	// INT-022: the relay/mesh surface gates default ON; scrubbing them to
+	// unset keeps the documented default posture and stops ambient process
+	// env from removing a whole surface under an unrelated test's boot.
+	"CR_RELAY_ENABLED": "",
+	"CR_MESH_ENABLED":  "",
 }
 
 // startTestServerWithEnv is startTestServer plus caller-supplied environment

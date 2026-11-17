@@ -267,6 +267,24 @@ type Config struct {
 	// Observability holds live-inspection and tracing settings.
 	Observability ObservabilityConfig
 	Tracing       TracingConfig
+	// RelayEnabled is the relay pub/sub surface's gate (CR_RELAY_ENABLED,
+	// INT-022, specs/CRIER-PROTOCOLS.md §3). Default TRUE: the three relay
+	// routes — POST /relay/publish, GET /relay/subscribe/{topic} and
+	// GET /relay/topics — have been mounted on every boot since they existed
+	// (the pre-protocol-layer server registered them unconditionally), so an
+	// unset variable leaves a deployment byte-identical. CR_RELAY_ENABLED=false
+	// is the way to remove the surface: with it set, the relay protocol
+	// registers zero routes and one "protocol disabled" log line.
+	RelayEnabled bool
+	// MeshEnabled is the P2P mesh surface's gate (CR_MESH_ENABLED, INT-022,
+	// specs/CRIER-PROTOCOLS.md §3). Default TRUE, for the same reason as
+	// RelayEnabled: GET /mesh/connect/{agentID} and GET /mesh/peers were
+	// always mounted, so an unset variable changes nothing. This gate is
+	// orthogonal to CR_REQUIRE_MESH_AUTH (a property of the connect
+	// handshake, read only while the surface is mounted) and to
+	// CR_MESH_ALLOWED_ORIGINS (the upgrade's Origin policy): those constrain
+	// a mounted mesh, this decides whether a mesh exists at all.
+	MeshEnabled bool
 	// A2AEnabled is the server-side half of the OPT-IN A2A interoperability
 	// gate (CR_A2A_ENABLED, INT-A2A-001, specs/A2A-OPTION.md §4.1). Default
 	// false: with the flag unset the option is OFF and NOTHING A2A-related is
@@ -736,6 +754,12 @@ func LoadFrom(getenv Getenv) (Config, error) {
 		// the operator override (§2.4 G1).
 		Observability: ObservabilityConfig{EnableMetrics: true},
 		Tracing:       TracingConfig{Exporter: "otlp", OTLPEndpoint: "http://localhost:4318", SampleRatio: 1, ServiceName: "crier"},
+		// Protocol surface gates (INT-022, specs/CRIER-PROTOCOLS.md §3): the
+		// relay and mesh surfaces are ON by default because they always were
+		// — an unset variable must leave the served route set byte-identical
+		// to every earlier release. Only an explicit false removes a surface.
+		RelayEnabled: true,
+		MeshEnabled:  true,
 	}
 
 	if v := getenv("CR_LOG_LEVEL"); v != "" {
@@ -1437,6 +1461,29 @@ func LoadFrom(getenv Getenv) (Config, error) {
 	}
 	if v := strings.TrimSpace(getenv("CR_TRACING_SERVICE_NAME")); v != "" {
 		cfg.Tracing.ServiceName = v
+	}
+
+	// Protocol surface gates (INT-022, specs/CRIER-PROTOCOLS.md §3). The
+	// relay and mesh surfaces were the two of the five the protocol layer
+	// could not remove: their Enabled() was the constant true. Both now read
+	// a real gate, defaulting TRUE so an unset variable serves exactly the
+	// routes every earlier release served. Same tolerant bool dialect as
+	// CR_A2A_ENABLED / CR_GUARD_ENABLED; a value that cannot be honoured is
+	// a startup error rather than a silently ignored setting — an operator
+	// who turned a surface off must get it off.
+	if v := strings.TrimSpace(getenv("CR_RELAY_ENABLED")); v != "" {
+		parsed, err := parseTolerantBool("CR_RELAY_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.RelayEnabled = parsed
+	}
+	if v := strings.TrimSpace(getenv("CR_MESH_ENABLED")); v != "" {
+		parsed, err := parseTolerantBool("CR_MESH_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.MeshEnabled = parsed
 	}
 
 	// Opt-in A2A interoperability (INT-A2A-001, specs/A2A-OPTION.md §4.1).
