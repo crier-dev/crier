@@ -510,6 +510,9 @@ type Counters struct {
 	BlockTotal    int64
 	// KanbanWritten/Dropped/Failed are CR-FEAT-014 fire-and-forget card
 	// stats (spec §8.2: full queue → drop + counter; failures counted).
+	// KanbanWritten is published before the card's write is attempted, so
+	// an observer that can see a card on the board never reads a stale
+	// count; a repaired failure moves the card from written to failed.
 	KanbanWritten int64
 	KanbanDropped int64
 	KanbanFailed  int64

@@ -16,21 +16,35 @@ import (
 // recordingWriter captures cards for assertions. delay slows WriteCard
 // (fire-and-forget / queue tests); err makes every write fail
 // (write-failure tolerance); started closes on the FIRST WriteCard entry
-// (deterministic queue-full setup).
+// (deterministic queue-full setup); completed receives one value per
+// WriteCard return, so a test can synchronize on the writer finishing
+// instead of polling the recorded cards.
 type recordingWriter struct {
-	mu      sync.Mutex
-	cards   []Card
-	err     error
-	delay   time.Duration
-	started chan struct{}
-	once    sync.Once
+	mu        sync.Mutex
+	cards     []Card
+	err       error
+	delay     time.Duration
+	started   chan struct{}
+	once      sync.Once
+	completed chan struct{}
 }
 
 func newRecordingWriter() *recordingWriter {
-	return &recordingWriter{started: make(chan struct{})}
+	return &recordingWriter{
+		started:   make(chan struct{}),
+		completed: make(chan struct{}, 64),
+	}
 }
 
 func (w *recordingWriter) WriteCard(ctx context.Context, c Card) error {
+	// Signal on every return path (success, error, timeout). Buffered +
+	// non-blocking so an undrained writer never stalls the worker.
+	defer func() {
+		select {
+		case w.completed <- struct{}{}:
+		default:
+		}
+	}()
 	w.once.Do(func() { close(w.started) })
 	if w.delay > 0 {
 		select {
@@ -65,6 +79,21 @@ func (w *recordingWriter) waitFor(t *testing.T, n int) []Card {
 	}
 	t.Fatalf("timed out waiting for %d cards (have %d)", n, len(w.all()))
 	return nil
+}
+
+// waitCompleted blocks until n writes have returned. The worker publishes
+// KanbanWritten before invoking the writer (kanbanWorker.write), so once a
+// write has completed its accounting is already visible — the assertion
+// needs no polling and no sleep.
+func (w *recordingWriter) waitCompleted(t *testing.T, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		select {
+		case <-w.completed:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for write %d to complete (cards=%d)", i+1, len(w.all()))
+		}
+	}
 }
 
 // newKanbanGuard wires a Guard with a CardWriter + worker (CR-FEAT-014).
@@ -523,11 +552,79 @@ func TestKanban_QueueFullDrops(t *testing.T) {
 	if got := g.Snapshot().KanbanDropped; got != 1 {
 		t.Fatalf("KanbanDropped = %d, want 1", got)
 	}
-	cards := w.waitFor(t, 2)
-	if cards[0].Verdict.MessageID != "m1" || cards[1].Verdict.MessageID != "m2" {
+	// Synchronize on the writer finishing both cards, not on the recorded
+	// slice: the counter is published before each WriteCard call, so a
+	// completed write is exactly the point where KanbanWritten is safe to
+	// read. (Watching cards raced the counter: the card was visible before
+	// the increment.)
+	w.waitCompleted(t, 2)
+	cards := w.all()
+	if len(cards) != 2 || cards[0].Verdict.MessageID != "m1" || cards[1].Verdict.MessageID != "m2" {
 		t.Errorf("written cards = %+v, want m1, m2", cards)
 	}
 	if got := g.Snapshot().KanbanWritten; got != 2 {
 		t.Errorf("KanbanWritten = %d, want 2", got)
+	}
+	if got := g.Snapshot().KanbanFailed; got != 0 {
+		t.Errorf("KanbanFailed = %d, want 0", got)
+	}
+}
+
+// entryProbeWriter samples kanbanWorker.stats() from INSIDE WriteCard —
+// i.e. at the exact moment a card becomes visible to the outside world
+// (INT-026: the counter must already account for that card).
+type entryProbeWriter struct {
+	kw      *kanbanWorker
+	mu      sync.Mutex
+	atEntry []int64
+	entered chan struct{}
+}
+
+func (p *entryProbeWriter) WriteCard(ctx context.Context, c Card) error {
+	written, _, _ := p.kw.stats()
+	p.mu.Lock()
+	p.atEntry = append(p.atEntry, written)
+	p.mu.Unlock()
+	p.entered <- struct{}{}
+	return nil
+}
+
+func (p *entryProbeWriter) entries() []int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]int64(nil), p.atEntry...)
+}
+
+func TestKanban_WrittenPublishedBeforeWrite(t *testing.T) {
+	// INT-026 ordering contract, asserted deterministically (no sleeps, no
+	// polling, no load): from inside WriteCard, KanbanWritten already
+	// includes the card being written. The old ordering incremented after
+	// the call returned, so this read 0 on the card's own write — an
+	// observer holding a visible card could read a stale counter.
+	probe := &entryProbeWriter{entered: make(chan struct{}, 1)}
+	kw := newKanbanWorker(probe, 1, nil, nil)
+	probe.kw = kw
+	t.Cleanup(kw.close)
+	const cards = 3
+	for i := 1; i <= cards; i++ {
+		if !kw.enqueue(Card{Title: "c"}) {
+			t.Fatalf("card %d: enqueue rejected (queue not full)", i)
+		}
+		select {
+		case <-probe.entered:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("card %d: write never ran", i)
+		}
+		written, dropped, failed := kw.stats()
+		if written != int64(i) || dropped != 0 || failed != 0 {
+			t.Fatalf("card %d in flight: stats = written=%d dropped=%d failed=%d, want %d/0/0",
+				i, written, dropped, failed, i)
+		}
+	}
+	for i, seen := range probe.entries() {
+		if want := int64(i + 1); seen != want {
+			t.Errorf("WriteCard %d entered with KanbanWritten = %d, want %d (counter trailed the visible card)",
+				i+1, seen, want)
+		}
 	}
 }

@@ -164,11 +164,32 @@ func (w *kanbanWorker) run() {
 	}
 }
 
+// write performs one card write and publishes its accounting. Ordering
+// contract (INT-026): the written counter is reserved before the writer is
+// invoked, so the count is never behind an observable card; a failed write
+// reverses the reservation under the same mutex.
 func (w *kanbanWorker) write(c Card) {
+	// Publish the card as written BEFORE invoking the writer. WriteCard's
+	// side effect (the card landing on the board) is visible to outside
+	// observers the moment it succeeds, so counting after the call let an
+	// observer that had already seen the card read a stale KanbanWritten —
+	// the counter trailed the effect by one scheduler switch. Reserving the
+	// slot first inverts that: the counter is always at least as advanced
+	// as the observable effect (INT-026).
+	w.mu.Lock()
+	w.written++
+	w.mu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), kanbanWriteTimeout)
 	defer cancel()
 	if err := w.writer.WriteCard(ctx, c); err != nil {
+		// The effect never landed: re-classify under the same mutex so the
+		// card is accounted exactly once — in failed, not written. Reservation
+		// + correction keep written+dropped+failed == cards the worker has
+		// taken off the queue, at every instant (no double counting, no lost
+		// cards).
 		w.mu.Lock()
+		w.written--
 		w.failed++
 		w.mu.Unlock()
 		if w.logfWarn != nil {
@@ -176,9 +197,6 @@ func (w *kanbanWorker) write(c Card) {
 		}
 		return
 	}
-	w.mu.Lock()
-	w.written++
-	w.mu.Unlock()
 	if w.logf != nil {
 		w.logf("guard kanban", "event", "kanban_card_written", "title", c.Title)
 	}
