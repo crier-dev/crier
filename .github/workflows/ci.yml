@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # RELEASE-028: a pushed version tag is the cut's own CI receipt — the same
+    # jobs grade the tagged commit, so the Release object has green evidence for
+    # the exact SHA it publishes. release.yml turns the tag into assets; this
+    # entry only adds the grade for that SHA.
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
 
