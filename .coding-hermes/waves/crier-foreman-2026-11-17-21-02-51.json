@@ -39,5 +39,7 @@
     "Deployed ~/.hermes/scripts/bunker-qa.sh diverges from the repo copy (~106 lines both directions) - never blind-deploy at merge."
   ],
   "created_at": "2026-11-17T21:20:00Z",
-  "status": "dispatching"
+  "status": "closed",
+  "outcome": "4 of 6 rows closed with landed commits and tier-2 PASS; README-017 blocked on the release-pin gate posture (worker commit kept, not merged); RELEASE-027 found already landed and restored to blocked on AC4. QA-CRIER-8-R2 needed a rework pass after a judge FAIL and closed on PASS (run 69c05064).",
+  "closed_at": "2026-11-17T22:50:00Z"
 }
