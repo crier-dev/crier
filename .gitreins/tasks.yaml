@@ -4373,3 +4373,19 @@ tasks:
   status: complete
   created_at: '2026-11-17T06:05:14.268002+00:00'
   completed_at: '2026-11-17T06:07:51.239719+00:00'
+- id: INT-010
+  title: "[loop:P1] hardening loop contract \u2014 wave-2 end-state evaluation pass\
+    \ (5 protocols, OTel trace, archive-then-delete) with gate exit codes and next-wave\
+    \ gap rows"
+  criteria:
+  - 'End state: a stranger can register an agent over EACH protocol mounted through
+    the Protocol interface (relay, mesh, A2A, dagger, federation), complete a signed
+    round trip, and observe the turn in an OTel-exported trace; archive-then-delete
+    is proven. Gates reported with exit codes: route-census parity per gate combination;
+    archive-then-delete invariant; tracing default-off proof; go build ./... && go
+    vet ./... && go test ./... -count=1 all rc=0. Evidence committed as docs/evidence/int010-iteration-*.md
+    quoting exact commands and outputs. Next-wave gap rows reported (board JSONL untouched
+    by the worker).'
+  status: complete
+  created_at: '2026-11-17T06:38:01.381291+00:00'
+  completed_at: '2026-11-17T07:05:27.659794+00:00'
