@@ -305,6 +305,33 @@ cause instead of needing a re-run. A green run prints the parseable one-liner
 `make coverage-selftest` proves both shapes on scratch fixtures, including one
 whose failing package and test sit below 40+ lines of suite output.
 
+## Cut from a tree that is at parity with origin/main
+
+`/home/kara/crier` is a shared checkout: the release lane, review lanes and
+foreman workers all read and write it. A commit that exists only in that working
+copy is invisible to CI and to every other lane, and a tag cut there names a
+commit no one else can fetch. Before cutting, from the same checkout the tag will
+be cut from:
+
+```
+git fetch origin
+git rev-list --left-right --count origin/main...HEAD   # must print 0<TAB>0
+git status --porcelain                                 # must be empty
+git merge-base --is-ancestor HEAD origin/main && echo on-parity
+```
+
+The release driver refuses a dirty tree and warns when `HEAD` is not an ancestor
+of `origin/main`; treat both as hard stops, not noise.
+
+**Pin for every worker and lane that commits here:** a commit made in the shared
+checkout is either pushed (and the push verified with
+`git rev-list --count origin/<branch>..HEAD` = 0) or reverted — `git reset --hard
+origin/main` after confirming, with `git patch-id --stable`, that the dropped
+commit carries nothing `origin/main` lacks — before the next lane reads the tree.
+Never leave an unpushed commit sitting in the shared checkout: it diverges the
+tree from `origin/main` and the divergence is silent until a release or a
+rebuild runs against the wrong code.
+
 ## What not to do
 
 - **Do not re-tag a published version.** Two commits under one version number
