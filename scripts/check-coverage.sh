@@ -27,26 +27,53 @@
 # Every run prints the resolved tool identities, the exact command run,
 # and the parsed total, so the verdict is always attributable to evidence.
 #
+# RELEASE-027: a coverage red used to be UNATTRIBUTABLE. The red-run
+# branch kept `go test`'s output in a variable and printed a fixed
+# `head -30` window of it, so when the Coverage CI job failed the log
+# named no package, no test and no percentage (run 43303623612, step
+# "Check coverage threshold"): the failing test sat below the window and
+# the number was never printed at all. A gate nobody can triage is not a
+# gate. The suite output is now ECHOED IN FULL and RETAINED in
+# $COVERAGE_LOG (gitignored); the red-run branch extracts the failing
+# package import paths and failing test names FROM that log and prints
+# them with the total percentage measured from the failed run's profile,
+# so any red names itself no matter where in the output it sits.
+#
 # CONFIG
 #   COVERAGE_THRESHOLD  pass mark (default 70.0)
 #   GO                  go binary to use (default: `go` on PATH)
-#   CHECK_COVERAGE_KEEP_GO_OUTPUT=1  do not discard `go test`'s output
+#   COVERAGE_LOG        where the FULL `go test` output is retained
+#                       (default .coverage-test-output.log, CWD-relative;
+#                       gitignored, so it never dirties `git status`)
+#   CHECK_COVERAGE_KEEP_GO_OUTPUT  accepted for compatibility with older
+#                       invocations; the suite output is ALWAYS retained in
+#                       COVERAGE_LOG and always echoed, so nothing is
+#                       discarded or truncated any more.
 #
 # EXIT CODES
 #   0  suite green and coverage >= threshold
 #   1  suite green but coverage BELOW threshold
-#   2  the suite FAILED (refusal; go test's output is printed)
+#   2  the suite FAILED (refusal; failing packages/tests + total printed)
 #   3  missing/unreadable coverage data or an unparseable total (refusal)
-#   4  misuse (unknown option / bad COVERAGE_THRESHOLD / missing `go`)
+#   4  misuse (unknown option / bad COVERAGE_THRESHOLD / missing `go` /
+#      unwritable suite log)
 #
 # OUTPUT CONTRACT (grep-able)
 #   coverage: using <go path> (<go version>)                    tool identity
 #   coverage: cmd: <the exact suite command>                    evidence line
-#   coverage: total <N.NN%> (threshold 70.0)                    parsed data
+#   coverage: log: <abs path> (<n> line(s) retained)            retention path
+#   coverage: FAILING: package <import path>                    red attribution
+#   coverage: FAILING: test <TestName>                          red attribution
+#   coverage: failed-run total <N.N> percent (threshold <T> percent)
+#   coverage: total <N.NN%> (threshold <T>)                     parsed data
+#   coverage: <N.N> percent (threshold <T> percent)             green summary
 #   PASS  coverage <N.NN%> >= <threshold>%                      green
 #   FAIL  coverage <N.NN%> < <threshold>%                       red
 #   REFUSED  coverage-check: <reason>                           every refusal
 #   A refusal NEVER prints a PASS line.
+#   NOTHING is truncated to a fixed first/last-N window: the suite's own
+#   output is echoed verbatim and the attribution above is read from the
+#   retained log.
 #
 # SELFTEST — `bash scripts/check-coverage.sh --selftest` (wired as
 # `make coverage-selftest`). It never needs the repo's own suite to be
@@ -79,7 +106,19 @@
 #      forced to succeed must print a PASS over an EMPTY total — proving
 #      the empty-data refusal is caused by that validation;
 #  12. a clean scratch module suite passes at ANY threshold the caller
-#      sets (COVERAGE_THRESHOLD is honoured, 100 refuses at 101).
+#      sets (COVERAGE_THRESHOLD is honoured, 100 refuses at 101);
+#  13. a FAILING suite prints — on STDOUT — the failing package import
+#      path, the failing TEST NAME, the total measured from the failed
+#      run beside the threshold, and the retention path of the full log;
+#  14. a green run prints the canonical summary line
+#      `coverage: <N.N> percent (threshold <T> percent)` carrying BOTH
+#      numbers (the line CI and operators parse);
+#  15. NO WINDOW TRUNCATION: a fixture whose failing package and test sit
+#      BELOW 40+ lines of suite output is still named in full, and the
+#      retained log holds every one of those lines — a fixed head/tail
+#      window would have dropped exactly the failure;
+#  16. the retention path is honoured and written on a green run too, so
+#      the operator can always re-read what the gate measured.
 #   `make coverage-selftest` exits 0 only when all of them behaved.
 #
 # DEPENDENCIES: bash, go (real suites), awk; the selftest additionally
@@ -92,6 +131,11 @@ case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
 
 PROG="coverage"
 THRESHOLD="${COVERAGE_THRESHOLD:-70.0}"
+# RELEASE-027: the FULL `go test` output is retained here (gitignored).
+LOG="${COVERAGE_LOG:-.coverage-test-output.log}"
+# "check" applies the threshold verdict; "report" (make coverage) only
+# measures and prints — two verbs, one engine, so they cannot disagree.
+MODE="check"
 
 # ── output helpers ────────────────────────────────────────────────────────────
 _err() { printf '%s: ERROR: %s\n' "$PROG" "$*" >&2; }
@@ -103,12 +147,21 @@ usage() {
 check-coverage.sh — fail-closed coverage gate engine (QA-CRIER-34)
 
 Usage:
-  bash scripts/check-coverage.sh [--selftest]
+  bash scripts/check-coverage.sh [--report] [--selftest]
 
-Runs the -short suite with -coverprofile into coverage.out, requires the
-suite to exit 0, parses the `total:` line, refuses missing/unreadable/
-unparseable coverage data, and compares the number against
-COVERAGE_THRESHOLD (default 70.0).
+Runs the -short suite with -coverprofile into coverage.out, echoing its
+output in full and retaining it in $COVERAGE_LOG (default
+.coverage-test-output.log). Requires the suite to exit 0, parses the
+`total:` line, refuses missing/unreadable/unparseable coverage data, and
+compares the number against COVERAGE_THRESHOLD (default 70.0).
+
+On a RED suite it prints the failing package import paths, the failing
+test names and the total measured from the failed run beside the
+threshold — extracted from the retained log, so no fixed output window
+can hide the failure.
+
+--report measures and prints without applying the threshold verdict
+(`make coverage`); the suite must still be green.
 
 Exit codes: 0 pass, 1 below threshold, 2 suite failed (refused),
 3 missing/unparseable coverage data (refused), 4 misuse/missing go.
@@ -141,44 +194,106 @@ _data_ok() {
   printf '%s' "$v" | grep -Eq '^[0-9]+([.][0-9]+)?$'
 }
 
+# _log_path — the retention path, made absolute for the echo line so the
+# operator can open it from anywhere (and CI can attach it).
+_log_path() {
+  local p="$LOG"
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  printf '%s' "$p"
+}
+
+# _log_lines <log> — how many lines of suite output were retained.
+_log_lines() { wc -l <"$1" 2>/dev/null | tr -d ' ' || printf '0'; }
+
+# _failing_packages <log> — every import path `go test` marked FAIL, plus
+# the `# <pkg>` headers of build failures, deduplicated. Read from the
+# RETAINED log, so the position of a failure in the output cannot hide it.
+_failing_packages() {
+  {
+    grep -E '^FAIL[[:space:]]+[^[:space:]]' "$1" 2>/dev/null | awk '{print $2}'
+    grep -E '^#[[:space:]]+[^[:space:]]' "$1" 2>/dev/null | awk '{print $2}'
+  } | sort -u
+}
+
+# _failing_tests <log> — every `--- FAIL: <TestName>` from the retained log
+# (subtests arrive indented, so the match is anchored loosely), deduped.
+_failing_tests() {
+  grep -E '^[[:space:]]*--- FAIL: ' "$1" 2>/dev/null | awk '{print $3}' | sort -u
+}
+
+# _report_failures <log> — RELEASE-027: the attribution a red run owed the
+# operator all along. Printed on STDOUT (so a step log that only captures
+# stdout still names the failure), from the retained log rather than a
+# fixed window of it, together with the retention path itself.
+_report_failures() {
+  local log="$1" pkg test found=0
+  for pkg in $(_failing_packages "$log"); do
+    _info "FAILING: package $pkg"
+    found=1
+  done
+  for test in $(_failing_tests "$log"); do
+    _info "FAILING: test $test"
+    found=1
+  done
+  if [ "$found" -eq 0 ]; then
+    _info "FAILING: no package or test name parsed from the suite log — read the retained log: $(_log_path)"
+  fi
+  _info "log: $(_log_path) ($(_log_lines "$log") line(s) retained, full go test output)"
+}
+
+# _total_from_profile <profile> — the parsed total, or empty.
+_total_from_profile() {
+  "$GO_BIN" tool cover -func="$1" 2>/dev/null | grep '^total:' | awk '{print $3}' | sed 's/%$//'
+}
+
+# _report_red_total <profile> — RELEASE-027: a red run still reports the
+# number it measured (from the profile the failed suite left behind) beside
+# the threshold, explicitly as a measurement and never as a verdict.
+_report_red_total() {
+  local t=""
+  t="$(_total_from_profile "$1")"
+  if _data_ok "$t"; then
+    _info "failed-run total ${t} percent (threshold ${THRESHOLD} percent) — measurement only; a red suite is refused, never graded"
+  else
+    _info "failed-run total unparseable (threshold ${THRESHOLD} percent) — the failed suite left no readable coverage profile"
+  fi
+}
+
 run_check() {
   local prof="coverage.out"
-  local test_rc=0 total_line="" coverage="" diag=""
+  local test_rc=0 total_line="" coverage=""
 
   # The gate may only ever grade a profile from THIS run: a profile left
   # behind by an earlier tree must never be readable when the current
   # suite fails to produce one (the stale-data RED arm).
   rm -f "$prof" 2>/dev/null || true
+  # Same rule for the retained log: never let a previous run's evidence be
+  # read as this run's (RELEASE-027).
+  rm -f "$LOG" 2>/dev/null || true
 
   resolve_go || return $?
+
+  if ! ( : >"$LOG" ) 2>/dev/null; then
+    _refuse "cannot write the suite log '$(_log_path)' — refusing to run a suite whose output could not be retained or attributed."
+    return 4
+  fi
+  _info "log: $(_log_path) (full go test output is retained here, untruncated)"
 
   # NEUTER-MARK[suite-status]: the suite verdict call. The selftest seds
   # exactly this line (and asserts the copy changed) to prove refusals
   # 3/4 are caused by THIS status check and not by accident.
   local cmd=("$GO_BIN" test -short -count=1 -coverprofile="$prof" ./...)
   _info "cmd: ${cmd[*]}"
-  if [ "${CHECK_COVERAGE_KEEP_GO_OUTPUT:-0}" = "1" ]; then
-    "${cmd[@]}"
-  else
-    diag="$("${cmd[@]}" 2>&1)"
-  fi
+  # No window, no truncation (RELEASE-027): the suite's own output goes to
+  # stdout in full AND to the retained log. `set -o pipefail` is in force,
+  # so go test's status — not tee's — is the pipeline's status and a red
+  # suite can never be laundered green by the retention pipe.
+  "${cmd[@]}" 2>&1 | tee "$LOG"
   test_rc=$?
   if [ "$test_rc" -ne 0 ]; then
     _refuse "the test suite FAILED (exit $test_rc) — no coverage verdict can be trusted from a red run; refusing to grade stale or missing data."
-    if [ -n "$diag" ]; then
-      # Name the failing package(s) — go test marks them "FAIL\tpkg".
-      local failing
-      failing="$(printf '%s\n' "$diag" | grep '^FAIL' | head -5)"
-      if [ -n "$failing" ]; then
-        printf '%s\n' "$failing" | sed 's/^/coverage: FAILING: /' >&2
-      fi
-      printf '%s\n' "$diag" | head -30 | sed 's/^/coverage: | /' >&2
-      local n
-      n="$(printf '%s\n' "$diag" | wc -l | tr -d ' ')"
-      [ "${n:-0}" -gt 30 ] && _info "(go test output truncated to the first 30 of $n line(s); re-run with CHECK_COVERAGE_KEEP_GO_OUTPUT=1 for the full log)"
-    else
-      _info "(go test's output above — CHECK_COVERAGE_KEEP_GO_OUTPUT=1 keeps it verbatim)"
-    fi
+    _report_failures "$LOG"
+    _report_red_total "$prof"
     return 2
   fi
   _info "suite: PASS (exit 0) — grading the profile from this run"
@@ -202,6 +317,15 @@ run_check() {
   fi
   coverage="$total_line"
   _info "total ${coverage}% (threshold ${THRESHOLD})"
+  # RELEASE-027 / AC2: the one-line, parseable green summary — measured
+  # total AND threshold, both present, always.
+  _info "${coverage} percent (threshold ${THRESHOLD} percent)"
+  _info "log: $(_log_path) ($(_log_lines "$LOG") line(s) retained, full go test output)"
+
+  if [ "$MODE" = "report" ]; then
+    _info "report mode: measuring only — the threshold verdict belongs to make coverage-check"
+    return 0
+  fi
 
   if awk -v c="$coverage" -v t="$THRESHOLD" 'BEGIN { exit !(c + 0 >= t + 0) }'; then
     printf 'PASS  coverage %s%% >= %s%%\n' "$coverage" "$THRESHOLD"
@@ -296,6 +420,58 @@ GO
   fi
 }
 
+# _mk_noisy_module <dir> — RELEASE-027 fixture: a scratch module whose
+# PASSING package sorts first and whose FAILING package sorts LAST and
+# emits 40+ lines of diagnostics BEFORE its failure line. Any fixed
+# first/last-N window of the suite output drops exactly that failure — the
+# defect this arm exists to keep dead.
+_mk_noisy_module() {
+  local dir="$1"
+  mkdir -p "$dir/aaa" "$dir/zzz"
+  cat >"$dir/go.mod" <<EOF
+module selftest.example/noisy
+
+go 1.24
+EOF
+  cat >"$dir/aaa/aaa.go" <<'GO'
+package aaa
+
+func A(x int) int { return x }
+GO
+  cat >"$dir/aaa/aaa_test.go" <<'GO'
+package aaa
+
+import "testing"
+
+func TestA(t *testing.T) {
+	if A(1) != 1 {
+		t.Fatal("A(1) != 1")
+	}
+}
+GO
+  cat >"$dir/zzz/zzz.go" <<'GO'
+package zzz
+
+func Z(x int) int { return x }
+GO
+  cat >"$dir/zzz/zzz_test.go" <<'GO'
+package zzz
+
+import (
+	"fmt"
+	"testing"
+)
+
+// TestDeepFailure buries its failure below 40 lines of output.
+func TestDeepFailure(t *testing.T) {
+	for i := 0; i < 40; i++ {
+		fmt.Printf("zzz diagnostic line %02d\n", i)
+	}
+	t.Fatal("deliberately failing test buried below 40 lines of output")
+}
+GO
+}
+
 # _mk_shim <dir> <mode> — a PATH shim directory. mode=hidego: symlinks to
 # every tool the script needs EXCEPT go (so the check proves the
 # script's own resolution path, not a broken environment). mode=stale:
@@ -306,7 +482,9 @@ _mk_shim() {
   local dir="$1" mode="$2" b p realgo
   mkdir -p "$dir"
   realgo="$(command -v go)"
-  for b in sh bash env awk grep sed head printf mkdir rm cat wc cmp mktemp dirname tr uname cut sort; do
+  # `tee` is on this list because the suite output is now retained through
+  # it (RELEASE-027); every arm must run with the same tool set.
+  for b in sh bash env awk grep sed head printf mkdir rm cat wc cmp mktemp dirname tr uname cut sort tee; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$dir/$b"
   done
   case "$mode" in
@@ -370,6 +548,7 @@ _selftest() {
   _mk_module "$tmp/mod-pass" above 0
   _mk_module "$tmp/mod-low" below 0
   _mk_module "$tmp/mod-fail" above 1
+  _mk_noisy_module "$tmp/mod-noisy"
 
   # shim dirs
   _mk_shim "$tmp/shim-stale" stale
@@ -600,6 +779,100 @@ _selftest() {
     fi
   fi
 
+  # 13. RELEASE-027: a FAILING suite ATTRIBUTES ITSELF ON STDOUT — the
+  #     failing package import path, the failing TEST NAME, the total
+  #     measured from the failed run beside the threshold, and the path of
+  #     the retained full log. This is exactly the information the old
+  #     `head -30` window threw away (CI run 43303623612).
+  checks=$((checks + 1))
+  local red_log="$tmp/red-run.log" red_out="" red_err=""
+  red_out="$(cd "$tmp/mod-fail" && COVERAGE_LOG="$red_log" bash "$SELF" 2>"$tmp/red-run.err")"
+  rc=$?
+  red_err="$(cat "$tmp/red-run.err" 2>/dev/null)"
+  if [ "$rc" -ne 2 ]; then
+    printf '%s selftest: FAIL: the attributing red-run arm exited %d, not 2\n  stdout: %s\n  stderr: %s\n' "$PROG" "$rc" "$red_out" "$red_err" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$red_out" | grep -q 'coverage: FAILING: package selftest.example/qa34/p'; then
+    printf '%s selftest: FAIL: the red run did not name the failing package on STDOUT\n  stdout: %s\n  stderr: %s\n' "$PROG" "$red_out" "$red_err" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$red_out" | grep -q 'coverage: FAILING: test TestBroken'; then
+    printf '%s selftest: FAIL: the red run did not name the failing TEST on STDOUT\n  stdout: %s\n  stderr: %s\n' "$PROG" "$red_out" "$red_err" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$red_out" | grep -Eq 'coverage: failed-run total [0-9]+([.][0-9]+)? percent \(threshold 70\.0 percent\)'; then
+    printf '%s selftest: FAIL: the red run did not print the measured total beside the threshold\n  stdout: %s\n  stderr: %s\n' "$PROG" "$red_out" "$red_err" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$red_out" | grep -q "coverage: log: $red_log"; then
+    printf '%s selftest: FAIL: the red run did not name the retained log path\n  stdout: %s\n  stderr: %s\n' "$PROG" "$red_out" "$red_err" >&2
+    fails=$((fails + 1))
+  elif [ ! -s "$red_log" ] || ! grep -q -e '--- FAIL: TestBroken' "$red_log"; then
+    printf '%s selftest: FAIL: the full go test output was not retained at %s\n  log: %s\n' "$PROG" "$red_log" "$(cat "$red_log" 2>/dev/null)" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: RELEASE-027: a red suite names its failing package, its failing test, the measured total and the retained log on STDOUT (rc=2)\n'
+  fi
+
+  # 14. RELEASE-027 / AC2: a green run prints the parseable one-line
+  #     summary carrying BOTH the measured total and the threshold.
+  checks=$((checks + 1))
+  out="$(cd "$tmp/mod-pass" && bash "$SELF" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s selftest: FAIL: the green arm for the summary line exited %d, not 0\n  output: %s\n' "$PROG" "$rc" "$out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$out" | grep -Eq '^coverage: [0-9]+([.][0-9]+)? percent \(threshold 70\.0 percent\)$'; then
+    printf '%s selftest: FAIL: the green run did not print the parseable summary line `coverage: NN.N percent (threshold 70.0 percent)`\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: RELEASE-027: a green run prints `coverage: NN.N percent (threshold 70.0 percent)` with both numbers\n'
+  fi
+
+  # 15. RELEASE-027: NO WINDOW TRUNCATION — the failing package and test
+  #     sit BELOW 40+ lines of suite output and are still named, the 40th
+  #     diagnostic line is still echoed to stdout, and the retained log
+  #     holds every line. A fixed first/last-N window fails this arm.
+  checks=$((checks + 1))
+  local noisy_log="$tmp/noisy-run.log" noisy_out=""
+  noisy_out="$(cd "$tmp/mod-noisy" && COVERAGE_LOG="$noisy_log" bash "$SELF" 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -ne 2 ]; then
+    printf '%s selftest: FAIL: the deep-failure arm exited %d, not 2\n  stdout: %s\n' "$PROG" "$rc" "$noisy_out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$noisy_out" | grep -q 'coverage: FAILING: package selftest.example/noisy/zzz'; then
+    printf '%s selftest: FAIL: the failure BELOW 40 lines of output was not attributed (fixed-window truncation is back)\n  stdout: %s\n' "$PROG" "$noisy_out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$noisy_out" | grep -q 'coverage: FAILING: test TestDeepFailure'; then
+    printf '%s selftest: FAIL: the failing test BELOW 40 lines of output was not named\n  stdout: %s\n' "$PROG" "$noisy_out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$noisy_out" | grep -q 'zzz diagnostic line 39'; then
+    printf '%s selftest: FAIL: the 40th line of suite output was not echoed to stdout (a window is cutting the log)\n  stdout: %s\n' "$PROG" "$noisy_out" >&2
+    fails=$((fails + 1))
+  elif [ ! -s "$noisy_log" ] || [ "$(_log_lines "$noisy_log")" -lt 40 ] || ! grep -q 'zzz diagnostic line 39' "$noisy_log"; then
+    printf '%s selftest: FAIL: the retained log did not hold the full suite output (%s line(s))\n  log: %s\n' "$PROG" "$(_log_lines "$noisy_log" 2>/dev/null)" "$(cat "$noisy_log" 2>/dev/null)" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: RELEASE-027: a failure buried below 40+ lines is still named, echoed and retained — no fixed output window\n'
+  fi
+
+  # 16. RELEASE-027: the retention path is honoured on a GREEN run too and
+  #     holds the suite's own output, so the operator can always re-read
+  #     what the gate measured.
+  checks=$((checks + 1))
+  local green_log="$tmp/green-run.log"
+  out="$(cd "$tmp/mod-pass" && COVERAGE_LOG="$green_log" bash "$SELF" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s selftest: FAIL: the green retention arm exited %d, not 0\n  output: %s\n' "$PROG" "$rc" "$out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$out" | grep -q "coverage: log: $green_log"; then
+    printf '%s selftest: FAIL: the green run did not print the retention path\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  elif [ ! -s "$green_log" ] || ! grep -q 'selftest.example/qa34/p' "$green_log"; then
+    printf '%s selftest: FAIL: the green run did not retain the suite output at %s\n  log: %s\n' "$PROG" "$green_log" "$(cat "$green_log" 2>/dev/null)" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: RELEASE-027: a green run retains the full suite output at the printed path (COVERAGE_LOG honoured)\n'
+  fi
+
   if [ "$fails" -ne 0 ]; then
     printf '%s selftest: %d/%d checks behaved — FAIL\n' "$PROG" "$((checks - fails))" "$checks" >&2
     return 1
@@ -616,6 +889,10 @@ main() {
     case "$1" in
       --selftest)
         selftest=1
+        shift
+        ;;
+      --report)
+        MODE="report"
         shift
         ;;
       -h | --help | help)

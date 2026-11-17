@@ -47,10 +47,10 @@ help:
 	@echo "  test-integration  PostgreSQL-backed registry tests (requires Docker)"
 	@echo "  lint              Static analysis (go vet ./...)"
 	@echo "  go-mod-tidy-check Run go mod tidy in a disposable tracked-tree copy and reject go.mod/go.sum drift"
-	@echo "  coverage          Run tests and print total coverage"
+	@echo "  coverage          Run tests and print total coverage (full suite output echoed and retained in $(COVERAGE_LOG))"
 	@echo "  coverage-html     Generate coverage.html"
-	@echo "  coverage-check    Fail if coverage is below the 70% threshold — fail-closed: a failed suite or missing/unparseable data is a refusal (QA-CRIER-34), never a PASS"
-	@echo "  coverage-selftest Prove that gate still refuses a failed suite / stale profile / empty or unparseable coverage data, incl. neuter proofs (QA-CRIER-34)"
+	@echo "  coverage-check    Fail if coverage is below the 70% threshold — fail-closed: a failed suite or missing/unparseable data is a refusal (QA-CRIER-34), never a PASS; a red run prints the failing packages, failing test names and measured total (RELEASE-027)"
+	@echo "  coverage-selftest Prove that gate still refuses a failed suite / stale profile / empty or unparseable coverage data, incl. neuter proofs, and that a red run attributes itself with no fixed output window (QA-CRIER-34, RELEASE-027)"
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
 	@echo "  readme-api-check  FAIL when README's API inventory sentence ('documented as N paths / M operations in docs/openapi.yaml') disagrees with a fresh parse of docs/openapi.yaml — an independent arm (PyYAML) beside the Go gate (DF-CRIER-492)"
 	@echo "  readme-api-selftest  Prove that check still rejects a drifted README (over-counted operations, wrong path count, missing and duplicated sentences) and refuses an empty/unparseable/missing spec or an interpreter without PyYAML, incl. a NEUTER proof (DF-CRIER-492)"
@@ -228,9 +228,28 @@ docker-build:
 	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t crier:latest .
 	docker build -f Dockerfile.mcp --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t crier-mcp:latest .
 
+# RELEASE-027: the coverage targets used to keep `go test`'s output in a
+# variable and print a fixed `head -30` window of it on a red run, while the
+# informational target piped the number through `tail -1`. A failing
+# Coverage CI job therefore named no package, no test and no percentage
+# (run 43303623612, step "Check coverage threshold") — the failure was in
+# the window's blind spot and the number was never printed at all.
+#
+# Both targets now go through scripts/check-coverage.sh so the informational
+# run and the gate can never disagree about what was measured:
+#   * the suite's FULL output is echoed (never windowed) and retained in
+#     $(COVERAGE_LOG) (gitignored, so it cannot dirty `git status`);
+#   * a red run prints the failing package import paths, the failing test
+#     names, and the total measured from the failed run's profile beside the
+#     threshold — extracted from the retained log, not from a window of it;
+#   * a green run prints the parseable summary line
+#         coverage: NN.N percent (threshold 70.0 percent)
+# `.coverage-test-output.log` holds the last run's output; read it (or attach
+# it in CI) to triage without re-running anything.
+COVERAGE_LOG ?= .coverage-test-output.log
+
 coverage:
-	go test -short -count=1 -coverprofile=coverage.out ./...
-	go tool cover -func=coverage.out | tail -1
+	COVERAGE_LOG=$(COVERAGE_LOG) bash scripts/check-coverage.sh --report
 
 coverage-html: coverage
 	go tool cover -html=coverage.out -o coverage.html
@@ -268,8 +287,13 @@ coverage-html: coverage
 # shapes above, on scratch fixtures (no repo suite tampering needed) —
 # with NEUTER proofs that the refusals are caused by the checks they
 # credit.
+# RELEASE-027: the gate's red-run output was unattributable (see the note on
+# the `coverage` target above). It now retains the full suite output in
+# $(COVERAGE_LOG) and prints the failing packages, the failing test names,
+# the total measured from the failed run and the log path — so a Coverage CI
+# red names its own cause. Proof lives in `make coverage-selftest` arms 13-16.
 coverage-check:
-	bash scripts/check-coverage.sh
+	COVERAGE_LOG=$(COVERAGE_LOG) bash scripts/check-coverage.sh
 
 coverage-selftest:
 	bash scripts/check-coverage.sh --selftest

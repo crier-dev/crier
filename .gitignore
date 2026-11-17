@@ -11,6 +11,11 @@ bin/
 # Output of go coverage
 *.out
 
+# Full `go test` output retained by the coverage targets (RELEASE-027). The
+# gate echoes it untruncated and keeps it here so a red run can be triaged
+# afterwards; it is run output, never source, so it must not dirty the tree.
+.coverage-test-output.log
+
 # IDE
 .idea/
 .vscode/
