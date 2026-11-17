@@ -89,7 +89,7 @@ Configuration is otherwise env-driven (full table in README):
 | `CR_DATABASE_URL` | PostgreSQL URL (fallbacks: `DATABASE_URL`, `CRIER_DATABASE_URL`) — the backend §1 starts | unset: the demo-only in-memory backend |
 | `CR_AUTH_TOKEN` | bearer token required on all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) | empty = auth disabled |
 | `CR_PERMISSIONS_ADMIN_TOKEN` | the **admin** secret of the permissions management surface — a **second** credential, deliberately distinct from `CR_AUTH_TOKEN`. The five management writes (`POST /principals`, `POST /bindings`, `POST /grants`, `POST /grants/{grantid}/revoke` and `POST /agents/{agentid}/class`) accept only this one as Bearer; other non-public routes accept only `CR_AUTH_TOKEN`, except the read-only runtime status endpoint. That endpoint additionally accepts the admin token to report viewer-specific `management_surface`; it grants no message reach. Setting the two to the same secret with `CR_PERMISSIONS_ENABLED` on refuses the boot (DF-CRIER-297). See *A fourth knob* below | empty = the admin gate is closed: every management write answers `403 MANAGEMENT_FORBIDDEN` |
-| `CR_REQUIRE_AGENT_SIG` | require per-agent ed25519 signatures on agent-scoped endpoints: inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}` | `true` |
+| `CR_REQUIRE_AGENT_SIG` | require per-agent ed25519 signatures on agent-scoped endpoints: inbox delivery (the sender's own key, INT-018), inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}` | `true` |
 | `CR_LOG_LEVEL` / `CR_LOG_FORMAT` | logging (`debug\|info\|warn\|error`, `text\|json`) | `info` / `text` |
 | `CR_RATE_LIMIT_PER_MINUTE` | relay publish rate limit | `100` |
 | `CR_WS_ALLOWED_ORIGINS` | comma-separated WebSocket origins, `*` = allow all | allow all |
@@ -116,7 +116,7 @@ in this guide works under all three (drop or add the headers as shown):
 |--------|-----------------|------------------------|--------|
 | A. Open | unset | `false` | No auth at all. Good for local dev only. |
 | B. Bearer only | `secret` | `false` | All HTTP requests except the five exempt paths (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) require `Authorization: Bearer ***`; inbox endpoints are open to any agent. |
-| C. Full security | `secret` | `true` (default) | Bearer token **and** per-agent ed25519 signatures on inbox/agent-delete endpoints. The production default. |
+| C. Full security | `secret` | `true` (default) | Bearer token **and** per-agent ed25519 signatures on inbox delivery, inbox reads and agent-delete/patch endpoints. The production default. |
 
 Start command per config — the durable backend of §1 is in every one of them
 (`CR_DATABASE_URL`), so the auth variables are the only difference:
@@ -191,12 +191,22 @@ starts (PostgreSQL): a delivered, unacked message is still there after a server
 restart. On the demo-only in-memory backend it is not — the process exit takes
 the queue with it.
 
-### Deliver (no signature needed in any config)
+### Deliver (signed as the sender in config C)
 
 ```bash
+# Config A/B: send it as-is. Config C (the default): the delivery must prove the
+# key of the sender it names — sign "POST\n/agents/agent-1/inbox\n<ts>" with that
+# agent's key and send the trio. Unsigned, config C answers 401 with nothing
+# stored (INT-018), so a claimed sender is never taken on its word.
+TS=$(date +%s)
 curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig POST /agents/agent-1/inbox "$TS")" \
   -d '{"payload":{"hello":"world","n":42}}'          # → 201 {"id":"..."}
 ```
+
+Drop the three headers in config A/B (where they are ignored) and keep them in
+config C. The rest of this section's reads are the same rule.
 
 Every delivery first passes the LLM message guard (see below) — the response
 body adds `"guard":{...}` whenever the verdict was not a plain allow, including
@@ -911,17 +921,21 @@ needs — this is the whole authorization surface of the pull path:
 |------|----------|-----------------|-------------------|-------------------------------|
 | Register the consumer | `POST /agents` | open | bearer | bearer — **no signature** |
 | Register the consumer (id in the path) | `POST /agents/{id}` | open | bearer | bearer — **no signature** |
-| Deliver into the inbox | `POST /agents/{id}/inbox` | open | bearer | bearer — **no signature** |
+| Deliver into the inbox | `POST /agents/{id}/inbox` | open | bearer | bearer **+ signature** (the sender's own key; INT-018) |
 | Retrieve (leases the batch) | `GET /agents/{id}/inbox` | open | bearer | bearer **+ signature** |
 | Ack the lease | `POST /agents/{id}/inbox/ack` | open | bearer | bearer **+ signature** |
 | Drain check (optional) | `GET /agents/{id}/inbox/stats` | open | bearer | bearer **+ signature** |
 
-Only the consumer's OWN steps are signed, and only in config C: **register and
-deliver need no signature in any configuration**, which is what makes the inbox
-a mailbox — any registered producer may deliver into it. The signed steps are
-exactly the agent-owned ones (`retrieve`, `ack`, `stats`, plus `DELETE
-/agents/{id}` and `PATCH /agents/{id}`), and the caller in `X-Agent-ID` must be
-the agent in the path: another agent's id is refused with `403`, not `401` (§9.3).
+Registration is the only bearer-only step in config C. Every message operation is
+agent-owned: **the delivery proves the sender's key and the reads prove the
+reader's**, so the caller in `X-Agent-ID` must be the identity the request speaks
+for, and the signature must verify over `METHOD\n/path\n<unix-seconds>`. A body
+`sender` that differs from the signed `X-Agent-ID` is refused `403`; an unsigned
+delivery is `401` with nothing stored (INT-018). The signed steps are exactly the
+agent-owned ones — `deliver`, `retrieve`, `ack`, `stats`, plus `DELETE
+/agents/{id}` and `PATCH /agents/{id}` — and for the reads the caller in
+`X-Agent-ID` must be the agent in the path: another agent's id is refused with
+`403`, not `401` (§9.3).
 
 ```bash
 # One identity, one keypair — OpenSSL >= 3, the same key format as §2 and §3.
@@ -937,11 +951,20 @@ curl -s -X POST localhost:$PORT/agents "${AUTH[@]}" -H 'Content-Type: applicatio
 # → 201 {"id":"consensus","public_key":"33acb5…","capabilities":["inbox"],"status":"online",
 #        "registered_at":"…","last_seen":"…"}
 
-# 2. deliver a message INTO its inbox — no signature, any registered producer  # → 201
+# 2. deliver a message INTO its inbox — signed as the SENDER                  # → 201
+#    Config C (the production default this section runs) proves the sender's
+#    key on an ordinary delivery: sign "POST\n/agents/consensus/inbox\n<ts>" with
+#    the key registered above. Config A/B ignore the trio — drop the headers.
+TS=$(date +%s)
+printf 'POST\n/agents/consensus/inbox\n%s' "$TS" > payload.txt
+SIG=$(sig)   # helper from §3 Retrieve — fails loudly on OpenSSL < 3
 curl -s -X POST localhost:$PORT/agents/$AGENT/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: $AGENT" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG" \
   -d '{"payload":{"round_trip":"cr-consensus-1","text":"hello from an external non-Go harness"}}'
 # → 201 {"id":"b619a256231e4fa5aeb00d82","transport":"inbox",
 #        "expires_at":"2026-09-26T04:06:23.868749589Z"}
+# Unsigned the same POST is 401 {"error":"missing agent signature headers
+# (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"} and nothing is stored (INT-018).
 # (the payload is stored VERBATIM, wrapped in nothing — see §9.3 for the
 #  round-trip proof: the retrieved payload base64-decodes to those exact bytes)
 
@@ -1137,9 +1160,13 @@ agent's **private** key. A client generated from the spec can send that header �
 it cannot compute it: it holds no private key, and the server binds the value to
 the method, the path, the timestamp and the `X-Agent-ID`.
 
-Five operations declare `agentSignature`. Everything else is drivable by a
-generated (bearer-only) client, and these five are not. Measured on a config C
-relay, all with `Authorization: Bearer <token>` and no signature headers:
+Five operations declare `agentSignature` in the served document. The relay also
+enforces the sender gate on ordinary **delivery** (INT-018): `POST
+/agents/{id}/inbox` proves the sender's registered key, so it answers `401`
+unsigned even though that operation does not yet declare the scheme — a
+spec/behaviour gap named here rather than glossed. Everything else is drivable by
+a generated (bearer-only) client. Measured on a config C relay, all with
+`Authorization: Bearer <token>` and no signature headers:
 
 | Endpoint | Spec security | Unsigned (bearer only) | With the signature |
 |----------|---------------|------------------------|--------------------|
@@ -1149,7 +1176,7 @@ relay, all with `Authorization: Bearer <token>` and no signature headers:
 | `POST /agents/{id}` (register, id in the path) | bearerAuth | `201` (`400` without `public_key`; `409` when the id is already registered under a different key) | — |
 | `GET /agents` | bearerAuth | `200` (`401` without the token) | — |
 | `GET /agents/{id}` | bearerAuth | `200` | — |
-| `POST /agents/{id}/inbox` (deliver) | bearerAuth | `201` — **no signature in any configuration** | — |
+| `POST /agents/{id}/inbox` (deliver) | bearerAuth — **enforced at runtime, scheme not yet declared** | `401` (nothing stored) | `201` |
 | `GET /relay/topics` | bearerAuth | `200` | — |
 | `POST /relay/publish` | bearerAuth; conditional agentSignature on A2A task topics | `202` on ordinary topics; `401` on A2A task topics when signature enforcement is on | Offered proof must verify; stale or bogus proof is refused |
 | `GET /mesh/peers` | bearerAuth | `200` | — |
@@ -1160,32 +1187,39 @@ relay, all with `Authorization: Bearer <token>` and no signature headers:
 | `PATCH /agents/{id}` | bearerAuth + agentSignature | `401` | `200` |
 | `DELETE /agents/{id}` | bearerAuth + agentSignature | `401` | `204` |
 
-The refusal is the same for every one of the five:
+The refusal is the same for every one of them:
 `{"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}`.
 A complete but wrong trio is refused too — a timestamp outside ±30s, a signature
 minted for another path, or a signature presented as another agent are all
 refused (`401`, except the last: a *valid* signature whose `X-Agent-ID` is not the
-`{id}` in the path answers `403`, `may only access its own resources`).
+`{id}` in the path answers `403`, `may only access its own resources`). On a
+delivery, a body `sender` that differs from the signed `X-Agent-ID` is that same
+`403`, one level earlier.
 
-**The spec and the live server agree on this table**, including
-`GET /agents/{id}/inbox/stats`: the document marks that operation with
-`agentSignature` **and** the running relay refuses an unsigned call with `401`
-(and answers `200` once the signature is supplied). An earlier internal note
-believed the stats read was signature-free — it is not, and the row above is the
-measurement that settles it.
+**The spec and the live server agree on every row but one, and the exception is
+named here.** The document marks the reads, ack, PATCH and DELETE with
+`agentSignature` and the relay refuses them unsigned (`GET
+/agents/{id}/inbox/stats` included: an earlier internal note believed that read
+was signature-free — it is not, and the row above is the measurement that
+settles it). The **deliver** row is enforced by the relay and not yet declared in
+that operation's `security`, so a generated client that signs nothing is refused
+`401` there: until the scheme is added to the operation, treat delivery as
+signature-required.
 
 Two consequences worth stating plainly:
 
 - **Signature-required endpoints are not reachable from a generated client.**
   Drive them from your own application code with §3's helper (or from a
   hand-written client), and keep the generated client on the operations in the
-  `bearerAuth`-only rows.
+  `bearerAuth`-only rows — remembering that **delivery behaves as one of the
+  signature-required rows** even though its row says `bearerAuth`.
 - **Config B is the configuration a generated client drives end to end**
-  (`CR_REQUIRE_AGENT_SIG=false`): the same five operations then answer `200`,
-  `200`, `404` (a bogus message id — that is the ack's own validation, not the
-  auth gate), `200` and `204` unsigned, and a bogus signature trio is ignored
-  rather than rejected. Register `201` → deliver `201` → retrieve `200` → ack
-  `204` is the whole path, with nothing to sign.
+  (`CR_REQUIRE_AGENT_SIG=false`): every operation in the table above then answers
+  unsigned — deliver `201`, and the signature operations `200`, `200`, `404` (a
+  bogus message id — that is the ack's own validation, not the auth gate), `200`
+  and `204` — and a bogus signature trio is ignored rather than rejected.
+  Register `201` → deliver `201` → retrieve `200` → ack `204` is the whole path,
+  with nothing to sign.
 
 ### 10.4 The runnable example
 
@@ -1212,10 +1246,10 @@ step is the §10.3 matrix, measured — this is the config C output:
     POST /agents without public_key (config C)     -> 400
     {"error":"public_key is required"}
 
-==> [5/9] deliver into its inbox — bearer token only, NO signature (201, 201)
-    POST /agents/muster-bridge/inbox #1 (no signature) -> 201
-    POST /agents/muster-bridge/inbox #2 (no signature) -> 201
-    {"id":"816583122b3815b05790b1c4","transport":"inbox","expires_at":"2026-09-26T06:02:26.719729018Z"}
+==> [5/9] deliver into its inbox — 201, 201
+    POST /agents/muster-bridge/inbox #1 (signed, config C) -> 201
+    POST /agents/muster-bridge/inbox #2 (signed, config C) -> 201
+    {"id":"7ea4ab7534e1111f23519bba","transport":"inbox","expires_at":"2026-11-18T08:42:40.855289457Z"}
     (the inbox is durable and pull-based: a delivery is stored until it is acked)
 
 ==> [6/9] retrieve — GET /agents/muster-bridge/inbox
@@ -1225,8 +1259,8 @@ step is the §10.3 matrix, measured — this is the config C output:
 
 ==> [7/9] sign the request — the leg no generated client can do
     signed retrieve                                -> 200
-    signed as: hex(ed25519("GET\n/agents/muster-bridge/inbox\n1790316146"), agent.key)
-    lease_id=b1e9bbaef27a01f0f17c8d6fd45160f7  message_ids=["3810068b0517f0394413be49","816583122b3815b05790b1c4"]
+    signed as: hex(ed25519("GET\n/agents/muster-bridge/inbox\n1794904960"), agent.key)
+    lease_id=2de1da31cb9d058e52acbd5acf018916  message_ids=["42243ac65483c7d8b2b43cd6","7ea4ab7534e1111f23519bba"]
     envelope: "queue_depth":2,"leased_count":2
     (a signature is bound to METHOD and path: the same key signing a
      different path is refused 401, and X-Agent-ID must be the {id} in
@@ -1246,7 +1280,8 @@ step is the §10.3 matrix, measured — this is the config C output:
     POST /agents/{id}/inbox/ack (unsigned, dummy ids) -> 401
     PATCH  /agents/{id} (unsigned)                 -> 401
 
-    everything else a bearer-only client drives:
+    everything else a bearer-only client drives (deliver excepted where the
+    sender gate is on — the two lines at the end of this group measure it):
     GET /health (no token)                         -> 200
     GET /version (no token)                        -> 200
     GET /docs (no token)                           -> 200
@@ -1256,7 +1291,8 @@ step is the §10.3 matrix, measured — this is the config C output:
     GET /agents (no token -> refused)              -> 401
     GET /agents/{id} (bearer)                      -> 200
     POST /agents (bearer, new id + public_key)     -> 201
-    POST /agents/{id}/inbox (bearer, deliver)      -> 201
+    POST /agents/{id}/inbox (unsigned deliver, config C) -> 401
+    POST /agents/{id}/inbox (signed deliver)       -> 201
     GET /relay/topics (bearer)                     -> 200
     GET /mesh/peers (bearer)                       -> 200
     GET /fed/peers (bearer)                        -> 200

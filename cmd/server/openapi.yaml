@@ -1831,8 +1831,16 @@ paths:
         mismatched sender, or nonempty principal_id/as_agent fails 403 before
         budgets, idempotency or delivery effects. reply_to is correlation only,
         never authority. A protected recipient requires its explicit URL, not
-        capability routing. Unconfigured recipients keep legacy/human ACL
-        behavior. Self-only GET/ack signing is unchanged. See
+        capability routing. Unconfigured recipients keep legacy ACL behavior;
+        with CR_REQUIRE_AGENT_SIG on (the default) an ordinary delivery must
+        also prove the sender key it names (INT-018): X-Agent-ID must be a
+        registered agent and X-Agent-Sig must verify over
+        "<METHOD>\n<path>\n<unix-seconds>" (extended with "sha256:<digest>" when
+        X-Agent-Body-SHA256 is supplied). Missing/invalid proof fails 401 with
+        nothing stored, and a body `sender` that differs from the signed
+        X-Agent-ID fails 403. An X-Agent-ID with no registered row is answered
+        404 (agent not found) with nothing stored. Self-only GET/ack signing is
+        unchanged. See
         docs/service-delivery-auth.md for provisioning and replay limitations.
 
         Delivers a message to the target agent. When the agent has a webhook
@@ -2173,6 +2181,17 @@ paths:
                     stated retention. Set the target's `consumer.ttl_seconds: 0`
                     to opt that inbox out of a contract bound entirely.
       responses:
+        "401":
+          description: "Sender signature missing or invalid on an ordinary inbox delivery while CR_REQUIRE_AGENT_SIG=true (INT-018). X-Agent-ID must name a registered agent and X-Agent-Sig must verify over \"<METHOD>\\n<path>\\n<unix-seconds>\" (extended with \"\\nsha256:<digest>\" when X-Agent-Body-SHA256 is supplied). Nothing is dispatched or stored, so a claimed sender never reaches the inbox. The protected service-delivery path keeps its own mandatory body-bound proof (see the description above)."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: "The shipped signature-failure message, e.g. 'missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)' or 'signature verification failed'"
         "201":
           description: "Message stored in the target's durable inbox (transport \"inbox\"). Webhook-configured agents never answer 201 — their deliveries accept with 200 (blocking) or 202 (async/batch) and are NOT stored (DF-CRIER-157). A stored message that expires while it is still unacknowledged is dead-lettered (GET /agents/{id}/inbox/dead-letters) and produces exactly one MESSAGE_EXPIRED receipt in the SENDER's own inbox (CR-FEAT-025): a TTL expiry is reported, never silent."
           content:

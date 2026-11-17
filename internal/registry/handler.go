@@ -1223,6 +1223,28 @@ func (h *Handler) rejectOversizedBody(w http.ResponseWriter, r *http.Request) bo
 // SetPeerRecords enables per-instance lifecycle checks at the delivery boundary.
 func (h *Handler) SetPeerRecords(s *federation.PeerStore) { h.peerRecords = s }
 
+// inProcessDeliveryKey marks a delivery request that entered deliver() from an
+// in-process protocol binding (today: cmd/server's A2A JSON-RPC translation)
+// rather than from the HTTP inbox route. Such a request carries no X-Agent-*
+// headers because the binding re-issues it with a freshly built body and the
+// route's own path; the OUTER request already passed the route's auth chain.
+// The sender on this path is the binding's own claim, not a wire signature, so
+// the ordinary inbox sender-signature gate (INT-018) does not demand a proof
+// the translated request can never carry. Only in-process callers can set it —
+// a context value cannot arrive over the wire.
+type inProcessDeliveryKey struct{}
+
+// InProcessDelivery marks ctx as an in-process protocol translation whose
+// sender identity was established by the calling binding.
+func InProcessDelivery(ctx context.Context) context.Context {
+	return context.WithValue(ctx, inProcessDeliveryKey{}, true)
+}
+
+func inProcessDelivery(ctx context.Context) bool {
+	marked, _ := ctx.Value(inProcessDeliveryKey{}).(bool)
+	return marked
+}
+
 func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability string) {
 	// Direct embeddings and the production middleware share one ingress verdict.
 	// DeliveryAuth's context marker prevents duplicate audit/receipt wrapping.
@@ -1241,6 +1263,12 @@ func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, i
 	deliverStart := time.Now()
 
 	var req deliverRequest
+
+	// signedSender is the X-Agent-ID whose registered key this request proved
+	// (INT-018). Empty means the sender-signature gate did not authenticate
+	// this request (gate off, protected service delivery, or a federated hop),
+	// so the body's sender claim is left exactly as it always was.
+	var signedSender string
 
 	// DETECTION (CR-FEAT-030): exactly one observation per delivery request,
 	// carrying the verdict the caller actually received.
@@ -1282,8 +1310,49 @@ func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, i
 	}
 	serviceAuthority, _ := r.Context().Value(serviceDeliveryContextKey{}).(*ServiceAuthority)
 
+	// ▼ SENDER-SIGNATURE GATE (INT-018). Ordinary inbox delivery used to accept
+	// ANY claimed sender: with CR_REQUIRE_AGENT_SIG=true the protected-recipient
+	// path proved a sender key, but a plain POST /agents/{id}/inbox stored
+	// whatever `sender` the body named. An agent delivery is now authenticated
+	// the same way every other agent-owned route is (authorizeAgent /
+	// verifyAgentSignature): the caller must prove possession of the registered
+	// ed25519 key for the X-Agent-ID it presents, over the same
+	// "<METHOD>\n<path>\n<ts>" transcript (body binding stays OPT-IN via
+	// X-Agent-Body-SHA256, exactly as on retrieve/ack — the signature is always
+	// verified against the delivered body when that header is supplied).
+	//
+	// Three deliveries do not carry a wire sender proof and are not re-proved
+	// here:
+	//   - a protected service delivery, whose ServiceAuthority was established
+	//     above with a MANDATORY body-bound signature and an exact
+	//     sender>recipient pair,
+	//   - a request that arrived over a federation link (HopHeader), whose
+	//     remote actor is not a local agent and is authenticated by the peer/
+	//     relay proof, never by a local agent key (specs/CHAT-FEDERATION.md), and
+	//   - an in-process protocol translation (InProcessDelivery), which
+	//     re-issues the delivery with a fresh body and path after the OUTER
+	//     route already authenticated the caller.
+	// With enforcement off (CR_REQUIRE_AGENT_SIG=false) this is a no-op and the
+	// legacy, bearer-only behaviour is unchanged.
+	if h.requireAgentSig && serviceAuthority == nil && r.Header.Get(federation.HopHeader) == "" && !inProcessDelivery(r.Context()) {
+		sender := r.Header.Get(HeaderAgentID)
+		if err := h.verifyAgentSignature(w, r, sender, false); err != nil {
+			return
+		}
+		signedSender = sender
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+
+	// The body may not claim a DIFFERENT sender than the one that just proved
+	// its key (the same rule the protected service path applies, with a 403).
+	// An omitted sender makes no claim and stays omitted: a signed delivery
+	// that names nobody is authenticated, it just records no sender.
+	if signedSender != "" && req.Sender != "" && req.Sender != signedSender {
+		_ = h.agentSigFail(w, http.StatusForbidden, "delivery body sender must equal the signed X-Agent-ID")
 		return
 	}
 

@@ -122,6 +122,21 @@ func (h *cr36Harness) signGet(t *testing.T, agentID string, priv ed25519.Private
 	})
 }
 
+// signPost posts a deliver body signed with the agent's own key: the same
+// three-line transcript (method, path, fresh unix timestamp) signGet uses.
+// Deliveries are agent-owned writes too — when per-agent signing is enforced
+// (INT-018) the sender must prove the key it claims.
+func (h *cr36Harness) signPost(t *testing.T, agentID string, priv ed25519.PrivateKey, path, body string) (int, string) {
+	t.Helper()
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	sig := ed25519.Sign(priv, []byte(http.MethodPost+"\n"+path+"\n"+ts))
+	return h.send(t, http.MethodPost, path, body, map[string]string{
+		HeaderAgentID:  agentID,
+		HeaderAgentTS:  ts,
+		HeaderAgentSig: hex.EncodeToString(sig),
+	})
+}
+
 // send posts an arbitrary deliver body to target's inbox and returns the status
 // and the raw response body.
 func (h *cr36Harness) send(t *testing.T, method, path, body string, headers map[string]string) (int, string) {
@@ -516,7 +531,11 @@ func TestRouterInboxIsReadableOnlyByTheRoutersOwnSignedIdentity(t *testing.T) {
 	_, routerKey := testAgentKeypair(t, h.store, cr36Router)
 	_, schedulerKey := testAgentKeypair(t, h.store, cr36Scheduler)
 
-	h.deliver(t, cr36Router, dispatchBody(cr36ExplicitModel, cr36ExplicitProvider, ""), http.StatusCreated)
+	// The delivery itself is signed by the router (INT-018: ordinary deliver
+	// proves its sender whenever enforcement is on).
+	status, respBody := h.signPost(t, cr36Router, routerKey, "/agents/"+cr36Router+"/inbox",
+		dispatchBody(cr36ExplicitModel, cr36ExplicitProvider, ""))
+	require.Equal(t, http.StatusCreated, status, "signed deliver to the router: %s", respBody)
 
 	// Nobody may read the router's inbox without the router's signature.
 	status, body := h.send(t, http.MethodGet, "/agents/"+cr36Router+"/inbox", "", nil)

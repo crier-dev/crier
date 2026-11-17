@@ -11,6 +11,12 @@ only thing switched off in §1, so a keyless run is deterministic. If a step
 answers `401`, you are missing the three signature headers — **§2.0a** is the
 fastest way to get them (`crier keygen` plus a client library that signs for
 you), and **§2.0b** builds the keypair by hand if you would rather see the wire.
+That includes an ordinary inbox **delivery**: an unsigned `POST /agents/{id}/inbox`
+is refused `401` exactly like an unsigned read, because the sender it names has
+to prove that key. Two marked recipe blocks in §1 (the `expires_at` value and the
+priority range) say in their own first comment that they run with
+`CR_REQUIRE_AGENT_SIG=false` — the subject there is the stored value, not the
+sender proof, and those two are the only exception in this guide.
 
 ## 1. Get it running (5 minutes)
 
@@ -213,8 +219,13 @@ curl -s $BASE/agents                                             # -> 200, both 
 **1. Inbox (store-and-forward)** — deliver to bob, read it back **signed**:
 
 ```bash
-# Deliver. bob's identity is not needed to send to him; anyone may deliver.
+# Deliver. The SENDING side is agent-owned too: the caller proves the key of the
+# agent it names as sender, so alice signs this delivery with her own key. Send
+# it unsigned and the answer is 401, not 201 — a claimed sender is not proof.
+TS=$(date +%s)
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: alice" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-alice.key POST /agents/bob/inbox "$TS")" \
   -d '{"payload":{"hello":"bob"}}'
 # -> 201 {"id":"...","transport":"inbox","expires_at":"..."}
 
@@ -245,11 +256,18 @@ curl -s -X POST $BASE/agents/bob/inbox/ack -H 'Content-Type: application/json' \
 
 # A delivery may carry an explicit lifetime. ttl_seconds is honoured; 0 means
 # never expires, which the wire reports as "expires_at":null (the key is
-# present, the value is null — not the zero time 0001-01-01T00:00:00Z):
+# present, the value is null — not the zero time 0001-01-01T00:00:00Z).
+# Both deliveries are signed as alice, the sender they name:
+TS=$(date +%s)
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: alice" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-alice.key POST /agents/bob/inbox "$TS")" \
   -d '{"payload":{"ping":1},"ttl_seconds":3600}'
 # -> 201 with expires_at = now + 3600s
+TS=$(date +%s)
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: alice" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-alice.key POST /agents/bob/inbox "$TS")" \
   -d '{"payload":{"ping":2},"ttl_seconds":0}'
 # -> 201 {"id":"...","transport":"inbox","expires_at":null}
 ```
@@ -258,8 +276,16 @@ The marked block below is executed by `make docs-check` against its own server:
 
 <!-- doccheck -->
 ```bash
+# CR_REQUIRE_AGENT_SIG=false for this block: the subject is the expires_at wire
+# value, not sender proof (under the default posture this POST answers 401).
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"never":1},"ttl_seconds":0}'   # -> 201
 ```
+
+The block above runs with the `401` check out of the way (`CR_REQUIRE_AGENT_SIG=false`,
+as its first comment says) so the measured thing is the `201` body, not the
+sender gate. Ordinary inbox delivery proves the sender's key whenever the gate is
+on — the default — so the same `POST` sent unsigned to a default server answers
+`401` before anything is stored; sign it (§2.0a) and it answers `201` here too.
 
 
 The retrieve above is the one **intentional negative** in this guide: drop the
@@ -276,6 +302,11 @@ curl -s $BASE/agents/bob/inbox # -> 401
 **1a. Task ownership (CR-FEAT-025)** — the four surfaces the external review
 (`DISPATCH · CRI-001`) filed under "the lease is the lock". Each recipe states
 what to look at, not just what to run.
+
+*These are ordinary inbox deliveries: with the gate on (the default) each must be
+signed by the sender it names (`sender:"alice"` ⇒ alice's key), or it is refused
+`401`. The statuses below are what a **signed** delivery gets; run the block with
+`CR_REQUIRE_AGENT_SIG=false` to see them unsigned.*
 
 ```bash
 # A. A retried delivery does not duplicate work. Deliver the SAME idempotency_key
@@ -339,6 +370,11 @@ capability index as a worker pool. `POST /capabilities/{capability}/inbox` takes
 the same body as `POST /agents/{id}/inbox` and picks a HOLDER, so lease, ack, TTL
 and the expiry receipt you just exercised are unchanged — only the addressing
 moved from a name to a pool.
+
+*The pool deliveries below name `sender:"alice"`, so they are signed as alice
+when the gate is on (the default) and answer `401` unsigned — the `201` bodies
+below are the signed answer. With `CR_REQUIRE_AGENT_SIG=false` they arrive
+unsigned.*
 
 ```bash
 # Two interchangeable workers for one capability. Each keeps its own key: the
@@ -410,6 +446,11 @@ surfaces (the global budget needs a server started with
 `CR_RATE_LIMIT_GLOBAL_PER_MINUTE` set — it is off by default, and with it off the
 delivery path is unchanged):
 
+*The deliveries below are unsigned: on a default server (gate on) each answers
+`401` before the priority or the budget is consulted, so the `201`/`400` values
+are what **signed** deliveries get. Run the block with
+`CR_REQUIRE_AGENT_SIG=false` to see them unsigned.*
+
 ```bash
 # A. A delivery may name a retrieval priority, 0..9 (default 0 = today's FIFO).
 #    Retrieve hands the HIGHEST priority claimable message back first, whatever
@@ -446,9 +487,16 @@ The two verdicts below are executed by `make docs-check` against its own server:
 
 <!-- doccheck -->
 ```bash
+# CR_REQUIRE_AGENT_SIG=false for this block: the subject is the priority range,
+# not sender proof (under the default posture these POSTs answer 401).
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"urgent":1},"priority":9}'   # -> 201
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"urgent":1},"priority":10}'  # -> 400
 ```
+
+Both verdicts are measured with the sender gate off (`CR_REQUIRE_AGENT_SIG=false`,
+the comment above them): the `201`/`400` pair is about the priority range. Under
+the default posture an unsigned delivery stops at `401` first, so sign it (§2.0a)
+when the gate is on.
 
 Check the refusal text too: it names the range (`{"error":"priority must be
 0..9"}`), and the inbox above is unchanged by it — `priority: 9` is the last
@@ -573,7 +621,11 @@ curl -s -X PATCH $BASE/agents/bob -H 'Content-Type: application/json' \
   -H "X-Agent-Sig: $(sig /tmp/crier-bob.key PATCH /agents/bob "$TS")" \
   -d '{"webhook":{"url":"http://127.0.0.1:9911/hook","delivery_mode":"blocking"}}'
 # -> 200 with bob's stored config (a PATCH without the signature headers is 401)
+# The delivery to bob is agent-owned on the sending side too: alice signs it.
+TS=$(date +%s)
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: alice" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-alice.key POST /agents/bob/inbox "$TS")" \
   -d '{"payload":{"ping":1}}'   # -> 200 and the SINK's reply comes back inline
 # switch to "async" in the PATCH and the deliver returns 202 instead — the body
 # names where the message went: {"transport":"webhook","delivery_mode":"async"}.

@@ -103,43 +103,60 @@ back as a normal correlated delivery (§6).
 ## 5. Delivery, poll, lease, acknowledgement
 
 The bunker router polls because it accepts no inbound connection. That means
-everything Crier owes it must be visible on a retrieve:
+everything Crier owes it must be visible on a retrieve.
+
+The deliveries below run with the sender gate off (`CR_REQUIRE_AGENT_SIG=false`,
+which the block's first line states): this walkthrough is about what Crier
+transports on a dispatch — the two hint members and the correlated result — not
+about who signed it, and its two probe identities register placeholder keys with
+no private halves. Under the default posture each of these deliveries has to
+carry the sender's signature or it is refused `401` before a message exists; the
+signed spelling is in `TESTERS.md` §2. The two reads are the other case, and the
+second block replays them against the enforcing default.
 
 <!-- doccheck -->
 ```bash
+# Server posture for this block: CR_REQUIRE_AGENT_SIG=false (see above).
 curl -s -X POST $BASE/agents/lane-dispatch-probe -H 'Content-Type: application/json' -d '{"id":"lane-dispatch-probe","public_key":"abababababababababababababababababababababababababababababababab"}'   # -> 201
 curl -s -X POST $BASE/agents/router-dispatch-probe -H 'Content-Type: application/json' -d '{"id":"router-dispatch-probe","public_key":"babababababababababababababababababababababababababababababababa"}'   # -> 201
 curl -s -X POST $BASE/agents/router-dispatch-probe/inbox -H 'Content-Type: application/json' -d '{"payload":{"lane":"crier-worker"},"model":"gpt-5.3","provider":"zai-glm-default"}'   # -> 201
 curl -s -X POST $BASE/agents/router-dispatch-probe/inbox -H 'Content-Type: application/json' -d '{"payload":{"lane":"crier-worker"},"model":null}'   # -> 201
-curl -s $BASE/agents/router-dispatch-probe/inbox   # -> 401
 curl -s -X POST $BASE/agents/lane-dispatch-probe/inbox -H 'Content-Type: application/json' -d '{"payload":{"result":"done"},"reply_to":"placeholder-dispatch-id"}'   # -> 201
-curl -s $BASE/agents/lane-dispatch-probe/inbox   # -> 401
 ```
 
 The steps above are replayed by `make docs-check` against a booted server, so
 this recipe cannot drift from the shipped handlers. Read them as: the two
 registrations are the two identities; the third and fourth deliveries are the
 two hint arms (both explicit, and a `null` model with no provider — neither of
-which Crier fills in); the sixth is the correlated result the scheduler
+which Crier fills in); the fifth is the correlated result the scheduler
 receives.
 
 Both reads are the same call — `GET /agents/{id}/inbox`, which leases what it
 returns and answers with a `lease_id` plus `queue_depth` / `leased_count` — and
 both are answered **401 unsigned**: an inbox read is agent-owned, so it is
 readable only by that agent's own ed25519-signed request (`X-Agent-ID`,
-`X-Agent-Ts`, `X-Agent-Sig`), which is why the replayed steps above carry the
-refusal rather than a body. The signed spelling, and the reason the default
-configuration insists on it, are in `TESTERS.md` §2; the router signs as itself
-for exactly the same reason it polls at all — nobody else may read the dispatch
-it was sent.
+`X-Agent-Ts`, `X-Agent-Sig`), which is why the replayed steps below carry the
+refusal rather than a body. The block declares the default posture on purpose:
+the delivery gate being off does not open a read.
 
-The `reply_to` value in the sixth step is a placeholder: in a real round trip it
-is the `id` the poll returned for the dispatch, and the scheduler matches the
-answer on exactly that value (§6). One more step a live consumer takes is not in
-the replayed recipe because its input is dynamic: work that is finished is
-acknowledged with `POST /agents/{id}/inbox/ack` under the lease that claimed it
-— `204`, and the message is gone. Acking a message your lease no longer covers
-is `409`; acking one that is already gone is `404`.
+<!-- doccheck -->
+```bash
+# Server posture for this block: the DEFAULT (CR_REQUIRE_AGENT_SIG=true).
+curl -s $BASE/agents/router-dispatch-probe/inbox   # -> 401
+curl -s $BASE/agents/lane-dispatch-probe/inbox   # -> 401
+```
+
+The signed spelling, and the reason the default configuration insists on it, are
+in `TESTERS.md` §2; the router signs as itself for exactly the same reason it
+polls at all — nobody else may read the dispatch it was sent.
+
+The `reply_to` value in the correlated-result step is a placeholder: in a real
+round trip it is the `id` the poll returned for the dispatch, and the scheduler
+matches the answer on exactly that value (§6). One more step a live consumer
+takes is not in the replayed recipe because its input is dynamic: work that is
+finished is acknowledged with `POST /agents/{id}/inbox/ack` under the lease that
+claimed it — `204`, and the message is gone. Acking a message your lease no
+longer covers is `409`; acking one that is already gone is `404`.
 
 An unacknowledged dispatch is redelivered when its lease expires, exactly as
 before this feature (the lease/redelivery contract is untouched: a live lease is

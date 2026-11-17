@@ -310,8 +310,10 @@ func TestRemoteStore_SignedLifecycle(t *testing.T) {
 	// Signing enabled + Bearer token both present: bearer behavior unchanged.
 	rs := NewRemoteStore(srv.URL, "signed-agent", "bearer-tok", WithSigningKey(loaded))
 
-	// Deliver to the (unsigned) inbox endpoint so there is something to read.
-	if err := regRS.Deliver("signed-agent", &InboxEntry{Payload: json.RawMessage(`{"kind":"ping"}`)}); err != nil {
+	// Deliver to the inbox signed by the same identity (INT-018: with
+	// enforcement on, an ordinary deliver must prove its sender key; the
+	// registration above stays the unsigned bootstrap step).
+	if err := rs.Deliver("signed-agent", &InboxEntry{Payload: json.RawMessage(`{"kind":"ping"}`)}); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 

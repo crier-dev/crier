@@ -338,7 +338,15 @@ func TestCRFEAT029NamespaceDocumentCanComeFromAFile(t *testing.T) {
 // default realm.
 func TestCRFEAT029UnknownNamespaceIsRefusedOnBothLanes(t *testing.T) {
 	parallelBoot(t)
-	s := bootNamespaceServer(t, map[string]string{"CR_NAMESPACES": `{"namespaces":[{"name":"acme"}]}`})
+	// INT-018: the SUBJECT is the namespace rule, not bearer-vs-signature
+	// posture. The delivery lane probes an unknown agent unsigned; the sender
+	// gate would answer 401 before the target lookup, so enforcement is
+	// explicitly off for this fixture (its sibling token test arms it back on
+	// where the posture IS the subject).
+	s := bootNamespaceServer(t, map[string]string{
+		"CR_NAMESPACES":        `{"namespaces":[{"name":"acme"}]}`,
+		"CR_REQUIRE_AGENT_SIG": "false",
+	})
 
 	status, body := s.publish(t, "ghost", "agent-a", "topic.a")
 	if status != http.StatusBadRequest || !strings.Contains(body, "UNKNOWN_NAMESPACE") {

@@ -215,13 +215,26 @@ else
 fi
 echo
 
-echo "==> [5/9] deliver into its inbox — bearer token only, NO signature (201, 201)"
+echo "==> [5/9] deliver into its inbox — 201, 201"
 for n in 1 2; do
-  D_BODY=$(curl -s -X POST "$BASE/agents/$MUSTER_BRIDGE_AGENT/inbox" "${AUTH[@]}" \
-    -H 'Content-Type: application/json' \
-    -d "{\"payload\":{\"source\":\"muster\",\"text\":\"hello from a Muster-driven integration\",\"n\":$n}}" \
-    -w '\n%{http_code}')
-  check "POST /agents/$MUSTER_BRIDGE_AGENT/inbox #$n (no signature)" 201 "$(printf '%s' "$D_BODY" | tail -1)"
+  if [ "$MUSTER_BRIDGE_REQUIRE_SIG" = true ]; then
+    # INT-018: an ordinary delivery proves the sender's key in config C, so the
+    # bearer-only client would get 401 here — this leg signs as the consumer.
+    TS=$(date +%s)
+    SIG=$(sig POST "/agents/$MUSTER_BRIDGE_AGENT/inbox" "$TS")
+    D_BODY=$(curl -s -X POST "$BASE/agents/$MUSTER_BRIDGE_AGENT/inbox" "${AUTH[@]}" \
+      -H 'Content-Type: application/json' \
+      -H "X-Agent-ID: $MUSTER_BRIDGE_AGENT" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG" \
+      -d "{\"payload\":{\"source\":\"muster\",\"text\":\"hello from a Muster-driven integration\",\"n\":$n}}" \
+      -w '\n%{http_code}')
+    check "POST /agents/$MUSTER_BRIDGE_AGENT/inbox #$n (signed, config C)" 201 "$(printf '%s' "$D_BODY" | tail -1)"
+  else
+    D_BODY=$(curl -s -X POST "$BASE/agents/$MUSTER_BRIDGE_AGENT/inbox" "${AUTH[@]}" \
+      -H 'Content-Type: application/json' \
+      -d "{\"payload\":{\"source\":\"muster\",\"text\":\"hello from a Muster-driven integration\",\"n\":$n}}" \
+      -w '\n%{http_code}')
+    check "POST /agents/$MUSTER_BRIDGE_AGENT/inbox #$n (no signature, config B)" 201 "$(printf '%s' "$D_BODY" | tail -1)"
+  fi
 done
 echo "    $(printf '%s' "$D_BODY" | head -1)"
 echo "    (the inbox is durable and pull-based: a delivery is stored until it is acked)"
@@ -308,7 +321,8 @@ check "POST /agents/{id}/inbox/ack (unsigned, dummy ids)" "$W_ACK" \
 check "PATCH  /agents/{id} (unsigned)" "$W_PATCH" \
   "$(code -X PATCH "$BASE/agents/$MUSTER_BRIDGE_AGENT" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"capabilities":["inbox"]}')"
 echo
-echo "    everything else a bearer-only client drives:"
+echo "    everything else a bearer-only client drives (deliver excepted where the"
+echo "    sender gate is on — the two lines at the end of this group measure it):"
 check "GET /health (no token)" 200 "$(code "$BASE/health")"
 check "GET /version (no token)" 200 "$(code "$BASE/version")"
 check "GET /docs (no token)" 200 "$(code "$BASE/docs")"
@@ -320,8 +334,21 @@ check "GET /agents/{id} (bearer)" 200 "$(code "${AUTH[@]}" "$BASE/agents/$MUSTER
 check "POST /agents (bearer, new id + public_key)" 201 \
   "$(code -X POST "$BASE/agents" "${AUTH[@]}" -H 'Content-Type: application/json' \
      -d "{\"id\":\"muster-bridge-probe\",\"public_key\":\"$PUBKEY\"}")"
-check "POST /agents/{id}/inbox (bearer, deliver)" 201 \
-  "$(code -X POST "$BASE/agents/$MUSTER_BRIDGE_AGENT/inbox" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"payload":{"matrix":"deliver"}}')"
+if [ "$MUSTER_BRIDGE_REQUIRE_SIG" = true ]; then
+  # INT-018: the sender gate covers ordinary delivery too, so this is the pair a
+  # generated (bearer-only) client sees on the deliver operation.
+  check "POST /agents/{id}/inbox (unsigned deliver, config C)" 401 \
+    "$(code -X POST "$BASE/agents/$MUSTER_BRIDGE_AGENT/inbox" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"payload":{"matrix":"deliver"}}')"
+  TS=$(date +%s)
+  SIG=$(sig POST "/agents/$MUSTER_BRIDGE_AGENT/inbox" "$TS")
+  check "POST /agents/{id}/inbox (signed deliver)" 201 \
+    "$(code -X POST "$BASE/agents/$MUSTER_BRIDGE_AGENT/inbox" "${AUTH[@]}" -H 'Content-Type: application/json' \
+       -H "X-Agent-ID: $MUSTER_BRIDGE_AGENT" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG" \
+       -d '{"payload":{"matrix":"deliver"}}')"
+else
+  check "POST /agents/{id}/inbox (bearer, deliver)" 201 \
+    "$(code -X POST "$BASE/agents/$MUSTER_BRIDGE_AGENT/inbox" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"payload":{"matrix":"deliver"}}')"
+fi
 check "GET /relay/topics (bearer)" 200 "$(code "${AUTH[@]}" "$BASE/relay/topics")"
 check "GET /mesh/peers (bearer)" 200 "$(code "${AUTH[@]}" "$BASE/mesh/peers")"
 check "GET /fed/peers (bearer)" 200 "$(code "${AUTH[@]}" "$BASE/fed/peers")"
@@ -343,7 +370,7 @@ else
   exit 1
 fi
 echo
-echo "    A generated client stops at the signature: register, deliver, relay,"
+echo "    A generated client stops at the signature: register, relay,"
 echo "    health/version/status/docs and the agent reads work bearer-only, while"
-echo "    retrieve / stats / ack / PATCH / DELETE need the ed25519 signature of"
-echo "    the agent's own private key (config C) — or run config B."
+echo "    deliver / retrieve / stats / ack / PATCH / DELETE need the ed25519"
+echo "    signature of the agent's own private key (config C) — or run config B."
