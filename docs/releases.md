@@ -188,7 +188,7 @@ linux/arm64 and 153 on darwin/arm64 (the Mach-O ad-hoc signature covers the
 stamped bytes) — the offsets bound is more than ten times the largest
 measured value, and the size bound is zero because the measured rebuild is
 size-identical. The bound is the discriminator that matters on the toolchain
-crier builds with: go1.26.10 records no `vcs.revision` and no `vcs.modified`
+crier builds with: go1.26.11 records no `vcs.revision` and no `vcs.modified`
 at all, so the `vcs.modified=true` dirty-tree gate cannot fire there and a
 rebuild from a modified tree carries the same stamps as a clean one — only
 the byte bound separates the two on that toolchain. It is a heuristic, not a

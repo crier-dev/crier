@@ -53,7 +53,7 @@
 #   (default 4096), quoting the measured numbers. The measured same-commit
 #   rebuild spread — sizes identical, 63 (linux/amd64), 63 (linux/arm64) and
 #   153 (darwin/arm64) differing offsets — passes with headroom. The bound is
-#   the discriminator on THIS toolchain: go1.26.10 records no vcs.revision /
+#   the discriminator on THIS toolchain: go1.26.11 records no vcs.revision /
 #   vcs.modified, so the vcs.modified gate is vacuous here and a dirty-tree
 #   rebuild at the same commit differs from a clean one by nothing the
 #   identity stamps can see — only the byte bound separates the two.
@@ -96,10 +96,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN || github.token }}
           fetch-depth: 0
 
-      - name: Set up Go 1.26.10
+      - name: Set up Go 1.26.11
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       # One variable, validated once: everything downstream (make,
       # release-upload.sh, the final verification) consumes this VERSION, so

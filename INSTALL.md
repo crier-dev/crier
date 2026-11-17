@@ -31,7 +31,7 @@ which is the smallest thing "a fresh box" means:
 | `sha256sum` | present | the installer verifies every download against it |
 | `git` | **absent** | Path B clones the source with it |
 | `make` | **absent** | Path B builds with it |
-| `go` | **absent** | Path B needs Go 1.26.10+ |
+| `go` | **absent** | Path B needs Go 1.26.11+ |
 | `useradd` | present | the system service wants its own account (§6.1) |
 | `systemd` | present (on a real host) | §6 runs crier as a service |
 | `openssl`, `xxd` | **absent** | only the *hand-written signing* recipes need these, not the install |
@@ -51,7 +51,7 @@ Two consequences you should act on before anything else:
 
 | | Path A — prebuilt binaries | Path B — build from source |
 | --- | --- | --- |
-| needs a toolchain | no | Go 1.26.10+, git, make |
+| needs a toolchain | no | Go 1.26.11+, git, make |
 | needs a fetch tool | yes (`curl`/`wget`) | yes (for git/Go, or bring a tarball) |
 | needs root | no | no (no-root recipe in §2.2) |
 | installs to | `$HOME/.local/bin` | anywhere you choose |
@@ -84,7 +84,7 @@ Without root there is no supported no-root route to a TLS-capable fetch tool
 `/dev/tcp` cannot do TLS). If you have no root on a box with no fetch tool, use
 a machine that has one to carry the Go tarball in (§2.2), or ask for `curl`.
 
-### 2.2 Go 1.26.10 or later (Path B only)
+### 2.2 Go 1.26.11 or later (Path B only)
 
 A no-root install of the official tarball. **Unpack it somewhere other than
 `$HOME/go`** — that path is the default `GOPATH`, and pointing `GOROOT` and
@@ -93,15 +93,15 @@ its own binaries into itself:
 
 ```sh
 mkdir -p "$HOME/sdk" && cd "$HOME/sdk"
-curl -LO https://go.dev/dl/go1.26.10.linux-amd64.tar.gz   # linux-arm64 on ARM
-tar -C "$HOME/sdk" -xzf go1.26.10.linux-amd64.tar.gz      # -> $HOME/sdk/go/bin/go
+curl -LO https://go.dev/dl/go1.26.11.linux-amd64.tar.gz   # linux-arm64 on ARM
+tar -C "$HOME/sdk" -xzf go1.26.11.linux-amd64.tar.gz      # -> $HOME/sdk/go/bin/go
 export PATH="$HOME/sdk/go/bin:$PATH"
 echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
-go version            # go version go1.26.10 linux/amd64
+go version            # go version go1.26.11 linux/amd64
 go env GOROOT GOPATH  # MUST print two DIFFERENT paths, and no warning
 ```
 
-Measured on a bare box: the archive is 66,890,545 bytes, `tar -xzf` exits 0 and
+Measured on a bare box: the 1.26.11 archive is 66,999,944 bytes, `tar -xzf` exits 0 and
 produces `$HOME/sdk/go`, and with `GOPATH` unset the toolchain resolves
 `GOPATH=$HOME/go` / `GOROOT=$HOME/sdk/go` with **no collision warning**. If you
 see `warning: both GOPATH and GOROOT are the same directory`, you unpacked into
@@ -111,7 +111,7 @@ rather than moving the toolchain.
 #### The floor belongs to `go.mod`, and an offline box has no fallback
 
 The required version lives in **one** place, this tree's `go.mod`
-(`go 1.26.10`); nothing in the repo keeps a second copy of it. A toolchain below
+(`go 1.26.11`); nothing in the repo keeps a second copy of it. A toolchain below
 that floor cannot build this module *offline* — and the default
 `GOTOOLCHAIN=auto` hides the shortfall, because Go silently downloads the
 toolchain `go.mod` asks for. That works on a networked box and fails wherever the
@@ -120,7 +120,7 @@ disconnect/chaos test, an air-gapped host, or a provisioning bootstrap that
 installed an older toolchain on the image. There the build stops with:
 
 ```
-go: go.mod requires go >= 1.26.10 (running go 1.26.5; GOTOOLCHAIN=local)
+go: go.mod requires go >= 1.26.11 (running go 1.26.5; GOTOOLCHAIN=local)
 ```
 
 Check before you build — the repository ships the gate, so you do not have to
@@ -128,7 +128,7 @@ read `go.mod` and compare versions by eye:
 
 ```sh
 make toolchain-check
-# toolchain-check: OK — running go1.26.10 satisfies the module floor go 1.26.10
+# toolchain-check: OK — running go1.26.11 satisfies the module floor go 1.26.11
 ```
 
 A toolchain below the floor is **exit 1**, with an actionable message naming the
@@ -227,7 +227,7 @@ is the Go toolchain's, in §2.2.)
 ```sh
 git clone --depth 1 https://github.com/crier-dev/crier.git
 cd crier
-make toolchain-check   # Go 1.26.10+ — the floor is read from go.mod, see §2.2
+make toolchain-check   # Go 1.26.11+ — the floor is read from go.mod, see §2.2
 make build build-mcp
 ```
 
