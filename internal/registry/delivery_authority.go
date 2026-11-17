@@ -122,6 +122,20 @@ func (s *AuthorityStore) PurgeExpiredReport(report func(agentID string, entry *I
 	return s.PurgeExpired()
 }
 
+// PurgeExpiredDeadLetters keeps the archive-then-delete contract visible
+// through the policy wrapper. The handler reaches the dead-letter retention
+// sweep by a capability assertion on the store it was built with, and the
+// production handler is built over AuthorityStore whenever a service-delivery
+// allowlist is configured; without this forwarding method the assertion fails
+// and the sweep silently never runs — no archive write, and no retention
+// delete either, for every deployment that configures an allowlist.
+func (s *AuthorityStore) PurgeExpiredDeadLetters(archive func(dl *DeadLetter) bool) int {
+	if hook, ok := s.Store.(ArchiveHook); ok {
+		return hook.PurgeExpiredDeadLetters(archive)
+	}
+	return 0
+}
+
 // The production handler is built over AuthorityStore. Keep optional inbox
 // contract capabilities visible through that policy wrapper; otherwise the
 // underlying backend can implement the sweep and stats contract while the
