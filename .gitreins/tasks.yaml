@@ -4397,7 +4397,7 @@ tasks:
     the 201->reject flip plus the signed-accepted and gate-off cases'
   status: complete
   created_at: '2026-11-17T07:52:51.872911+00:00'
-  completed_at: '2026-11-17T09:16:47.892299+00:00'
+  completed_at: '2026-11-17T10:04:39.517556+00:00'
 - id: INT-019
   title: A2A paths are declared in docs/openapi.yaml and pinned by the route census
   criteria:
