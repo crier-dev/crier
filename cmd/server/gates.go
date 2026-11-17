@@ -12,6 +12,12 @@ type gatedRoute struct {
 }
 
 var gatedRoutes = []gatedRoute{
+	// A2A (opt-in, INT-A2A-002/003): the discovery card and the JSON-RPC
+	// binding are registered only while CR_A2A_ENABLED is set, so with the
+	// switch unset each path answers the router's 404 naming this gate — the
+	// same posture the dagger and detection surfaces have.
+	{Path: "/.well-known/agent-card.json", Gate: "CR_A2A_ENABLED"},
+	{Path: "/a2a", Gate: "CR_A2A_ENABLED"},
 	{Path: "/dagger/runs", Gate: "CR_DAGGER_URL"},
 	{Path: "/dagger/runs/{id}", Gate: "CR_DAGGER_URL"},
 	{Path: "/dagger/runs/{id}/cancel", Gate: "CR_DAGGER_URL"},
