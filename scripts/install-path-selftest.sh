@@ -306,7 +306,12 @@ esac
 # arm (scripts/check-demo-cleanup.sh) classifies this script and checks its cleanup
 # contract — a trap that kills the pid it started, and an assertion that the
 # port's holder IS that pid.
-env -i PATH="$CLEAN_PATH" HOME="$CLEAN_HOME" CRIER_PORT="$RELAY_PORT" CR_GUARD_ENABLED=false CR_LOG_LEVEL=warn "$CLEAN_HOME/.local/bin/crier" > "$WORKDIR/relay.log" 2>&1 &
+# INT-018: this probe's subject is "the INSTALLED binary serves a durable inbox",
+# not sender authentication — the placeholder public key it registers has no
+# private half, so the probe cannot sign a delivery. The gate is therefore
+# stated OFF here (and only here) rather than the probe silently passing on a
+# posture it does not test.
+env -i PATH="$CLEAN_PATH" HOME="$CLEAN_HOME" CRIER_PORT="$RELAY_PORT" CR_GUARD_ENABLED=false CR_REQUIRE_AGENT_SIG=false CR_LOG_LEVEL=warn "$CLEAN_HOME/.local/bin/crier" > "$WORKDIR/relay.log" 2>&1 &
 RELAY_PID=$!
 wait_http_or_die "${RELAY_BASE}/health" "$RELAY_PID" "$WORKDIR/relay.log" "the installed crier server"
 assert_port_owned "$RELAY_PORT" "$RELAY_PID" "the installed crier server"
