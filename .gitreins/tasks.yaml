@@ -4370,5 +4370,6 @@ tasks:
     artifacts named''; actionlint .github/workflows/pages.yml exits 0. This commit
     is the workflow hardening only, it is not expected to change Go code or fix the
     pending board rows.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-17T06:05:14.268002+00:00'
+  completed_at: '2026-11-17T06:07:51.239719+00:00'

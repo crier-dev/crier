@@ -150,3 +150,44 @@ The failure had two attempts inside one run (`run_attempt: 2`). Each attempt has
 
 - `366eb95269d68b7257bead6bb1eef03dac700bbd` — the push whose Pages deploy failed (analysed here, not changed)
 - `463a7c04650141ac762712f1d52ae2a226438813` — the first green Pages run after the failure (the whole-workflow re-run)
+
+## Appended 2026-11-17 — verification of the fix (probe: the workflow itself)
+
+The GitHub-side workflow has no local runner, so the probe is the run for the fix commit. Command and output, verbatim:
+
+- **Commands run:**
+  ```bash
+  git rev-parse HEAD                       # aab2aab255cc38828ccb019d9e040da00d64d317
+  gh run list --repo crier-dev/crier --workflow pages --limit 1 --json databaseId,status,conclusion,headSha
+  gh run rerun 44028742935 --repo crier-dev/crier          # attempt 2 of the SAME run id: the pre-fix trap
+  gh api repos/crier-dev/crier/actions/runs/44028742935 --jq '"\(.run_attempt)|\(.status)|\(.conclusion)"'
+  gh api repos/crier-dev/crier/actions/runs/44028742935/artifacts --jq '.artifacts[]|{id,name,created_at}'
+  gh api repos/crier-dev/crier/actions/jobs/133855557716/logs | grep -E 'Fetching artifact metadata|Found [0-9]+ artifact|successfully uploaded'
+  ```
+- **Observed output:**
+  ```text
+  06:06:18 44028742935|waiting||aab2aab255cc38828ccb019d9e040da00d64d317
+  06:06:34 44028742935|in_progress||aab2aab255cc38828ccb019d9e040da00d64d317
+  06:06:50 44028742935|completed|success|aab2aab255cc38828ccb019d9e040da00d64d317
+  06:07:21 attempt|status|concl=2|in_progress|null
+  06:07:37 attempt|status|concl=2|completed|success
+  {"created_at":"2026-11-17T06:07:14Z","id":14303114885,"name":"github-pages-2"}
+  2026-11-17T06:07:14.7953434Z Artifact github-pages-2 has been successfully uploaded! Final size is 3382838 bytes. Artifact ID is 14303114885
+  2026-11-17T06:07:15.1114565Z Fetching artifact metadata for "github-pages-2" in this workflow run
+  2026-11-17T06:07:15.2191117Z Found 1 artifact(s)
+  ```
+- **Before:** an attempt 2 of a Pages run hard-failed with `Found 2 artifact(s)` → `Multiple artifacts named "github-pages" were unexpectedly found` (AC-1b).
+- **After:** attempt 1 of run `44028742935` (head `aab2aab2`) deployed green, and **attempt 2 of the same run id also
+  deployed green** — the exact operation that previously could never succeed. The deploy step resolved
+  `github-pages-2` and got `Found 1 artifact(s)`, i.e. one unambiguous artifact per attempt.
+- **Residual, not claimed:** the AC-1a race (artifact uploaded but not yet listed) is GitHub-side and is not removed by
+  this change; a repeat would still need a retry — but the retry now works instead of being guaranteed to fail.
+
+### Verification verdict (GitReins tier-1 + tier-2 on the fix commit)
+
+- Runs: `.gitreins/history/2026-11-17/0d245e9d/verdict.json` — task `INT-CI-040`, commit
+  `aab2aab255cc38828ccb019d9e040da00d64d317`, `passed: true`, overall **PASS**.
+- Tier 1: guard PASS. Tier 2: PASS (re-derived the log lines from the live API, re-ran actionlint, confirmed both
+  action inputs from the upstream manifests, and confirmed run `44028742935` attempt 2 is green).
+- Tier-2 boundary: the guard reported `DEGRADED PASS (skips: go_build, go_lint, go_tests — no Go files staged)`. That is
+  correct and expected for a workflow+evidence diff; the Go suite was not run by this task and is not claimed.
