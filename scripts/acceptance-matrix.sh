@@ -539,11 +539,19 @@ REG_FED=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PEER
   -d "{\"id\":\"$FOREGIN_ID\",\"public_key\":\"$FED_PUB_HEX\",\"capabilities\":[\"acceptance\"]}")
 [ "$REG_FED" = "201" ] || [ "$REG_FED" = "200" ] || record FAIL "4-federation-peer-auth" "register foreign agent -> HTTP $REG_FED"
 BODY='{"payload":{"fed":"acceptance"}}'
+# INT-018: a REAL federation forward sets the hop marker as well as the peer
+# identity (internal/federation/forwardDeliverReceipt sets X-Crier-Fed-Hop: 1 and
+# X-Crier-Fed-Peer: <self>), because a forwarded delivery is authenticated by the
+# peer proof and the remote actor is not a local agent. Without the hop marker
+# this cell was sending a shape no real forward emits, and INT-018's sender gate
+# refused it before peer auth could run — which also made the negative control
+# vacuous (both curls answered the same 401 for the same wrong reason).
+HOP_HDR='X-Crier-Fed-Hop: 1'
 sign_ed "POST" "/agents/$FOREGIN_ID/inbox" "$PEER_KEY"
 GOOD_CODE=$(curl -s -o "$WORKDIR/fed-good.json" -w '%{http_code}' -X POST \
   "http://127.0.0.1:$PEER_PORT/agents/$FOREGIN_ID/inbox" \
   -H 'Content-Type: application/json' -d "$BODY" \
-  -H 'X-Crier-Fed-Peer: relay-b' -H "X-Fed-Ts: $TS" -H "X-Fed-Sig: $SIG")
+  -H "$HOP_HDR" -H 'X-Crier-Fed-Peer: relay-b' -H "X-Fed-Ts: $TS" -H "X-Fed-Sig: $SIG")
 # Negative control: same key, WRONG transcript (signed over a DIFFERENT path
 # than the request's — the server verifies over METHOD\nPATH\nTS of the
 # delivered request). A server that did not verify would accept both.
@@ -551,7 +559,7 @@ sign_ed "POST" "/agents/other-agent/inbox" "$PEER_KEY"
 BAD_CODE=$(curl -s -o "$WORKDIR/fed-bad.json" -w '%{http_code}' -X POST \
   "http://127.0.0.1:$PEER_PORT/agents/$FOREGIN_ID/inbox" \
   -H 'Content-Type: application/json' -d "$BODY" \
-  -H 'X-Crier-Fed-Peer: relay-b' -H "X-Fed-Ts: $TS" -H "X-Fed-Sig: $SIG")
+  -H "$HOP_HDR" -H 'X-Crier-Fed-Peer: relay-b' -H "X-Fed-Ts: $TS" -H "X-Fed-Sig: $SIG")
 if [ "$GOOD_CODE" = "201" ] && [ "$BAD_CODE" = "401" ]; then
   record PASS "4-federation-peer-auth" "valid signed forward accepted (201); forged-transcript forward refused (401) by the peer-auth gate"
 elif [ "$GOOD_CODE" != "201" ]; then
