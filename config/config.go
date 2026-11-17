@@ -207,6 +207,17 @@ type Config struct {
 	ServiceDeliveryAllowlist string
 	// ServiceDeliveryAudience identifies this relay in protected signatures.
 	ServiceDeliveryAudience string
+	// RegistrySeedIdentities is the operator's boot-time identity declaration
+	// (CR_REGISTRY_SEED_IDENTITIES): comma-separated id=<64-hex ed25519 public
+	// key> entries seeded into an EMPTY in-memory registry store before the
+	// service-delivery policy is validated. The default — unset — seeds
+	// nothing, so the pre-provisioning guard is exactly as strict as before:
+	// an identity that neither the store nor this declaration names is still
+	// refused at boot ("... is not pre-provisioned"). It is a declaration, not
+	// auto-registration: each identity is named by the operator, and the same
+	// declaration is refused on a durable backend (sqlite/postgres) because
+	// those stores keep their own agents across restarts.
+	RegistrySeedIdentities string
 	// RequireMeshAuth enforces the ed25519 connect handshake on the mesh
 	// (CR_REQUIRE_MESH_AUTH, DF-CRIER-287). Default FALSE — the mesh is
 	// opt-in, because its lane is used by single-host deployments whose
@@ -1172,6 +1183,15 @@ func LoadFrom(getenv Getenv) (Config, error) {
 		return cfg, err
 	}
 	cfg.ServiceDeliveryAudience = getenv("CR_SERVICE_DELIVERY_AUDIENCE")
+	// CR_REGISTRY_SEED_IDENTITIES: the operator's explicit boot-time identity
+	// declaration for an empty in-memory store. Validated here so a malformed
+	// declaration fails the boot in the same place every other pre-flight
+	// identity/config check does; the seeding itself happens in the boot path
+	// (cmd/server/seed_identities.go) before the delivery policy is validated.
+	cfg.RegistrySeedIdentities = getenv("CR_REGISTRY_SEED_IDENTITIES")
+	if _, err := registry.ParseSeedIdentities(cfg.RegistrySeedIdentities); err != nil {
+		return cfg, err
+	}
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.

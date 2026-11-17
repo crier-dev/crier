@@ -166,6 +166,16 @@ ignore_paths:
   - /api/sessions/{id}/chat
   - /run/secrets/hermes-gateway.token
 
+  # INT-021: the README's service-delivery dev recipe creates two scratch key
+  # files beside each other in a mktemp directory and passes them to
+  # `crier keygen` / the Python client. The scanner splits `$D/agent-*.key` at
+  # the placeholder, so the bare leaf names appear as path tokens. Filesystem
+  # scratch files, NOT API routes — the route the recipe exercises
+  # (POST /agents/{id}/inbox) is a live route, already covered by the
+  # route-count claim.
+  - /agent-a.key
+  - /agent-b.key
+
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
   - id: ROUTE-README-RELAY-PUBLISH

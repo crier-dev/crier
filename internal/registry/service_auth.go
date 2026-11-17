@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,72 @@ func ValidateServiceIdentities(store Store, policy ServiceDeliveryPolicy) error 
 		}
 		if len(agent.PublicKey) != ed25519.PublicKeySize {
 			return fmt.Errorf("service identity %q has no valid Ed25519 public key", id)
+		}
+	}
+	return nil
+}
+
+// SeedIdentity is one identity the OPERATOR declares at boot
+// (CR_REGISTRY_SEED_IDENTITIES) so an empty store starts with it. It carries
+// only public material: the private half stays with the service that holds the
+// identity, exactly as it does when the same identity is registered over
+// POST /agents.
+type SeedIdentity struct {
+	ID        string
+	PublicKey HexKey
+}
+
+// ParseSeedIdentities validates CR_REGISTRY_SEED_IDENTITIES. Empty disables
+// seeding; nonempty input must consist entirely of id=<hex ed25519 public key>
+// entries. Surrounding whitespace is ignored, identity bytes/case are not
+// changed. A declaration is explicit per identity — there is deliberately no
+// wildcard, no "seed everything on the allowlist", and no default.
+func ParseSeedIdentities(raw string) ([]SeedIdentity, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	seen := map[string]struct{}{}
+	ids := make([]SeedIdentity, 0, strings.Count(raw, ",")+1)
+	for _, entry := range strings.Split(raw, ",") {
+		parts := strings.Split(strings.TrimSpace(entry), "=")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid CR_REGISTRY_SEED_IDENTITIES entry %q: want exactly id=<hex ed25519 public key>", entry)
+		}
+		id, rawKey := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		if !serviceAgentID.MatchString(id) {
+			return nil, fmt.Errorf("invalid CR_REGISTRY_SEED_IDENTITIES entry %q: agent IDs must match [A-Za-z0-9][A-Za-z0-9._:-]*; no wildcards", entry)
+		}
+		key, err := hex.DecodeString(rawKey)
+		if err != nil || len(key) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("invalid CR_REGISTRY_SEED_IDENTITIES entry %q: public key must be %d hex-encoded bytes", entry, ed25519.PublicKeySize)
+		}
+		if _, dup := seen[id]; dup {
+			return nil, fmt.Errorf("invalid CR_REGISTRY_SEED_IDENTITIES entry %q: identity %q is declared twice", entry, id)
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, SeedIdentity{ID: id, PublicKey: HexKey(key)})
+	}
+	return ids, nil
+}
+
+// ApplySeedIdentities provisions the operator-declared identities into a store
+// at boot, BEFORE any service-delivery policy is validated. Seeding is legal
+// only on the in-memory backend: it starts empty by definition, so the guard's
+// "the identity already exists" requirement has no other way to be satisfied
+// without the operator also landing at the registration API inside the same
+// process lifetime. A durable store already keeps its own agents across
+// restarts; re-seeding it at every boot would silently resurrect rows an
+// operator deleted, so that is refused rather than performed.
+func ApplySeedIdentities(store Store, ids []SeedIdentity) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, ok := store.(*MemoryStore); !ok {
+		return fmt.Errorf("CR_REGISTRY_SEED_IDENTITIES applies only to the in-memory registry backend (got %T): a durable store keeps its own agents, so provision new identities with POST /agents", store)
+	}
+	for _, id := range ids {
+		if err := store.Register(&Agent{ID: id.ID, PublicKey: id.PublicKey, Capabilities: []string{}}); err != nil {
+			return fmt.Errorf("seed identity %q: %w", id.ID, err)
 		}
 	}
 	return nil
