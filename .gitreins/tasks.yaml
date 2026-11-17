@@ -4318,3 +4318,25 @@ tasks:
   status: complete
   created_at: '2026-11-16T20:35:51.905112+00:00'
   completed_at: '2026-11-16T21:27:07.118507+00:00'
+- id: RELEASE-028
+  title: prepare the v0.7.0 version carrier and give the tag a CI receipt before cutting
+  criteria:
+  - CHANGELOG.md carries a released 0.7.0 section above 0.6.1 summarizing non-merge
+    commits since v0.6.1 with every feat/fix/perf named, Unreleased emptied; every
+    version surface reads 0.7.0 (3 README pin sites, cmd/server/openapi.yaml, docs/openapi.yaml);
+    version-carrier file edits only - the CUT itself is owner-gated and must NOT be
+    executed
+  status: complete
+  created_at: '2026-11-17T00:15:46.283190+00:00'
+  completed_at: '2026-11-17T00:49:26.558803+00:00'
+- id: RELEASE-027
+  title: 'coverage lane reds are unattributable: the coverage target truncates go
+    test output to 30 lines'
+  criteria:
+  - 'The coverage path no longer truncates test output to a fixed trailing window:
+    on a failing run it prints failing package import paths, failing test names, and
+    total coverage percentage alongside the threshold; verified by a deliberately
+    failing test in a scratch worktree whose package and test name appear in stdout;
+    a green run prints a parseable summary line'
+  status: in_progress
+  created_at: '2026-11-17T00:15:46.838691+00:00'
