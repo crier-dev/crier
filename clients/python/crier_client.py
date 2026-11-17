@@ -1013,13 +1013,16 @@ class Crier:
         reply_to: Any = ABSENT,
         idempotency_key: Any = ABSENT,
     ) -> Dict[str, Any]:
-        """POST /agents/{id}/inbox — body-sign only an explicit own sender.
+        """POST /agents/{id}/inbox — signs with this client's key when it names itself.
 
         ttl_seconds: absent keeps the store default (24h), 0 means never expire
         (reported as "expires_at": null, not the zero time).
         sender: when equal to this client's agent_id, signs the exact serialized
-        body with this client's key. Other/missing sender stays unsigned for
-        ordinary legacy recipients; configured service recipients reject it.
+        body with this client's key — that is the ordinary, authenticated
+        delivery (INT-018: a server with CR_REQUIRE_AGENT_SIG on, the default,
+        refuses an unsigned deliver). Other/missing sender is sent unsigned and
+        is only accepted by a server whose gate is off, or by a configured
+        service recipient that requires a different, mandatory body proof.
         """
         body: Dict[str, Any] = {"payload": payload}
         if ttl_seconds is not None:

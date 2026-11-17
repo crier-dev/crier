@@ -223,8 +223,12 @@ REG_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$POR
 if [ "$REG_CODE" != "201" ] && [ "$REG_CODE" != "200" ]; then
   record FAIL "2a-sqlite-relaunch" "register agent -> HTTP $REG_CODE (want 201)"
 else
+  # INT-018: this cell boots with CR_REQUIRE_AGENT_SIG=true, so the ordinary
+  # delivery must prove the sender — sign it with the key registered above.
+  sign_ed "POST" "/agents/$AGENT_ID/inbox" "$AGENT_KEY"
   DEL_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PORT_SQLITE/agents/$AGENT_ID/inbox" \
-    -H 'Content-Type: application/json' -d '{"payload":{"hello":"acceptance"}}')
+    -H 'Content-Type: application/json' -d '{"payload":{"hello":"acceptance"}}' \
+    -H "X-Agent-ID: $AGENT_ID" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG")
   if [ "$DEL_CODE" != "201" ] && [ "$DEL_CODE" != "200" ]; then
     record FAIL "2a-sqlite-relaunch" "deliver -> HTTP $DEL_CODE (want 201)"
   else

@@ -123,9 +123,9 @@ def main(argv=None) -> int:
         note("already registered (409) — reusing the existing identity; the public key must match, or the signed calls below fail")
 
     # -- [4] deliver -------------------------------------------------------
-    step("deliver a message (POST /agents/%s/inbox — the sender needs no key)" % args.id)
+    step("deliver a message (POST /agents/%s/inbox — SIGNED by this agent: X-Agent-ID + X-Agent-Ts + X-Agent-Sig)" % args.id)
     try:
-        delivered = client.deliver(args.id, payload, ttl_seconds=3600)
+        delivered = client.deliver(args.id, payload, ttl_seconds=3600, sender=args.id)
     except CrierError as exc:
         fail(str(exc))
     message_id = delivered.get("id")

@@ -65,7 +65,7 @@ def main(argv=None) -> int:
         fail(str(exc))
 
     print()
-    print("-- deliver %s -> %s (the sender needs no key of its own)" % (args.alice_id, args.bob_id))
+    print("-- deliver %s -> %s (SIGNED by alice's own key — INT-018)" % (args.alice_id, args.bob_id))
     try:
         delivered = alice.deliver(args.bob_id, payload, ttl_seconds=3600, sender=args.alice_id)
     except CrierError as exc:
@@ -106,21 +106,23 @@ def main(argv=None) -> int:
     ok("bob's ack succeeded (204)")
 
     print()
-    print("-- deliver is OPEN: a sender needs no key and no signature to deliver")
+    print("-- deliver is GATED: an unsigned sender is refused (INT-018)")
     try:
-        # The escape hatch with signed=False is exactly the wire request the
-        # README documents: delivery carries no signature and is not gated; it
-        # is bob's SIGNED READ that is gated.
+        # INT-018 flipped this posture: ordinary delivery now proves the sender
+        # whenever CR_REQUIRE_AGENT_SIG is on (the shipped default). The escape
+        # hatch with signed=False is the exact wire request a legacy client
+        # sends, and it must now be refused — 401, with nothing stored.
         alice.request("POST", "/agents/%s/inbox" % args.bob_id, body={"payload": {"hello": "unsigned delivery"}})
+        fail("an unsigned POST /agents/%s/inbox was ACCEPTED — the sender gate is not enforced" % args.bob_id)
     except CrierError as exc:
-        fail(str(exc))
-    ok("an unsigned POST /agents/%s/inbox was accepted" % args.bob_id)
+        if exc.status != 401:
+            fail("expected 401 for an unsigned deliver, got HTTP %d: %s" % (exc.status, exc.message))
+        ok("an unsigned POST /agents/%s/inbox was refused: 401 %s" % (args.bob_id, exc.message))
     try:
         extra = [m for m in bob.retrieve() if m.payload == {"hello": "unsigned delivery"}]
-        if not extra:
-            fail("bob's signed read did not see the unsigned delivery")
-        ok("bob's SIGNED read saw it (the read is the gated half)")
-        bob.ack(extra)
+        if extra:
+            fail("bob saw a refused delivery — the rejection still stored it")
+        ok("bob's SIGNED read does not see it (the refusal stored nothing)")
         bob.unregister()
     except CrierError as exc:
         fail(str(exc))

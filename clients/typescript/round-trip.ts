@@ -164,10 +164,10 @@ async function main(): Promise<number> {
   }
 
   // -- [4] deliver --------------------------------------------------------
-  step(`deliver a message (POST /agents/${args.id}/inbox — the sender needs no key)`);
+  step(`deliver a message (POST /agents/${args.id}/inbox — SIGNED by this agent)`);
   let delivered: Record<string, unknown>;
   try {
-    delivered = await client.deliver(args.id, payload, { ttlSeconds: 3600 });
+    delivered = await client.deliver(args.id, payload, { ttlSeconds: 3600, sender: args.id });
   } catch (exc) {
     fail((exc as Error).message);
   }

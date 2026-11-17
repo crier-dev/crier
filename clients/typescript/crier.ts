@@ -717,7 +717,14 @@ export class Crier {
     const body: Record<string, unknown> = { payload };
     if (options.ttlSeconds !== undefined) body["ttl_seconds"] = options.ttlSeconds;
     if (options.sender !== undefined) body["sender"] = options.sender;
-    const { body: parsed } = await this.raw("POST", `/agents/${encodeURIComponent(agentId)}/inbox`, { body });
+    // INT-018: ordinary inbox delivery must prove the sender. A caller that
+    // names itself as the sender signs with its own key; the server refuses an
+    // unsigned delivery when CR_REQUIRE_AGENT_SIG is on (the default).
+    const signed = options.sender !== undefined && options.sender === this.agentId;
+    const { body: parsed } = await this.raw("POST", `/agents/${encodeURIComponent(agentId)}/inbox`, {
+      body,
+      signed,
+    });
     return (parsed as Record<string, unknown>) ?? {};
   }
 
