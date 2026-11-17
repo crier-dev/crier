@@ -114,6 +114,10 @@ func TestMetricsGuardCircuitOpenReachesOne(t *testing.T) {
 	t.Setenv("CR_GUARD_DEEPSEEK_BASE_URL", "http://127.0.0.1:1")
 	t.Setenv("CR_GUARD_CIRCUIT_THRESHOLD", "1")
 	t.Setenv("CR_GUARD_TIMEOUT_MS", "2000")
+	// INT-018: the guard circuit metric is the subject; the probe agent holds
+	// only a placeholder public key, so the delivery is unsigned under the
+	// legacy posture and enforcement is explicitly off here.
+	t.Setenv("CR_REQUIRE_AGENT_SIG", "false")
 	baseURL := bootObservabilityServer(t)
 	client := &http.Client{Timeout: 20 * time.Second}
 

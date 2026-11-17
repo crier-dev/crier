@@ -24,6 +24,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -601,7 +602,19 @@ func docsClaimsInstanceKey(t *testing.T) string {
 	return path
 }
 
+// bootDocsClaimsServer boots the gate's DEFAULT-posture server: the enforcing
+// configuration a default deployment runs, where INT-018's sender gate is ON.
 func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client, sessionLogRoot string) {
+	t.Helper()
+	return bootDocsClaimsServerWith(t, nil)
+}
+
+// bootDocsClaimsServerWith boots a server with extra configuration applied on
+// top of the standard fixtures. INT-018 uses it to provide the gate-OFF server a
+// re-baselined recipe block declares in its own text ("CR_REQUIRE_AGENT_SIG=false
+// ./bin/crier serve"): identical boot, one knob different, so a block whose
+// subject is not sender proof keeps its verdicts measured instead of retargeted.
+func bootDocsClaimsServerWith(t *testing.T, extra map[string]string) (baseURL string, client *http.Client, sessionLogRoot string) {
 	t.Helper()
 
 	// INT-CI-014: the boot reads its configuration through a per-test overlay
@@ -681,6 +694,13 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client, se
 	bootEnv["CR_FED_SELF_KEY_FILE"] = docsClaimsInstanceKey(t)
 	bootEnv["CR_FED_RECORDS_FILE"] = filepath.Join(t.TempDir(), "federation-peers.json")
 
+	// A caller's explicit overlay wins over every derived default above: the
+	// gate-off server differs from the default server in exactly the knob it
+	// names, nothing else.
+	for k, v := range extra {
+		bootEnv[k] = v
+	}
+
 	port := freePort(t)
 	bootEnv["CRIER_PORT"] = fmt.Sprintf("%d", port)
 
@@ -739,6 +759,84 @@ func registerAgent(t *testing.T, client *http.Client, baseURL, id string) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register %s: status %d, want 201", id, resp.StatusCode)
 	}
+}
+
+// docsClaimsSigner holds the private halves of the identities the gate registers
+// with REAL ed25519 keys. INT-018 put sender proof on ordinary inbox delivery,
+// so a probe whose SUBJECT is something else (guard blocking, capability
+// refusal, webhook envelope mechanics, a TTL wire value) still has to arrive at
+// the handler as a genuine sender. Signing keeps every such claim measured
+// against the DEFAULT enforcing posture; turning the gate off for them would
+// have measured less.
+type docsClaimsSigner struct {
+	keys map[string]ed25519.PrivateKey
+}
+
+// agentSigHeaders builds the signature trio for one request from an explicit
+// key. The transcript is the one every agent-owned route verifies —
+// "<METHOD>\n<path>\n<unix-seconds>" — and body binding stays opt-in (no
+// X-Agent-Body-SHA256), exactly as the client libraries send it.
+func agentSigHeaders(agentID string, priv ed25519.PrivateKey, method, path string) map[string]string {
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	sig := ed25519.Sign(priv, []byte(method+"\n"+path+"\n"+ts))
+	return map[string]string{
+		registry.HeaderAgentID:  agentID,
+		registry.HeaderAgentTS:  ts,
+		registry.HeaderAgentSig: hex.EncodeToString(sig),
+	}
+}
+
+// headers proves agentID's own key over the request it is about to send.
+func (s docsClaimsSigner) headers(agentID, method, path string) (map[string]string, error) {
+	priv, ok := s.keys[agentID]
+	if !ok {
+		return nil, fmt.Errorf("no signing key for %q: a probe that delivers as a sender must be registered with a real keypair", agentID)
+	}
+	return agentSigHeaders(agentID, priv, method, path), nil
+}
+
+func setHeaders(req *http.Request, headers map[string]string) {
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+}
+
+// registerIdentityWithKey registers id with the public half of a freshly
+// generated ed25519 keypair and returns the private half. Probes use this form
+// so a failure is reported as an observed error rather than a test abort.
+func registerIdentityWithKey(client *http.Client, baseURL, id string) (ed25519.PrivateKey, error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate keypair for %q: %w", id, err)
+	}
+	body := fmt.Sprintf(`{"id":%q,"public_key":%q}`, id, hex.EncodeToString(pub))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents", strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("register %q with a real key: status %d, want 201", id, resp.StatusCode)
+	}
+	return priv, nil
+}
+
+// registerSigningAgent is registerIdentityWithKey for the fixtures: it fails the
+// test on error and records the private half in keys.
+func registerSigningAgent(t *testing.T, client *http.Client, baseURL, id string, keys map[string]ed25519.PrivateKey) {
+	t.Helper()
+	priv, err := registerIdentityWithKey(client, baseURL, id)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	keys[id] = priv
 }
 
 // seedDaggerProbeRun creates one dagger run under the probe agent, so the
@@ -843,7 +941,14 @@ func TestDocsClaims(t *testing.T) {
 	set := loadClaimsFile(t, repoRoot)
 	baseURL, client, sessionLogRoot := bootDocsClaimsServer(t)
 
-	registerAgent(t, client, baseURL, docsClaimsProbeAgent)
+	// INT-018: the identities the id-keyed probes deliver AS are registered with
+	// REAL keypairs, because ordinary inbox delivery now proves the sender's key
+	// under the default posture. Each probe below signs with the key of the
+	// sender its claim is about, so the claim keeps measuring the enforcing
+	// server instead of a special-case one.
+	signKeys := map[string]ed25519.PrivateKey{}
+	registerSigningAgent(t, client, baseURL, docsClaimsProbeAgent, signKeys)
+	registerSigningAgent(t, client, baseURL, "agent-a", signKeys)
 	registerAgent(t, client, baseURL, "agent-1")
 	registerAgent(t, client, baseURL, "bob")
 	registerAgent(t, client, baseURL, "alice")
@@ -868,10 +973,10 @@ func TestDocsClaims(t *testing.T) {
 	// default-mode probe registers its OWN identity with the webhook attached
 	// (an update would need a signed request; the default is only observable
 	// on an agent that carries a webhook and states no delivery_mode).
-	registerAgent(t, client, baseURL, docsClaimsTTLProbeAgent)
+	registerSigningAgent(t, client, baseURL, docsClaimsTTLProbeAgent, signKeys)
 	// DF-CRIER-182: the identity whose never-expiring delivery reports the
 	// raw wire value of expires_at.
-	registerAgent(t, client, baseURL, docsClaimsNeverExpiresProbeAgent)
+	registerSigningAgent(t, client, baseURL, docsClaimsNeverExpiresProbeAgent, signKeys)
 	// DF-CRIER-11: docsClaimsSenderProbeAgent is deliberately NOT registered
 	// here. The claim's probe attaches its webhook at register time (a webhook
 	// cannot be added by an update without a signed request), and a pre-existing
@@ -879,6 +984,20 @@ func TestDocsClaims(t *testing.T) {
 	// with NO webhook, so the delivery would land in the inbox (201,
 	// transport=inbox) and the probe would see no POST at all. It mirrors the
 	// DF-CRIER-175 target probe, which has the same reason for being absent.
+
+	// INT-018 (foreman authority (a)): a marked block whose SUBJECT is not
+	// sender proof declares its own posture IN its text — the recipe carries
+	// "CR_REQUIRE_AGENT_SIG=false ./bin/crier serve" — and the replay executes
+	// that block against a server booted exactly that way. One extra boot,
+	// identical fixtures, one knob different: no verdict is retargeted, and the
+	// blocks that ARE about sender proof keep running here, enforcing.
+	gateOffBaseURL, gateOffClient, _ := bootDocsClaimsServerWith(t, map[string]string{"CR_REQUIRE_AGENT_SIG": "false"})
+	// The re-baselined blocks address bob (the TESTERS.md §1 deliveries); the
+	// README and router-dispatch walkthroughs register their own cast inside
+	// their own blocks, so this is the whole gate-off fixture set.
+	registerAgent(t, gateOffClient, gateOffBaseURL, "bob")
+
+	sign := docsClaimsSigner{keys: signKeys}
 
 	probes := probeSet{
 		readDoc: func(doc string) (string, error) {
@@ -902,8 +1021,8 @@ func TestDocsClaims(t *testing.T) {
 			io.Copy(io.Discard, resp.Body)
 			return resp.StatusCode, nil
 		},
-		probeStatus:  makeLiveStatusProbes(client, baseURL),
-		probeDefault: makeLiveDefaultProbes(client, baseURL),
+		probeStatus:  makeLiveStatusProbes(client, baseURL, sign),
+		probeDefault: makeLiveDefaultProbes(client, baseURL, sign),
 		probeCount: func(claimID string) (any, error) {
 			return liveCount(repoRoot, claimID)
 		},
@@ -938,7 +1057,16 @@ func TestDocsClaims(t *testing.T) {
 		for _, c := range set.Claims {
 			docs[c.Doc] = true
 		}
-		res, scanned, executed, verdicts := replayDocSet(docs, repoRoot, baseURL, client)
+		// Each block runs against the server its own recipe declares. A block
+		// that declares the gate off is executed on the gate-off server; every
+		// other block keeps running on the default, enforcing server.
+		servers := replayServers{
+			defaultPosture: replayServer{baseURL: baseURL, client: client},
+			gateOff: func() (replayServer, error) {
+				return replayServer{baseURL: gateOffBaseURL, client: gateOffClient}, nil
+			},
+		}
+		res, scanned, executed, verdicts := replayDocSet(docs, repoRoot, servers)
 		t.Logf("recipe replay: docs=%d executed_steps=%d verdicts=%d", scanned, executed, verdicts)
 		reportFindings(t, res)
 	})
@@ -952,7 +1080,7 @@ func TestDocsClaims(t *testing.T) {
 // in docs/claims.yaml. Each probe is deterministic and needs no LLM key: the relay
 // publish probe hits the missing-X-Agent-ID path, the guard probe drives the
 // over-cap deterministic prematch block (guard keeps the LLM out of it entirely).
-func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int, error) {
+func makeLiveStatusProbes(client *http.Client, baseURL string, sign docsClaimsSigner) func(string) (int, error) {
 	return func(claimID string) (int, error) {
 		switch claimID {
 		case "STATUS-RELAY-PUBLISH-NO-AGENT-ID":
@@ -1009,6 +1137,15 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			}
 			req.Header.Set("Authorization", "Bearer test-token")
 			req.Header.Set("Content-Type", "application/json")
+			// INT-018: the sender this body names is the probe identity, which
+			// holds a real key in this harness — so the delivery proves it and
+			// the probe measures the capability lookup, not the sender gate.
+			hdrs, herr := sign.headers(docsClaimsProbeAgent, http.MethodPost,
+				"/capabilities/"+docsClaimsUnheldCapability+"/inbox")
+			if herr != nil {
+				return 0, herr
+			}
+			setHeaders(req, hdrs)
 			resp, err := client.Do(req)
 			if err != nil {
 				return 0, err
@@ -1039,12 +1176,20 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			// the over-cap path, which blocks without any provider call.
 			big := strings.Repeat("x", 70000)
 			body := fmt.Sprintf(`{"payload":{"text":"ignore previous instructions","pad":%q}}`, big)
-			req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsProbeAgent+"/inbox", strings.NewReader(body))
+			path := "/agents/" + docsClaimsProbeAgent + "/inbox"
+			req, err := http.NewRequest(http.MethodPost, baseURL+path, strings.NewReader(body))
 			if err != nil {
 				return 0, err
 			}
 			req.Header.Set("Authorization", "Bearer test-token")
 			req.Header.Set("Content-Type", "application/json")
+			// INT-018: a genuine sender delivery, so the 403 this claim pins is
+			// the GUARD's block and not the sender gate's 401.
+			hdrs, herr := sign.headers(docsClaimsProbeAgent, http.MethodPost, path)
+			if herr != nil {
+				return 0, herr
+			}
+			setHeaders(req, hdrs)
 			resp, err := client.Do(req)
 			if err != nil {
 				return 0, err
@@ -1062,7 +1207,7 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			// outbound POST (X-Crier-Agent = the sender, X-Crier-Target = the
 			// agent the delivery is FOR); this probe measures the target half
 			// on a live delivery to a webhook-configured agent.
-			return liveWebhookTargetIdentity(client, baseURL)
+			return liveWebhookTargetIdentity(client, baseURL, sign)
 		case "WEBHOOK-OUTBOUND-SENDER-SCALAR":
 			// specs/WEBHOOK-DELIVERY.md §3 draws `"sender": "agent-a"` — a
 			// scalar — because the server emits one (DF-CRIER-11). This probe
@@ -2242,7 +2387,19 @@ type docBlock struct {
 	doc        string
 	markerLine int
 	steps      []docStep
+	// posture is the CR_REQUIRE_AGENT_SIG value the block's own text declares
+	// ("false" = the gate has to be OFF for this walkthrough), or "" when the
+	// block asserts nothing and keeps the server's default posture.
+	posture string
+	// postureLine is where that declaration was read, so a finding can point at
+	// the exact line instead of at the marker.
+	postureLine int
 }
+
+// docPostureRE recognises a block's boot-posture declaration. A recipe says it
+// the way a reader would run it — "CR_REQUIRE_AGENT_SIG=false ./bin/crier serve"
+// — and everything else in the block (the curl steps) stays untouched.
+var docPostureRE = regexp.MustCompile(`CR_REQUIRE_AGENT_SIG\s*=\s*(true|false)`)
 
 func isFenceLine(t string) bool { return strings.HasPrefix(t, "```") }
 
@@ -2308,10 +2465,32 @@ func parseDoccheckBlocks(doc, text string) ([]docBlock, []claimResult) {
 			k = len(lines)
 		}
 		blk := docBlock{doc: doc, markerLine: markerLine, steps: parseBlockSteps(doc, lines, j+1, k)}
+		blk.posture, blk.postureLine = blockPosture(doc, lines, j+1, k, &fails)
 		blocks = append(blocks, blk)
 		i = k
 	}
 	return blocks, fails
+}
+
+// blockPosture reads a block's declared boot posture. A block that names the
+// knob twice with DIFFERENT values is contradictory — one block is replayed
+// against one server — so it is reported, never silently resolved to the last
+// line that happens to mention the variable.
+func blockPosture(doc string, lines []string, from, to int, fails *[]claimResult) (posture string, line int) {
+	for i := from; i < to && i < len(lines); i++ {
+		m := docPostureRE.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		if posture != "" && posture != m[1] {
+			*fails = append(*fails, doccheckResult(doc, i+1, fmt.Sprintf(
+				"doc=%s line=%d block declares contradictory boot postures (CR_REQUIRE_AGENT_SIG=%s at line %d, then =%s here): expected=one posture per block observed=two — split the block so each runs against the server its verdicts describe",
+				doc, i+1, posture, line, m[1])))
+			continue
+		}
+		posture, line = m[1], i+1
+	}
+	return posture, line
 }
 
 // parseBlockSteps extracts the executable steps of one fenced block: lines whose
@@ -2548,13 +2727,53 @@ func executeStep(ctx context.Context, step docStep, baseURL string, client *http
 	return resp.StatusCode, nil
 }
 
+// replayServer is one booted server a recipe block can execute against: its base
+// URL and the client the replay issues through.
+type replayServer struct {
+	baseURL string
+	client  *http.Client
+}
+
+// replayServers is the posture-routing seam. Every block runs against the server
+// its OWN text declares: the default (enforcing) server unless the block says
+// "CR_REQUIRE_AGENT_SIG=false", in which case it needs the gate-off server.
+// There is deliberately no fallback — a block that declares a posture the caller
+// cannot provide FAILS, because replaying it against the other server would
+// measure the opposite of what its verdicts claim.
+type replayServers struct {
+	defaultPosture replayServer
+	gateOff        func() (replayServer, error) // nil: no gate-off server is wired
+}
+
+// forBlock picks the server one block executes against, reporting a finding and
+// returning ok=false when the declared posture is unavailable.
+func (s replayServers) forBlock(doc string, blk docBlock, res *[]claimResult) (replayServer, bool) {
+	if blk.posture != "false" {
+		return s.defaultPosture, true
+	}
+	if s.gateOff == nil {
+		*res = append(*res, doccheckResult(doc, blk.postureLine, fmt.Sprintf(
+			"doc=%s line=%d block declares CR_REQUIRE_AGENT_SIG=false but this replay has no gate-off server wired: expected=the block executed against a server booted with the gate off observed=no such server (refusing to replay it against the enforcing server, where its verdicts would measure the opposite posture)",
+			doc, blk.postureLine)))
+		return replayServer{}, false
+	}
+	target, err := s.gateOff()
+	if err != nil {
+		*res = append(*res, doccheckResult(doc, blk.postureLine, fmt.Sprintf(
+			"doc=%s line=%d block declares CR_REQUIRE_AGENT_SIG=false and the gate-off server could not be obtained: %v",
+			doc, blk.postureLine, err)))
+		return replayServer{}, false
+	}
+	return target, true
+}
+
 // replayDocRecipes is the CR-GAP-062 detector: it parses every marked block in one
-// doc and EXECUTES each curl step in order against the booted server, comparing
-// each observed status to the step's "# -> NNN" verdict. Findings come back in the
-// same shape as every other claim finding. executed/verdicts are returned so the
-// negative control can prove the replay is non-vacuous (requests really were
-// issued) and that verdicts really were counted.
-func replayDocRecipes(doc, text, baseURL string, client *http.Client) (res []claimResult, executed, verdicts int) {
+// doc and EXECUTES each curl step in order against the server that block declares,
+// comparing each observed status to the step's "# -> NNN" verdict. Findings come
+// back in the same shape as every other claim finding. executed/verdicts are
+// returned so the negative control can prove the replay is non-vacuous (requests
+// really were issued) and that verdicts really were counted.
+func replayDocRecipes(doc, text string, servers replayServers) (res []claimResult, executed, verdicts int) {
 	blocks, parseFails := parseDoccheckBlocks(doc, text)
 	res = append(res, parseFails...)
 	if len(blocks) == 0 {
@@ -2564,6 +2783,9 @@ func replayDocRecipes(doc, text, baseURL string, client *http.Client) (res []cla
 	defer cancel()
 
 	for _, blk := range blocks {
+		// Count the block's declared verdicts BEFORE the posture lookup: a
+		// block that names a posture this replay cannot provide still carries
+		// its "# -> NNN" claims, and the totals must reflect what was scanned.
 		blockVerdicts := 0
 		for _, s := range blk.steps {
 			if s.hasVerdict {
@@ -2571,6 +2793,10 @@ func replayDocRecipes(doc, text, baseURL string, client *http.Client) (res []cla
 			}
 		}
 		verdicts += blockVerdicts
+		target, ok := servers.forBlock(doc, blk, &res)
+		if !ok {
+			continue
+		}
 		if blockVerdicts == 0 {
 			res = append(res, doccheckResult(doc, blk.markerLine, fmt.Sprintf(
 				"doc=%s line=%d marked block carries no verdict: expected=at least one curl step with a '# -> NNN' status claim observed=0 (marker %s)",
@@ -2582,7 +2808,7 @@ func replayDocRecipes(doc, text, baseURL string, client *http.Client) (res []cla
 					"doc=%s line=%d unparseable curl step: %v — raw: %s", doc, s.line, s.parseErr, s.raw)))
 				continue
 			}
-			status, err := executeStep(ctx, s, baseURL, client)
+			status, err := executeStep(ctx, s, target.baseURL, target.client)
 			if err != nil {
 				res = append(res, doccheckResult(doc, s.line, fmt.Sprintf(
 					"doc=%s line=%d curl step could not be executed: %v (url=%s)", doc, s.line, err, s.url)))
@@ -2605,7 +2831,7 @@ func replayDocRecipes(doc, text, baseURL string, client *http.Client) (res []cla
 
 // replayDocSet runs the recipe replay over a doc set, returning every finding plus
 // the totals the caller logs (docs scanned, steps executed, verdicts counted).
-func replayDocSet(docs map[string]bool, repoRoot, baseURL string, client *http.Client) ([]claimResult, int, int, int) {
+func replayDocSet(docs map[string]bool, repoRoot string, servers replayServers) ([]claimResult, int, int, int) {
 	var res []claimResult
 	executed, verdicts := 0, 0
 	for doc := range docs {
@@ -2615,7 +2841,7 @@ func replayDocSet(docs map[string]bool, repoRoot, baseURL string, client *http.C
 				"recipe scan: cannot read %s: %v", doc, err)))
 			continue
 		}
-		r, e, v := replayDocRecipes(doc, string(raw), baseURL, client)
+		r, e, v := replayDocRecipes(doc, string(raw), servers)
 		res = append(res, r...)
 		executed += e
 		verdicts += v
@@ -2628,7 +2854,7 @@ func replayDocSet(docs map[string]bool, repoRoot, baseURL string, client *http.C
 // makeLiveDefaultProbes returns the id-keyed kind=default probes. The two
 // CR-GAP-062 claims are measured live (imported production constant / live
 // deliver); everything else falls through to liveDefault.
-func makeLiveDefaultProbes(client *http.Client, baseURL string) func(string) (any, error) {
+func makeLiveDefaultProbes(client *http.Client, baseURL string, sign docsClaimsSigner) func(string) (any, error) {
 	return func(claimID string) (any, error) {
 		switch claimID {
 		case "MESH-ROUTE-CAP-4096":
@@ -2639,9 +2865,9 @@ func makeLiveDefaultProbes(client *http.Client, baseURL string) func(string) (an
 			// literal.
 			return mesh.DefaultMeshConfig("").MaxPendingRequests, nil
 		case "TTL-SECONDS-CLAIM-IGNORED":
-			return liveTTLDeliverySeconds(client, baseURL)
+			return liveTTLDeliverySeconds(client, baseURL, sign)
 		case "DEFAULT-NEVER-EXPIRES-WIRE-VALUE":
-			return liveNeverExpiresWireValue(client, baseURL)
+			return liveNeverExpiresWireValue(client, baseURL, sign)
 		default:
 			return liveDefault(claimID)
 		}
@@ -2655,14 +2881,23 @@ func makeLiveDefaultProbes(client *http.Client, baseURL string) func(string) (an
 // and fails it, which is what makes the claim non-vacuous. A MISSING key is a
 // probe error, never a null: absent means "no expiry applies" (the webhook
 // paths), a different state from null.
-func liveNeverExpiresWireValue(client *http.Client, baseURL string) (any, error) {
+func liveNeverExpiresWireValue(client *http.Client, baseURL string, sign docsClaimsSigner) (any, error) {
 	body := `{"payload":{"never_expires_probe":true},"ttl_seconds":0}`
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsNeverExpiresProbeAgent+"/inbox", strings.NewReader(body))
+	path := "/agents/" + docsClaimsNeverExpiresProbeAgent + "/inbox"
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
+	// INT-018: the wire VALUE of expires_at is the subject, so the delivery is
+	// made as a genuine sender (this identity holds a real key here) rather
+	// than against a server with the gate switched off.
+	hdrs, herr := sign.headers(docsClaimsNeverExpiresProbeAgent, http.MethodPost, path)
+	if herr != nil {
+		return nil, herr
+	}
+	setHeaders(req, hdrs)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -2695,14 +2930,22 @@ func liveNeverExpiresWireValue(client *http.Client, baseURL string) (any, error)
 // documented ttl_seconds: deliver with ttl_seconds=3600 (the doc claims the
 // setting is ignored and expiry is hard-coded to 24h) and report the lifetime the
 // response's expires_at implies, in seconds.
-func liveTTLDeliverySeconds(client *http.Client, baseURL string) (any, error) {
+func liveTTLDeliverySeconds(client *http.Client, baseURL string, sign docsClaimsSigner) (any, error) {
 	body := `{"payload":{"ttl_probe":true},"ttl_seconds":3600}`
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsTTLProbeAgent+"/inbox", strings.NewReader(body))
+	path := "/agents/" + docsClaimsTTLProbeAgent + "/inbox"
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
+	// INT-018: the TTL arithmetic is the subject; the delivery is signed as the
+	// identity it is addressed to, which holds a real key in this harness.
+	hdrs, herr := sign.headers(docsClaimsTTLProbeAgent, http.MethodPost, path)
+	if herr != nil {
+		return nil, herr
+	}
+	setHeaders(req, hdrs)
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -2738,16 +2981,22 @@ func liveWebhookDefaultMode(client *http.Client, baseURL string) (int, error) {
 	}))
 	defer sink.Close()
 
-	if err := registerAgentWithWebhook(client, baseURL, docsClaimsWebhookProbeAgent, sink.URL+"/hook"); err != nil {
+	priv, err := registerAgentWithWebhook(client, baseURL, docsClaimsWebhookProbeAgent, sink.URL+"/hook")
+	if err != nil {
 		return 0, err
 	}
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsWebhookProbeAgent+"/inbox",
+	path := "/agents/" + docsClaimsWebhookProbeAgent + "/inbox"
+	req, err := http.NewRequest(http.MethodPost, baseURL+path,
 		strings.NewReader(`{"payload":{"mode_probe":true}}`))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
+	// INT-018: delivery_mode is the subject here, not sender proof — so the
+	// delivery arrives as a genuine sender, signed with the key this identity
+	// registered with its webhook.
+	setHeaders(req, agentSigHeaders(docsClaimsWebhookProbeAgent, priv, http.MethodPost, path))
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
@@ -2762,7 +3011,7 @@ func liveWebhookDefaultMode(client *http.Client, baseURL string) (int, error) {
 // sink names the agent it is FOR — X-Crier-Target on the request and
 // crier.target in the envelope — while X-Crier-Agent carries the SENDER, whose
 // meaning must not have changed.
-func liveWebhookTargetIdentity(client *http.Client, baseURL string) (int, error) {
+func liveWebhookTargetIdentity(client *http.Client, baseURL string, sign docsClaimsSigner) (int, error) {
 	var mu sync.Mutex
 	var gotHeader http.Header
 	var gotBody []byte
@@ -2776,16 +3025,25 @@ func liveWebhookTargetIdentity(client *http.Client, baseURL string) (int, error)
 	}))
 	defer sink.Close()
 
-	if err := registerAgentWithWebhook(client, baseURL, docsClaimsTargetProbeAgent, sink.URL+"/hook"); err != nil {
+	if _, err := registerAgentWithWebhook(client, baseURL, docsClaimsTargetProbeAgent, sink.URL+"/hook"); err != nil {
 		return 0, err
 	}
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsTargetProbeAgent+"/inbox",
+	path := "/agents/" + docsClaimsTargetProbeAgent + "/inbox"
+	req, err := http.NewRequest(http.MethodPost, baseURL+path,
 		strings.NewReader(`{"payload":{"target_probe":true},"sender":"agent-a"}`))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
+	// INT-018: the outbound identity headers are the subject, so the delivery is
+	// made by the sender the body names — agent-a, whose real key this harness
+	// holds — and the response status stays the accept the claim pins (202).
+	hdrs, herr := sign.headers("agent-a", http.MethodPost, path)
+	if herr != nil {
+		return 0, herr
+	}
+	setHeaders(req, hdrs)
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
@@ -2862,17 +3120,27 @@ func liveWebhookSenderToken(client *http.Client, baseURL string) (int, error) {
 	}))
 	defer sink.Close()
 
-	if err := registerAgentWithWebhook(client, baseURL, docsClaimsSenderProbeAgent, sink.URL+"/hook"); err != nil {
+	if _, err := registerAgentWithWebhook(client, baseURL, docsClaimsSenderProbeAgent, sink.URL+"/hook"); err != nil {
 		return 0, err
 	}
+	// INT-018: the crier.sender TOKEN TYPE is the subject, so the delivery must
+	// arrive as the sender it names — that identity is registered with a real
+	// key here and signs the request, keeping the claim measured on the
+	// enforcing server.
+	senderPriv, err := registerIdentityWithKey(client, baseURL, sender)
+	if err != nil {
+		return 0, err
+	}
+	path := "/agents/" + docsClaimsSenderProbeAgent + "/inbox"
 	body := fmt.Sprintf(`{"payload":{"sender_shape_probe":true},"sender":%q}`, sender)
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsSenderProbeAgent+"/inbox",
+	req, err := http.NewRequest(http.MethodPost, baseURL+path,
 		strings.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
+	setHeaders(req, agentSigHeaders(sender, senderPriv, http.MethodPost, path))
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
@@ -2941,27 +3209,34 @@ func liveRegisterStatus(client *http.Client, baseURL, id, webhookJSON string) (i
 	return resp.StatusCode, nil
 }
 
-// registerAgentWithWebhook registers the probe identity with a webhook attached and
-// NO delivery_mode, so the accept the server gives it IS the server's own default.
-// A 409 means the identity was already registered this run — still observable.
-func registerAgentWithWebhook(client *http.Client, baseURL, id, webhookURL string) error {
-	body := fmt.Sprintf(`{"id":%q,"public_key":%q,"webhook":{"url":%q}}`, id, strings.Repeat("ab", 32), webhookURL)
+// registerAgentWithWebhook registers the probe identity with a REAL keypair and a
+// webhook attached, NO delivery_mode, so the accept the server gives it IS the
+// server's own default. The private half is returned because INT-018 makes an
+// ordinary delivery prove its sender: the probe signs with it. A 409 means the
+// identity was already registered this run — still observable, but the caller
+// gets no key, which the probe reports rather than absorbing.
+func registerAgentWithWebhook(client *http.Client, baseURL, id, webhookURL string) (ed25519.PrivateKey, error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	body := fmt.Sprintf(`{"id":%q,"public_key":%q,"webhook":{"url":%q}}`, id, hex.EncodeToString(pub), webhookURL)
 	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents", strings.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
-		return fmt.Errorf("register %s with webhook: status %d, want 201", id, resp.StatusCode)
+		return nil, fmt.Errorf("register %s with webhook: status %d, want 201", id, resp.StatusCode)
 	}
-	return nil
+	return priv, nil
 }
 
 // ---------- negative control ----------
@@ -3085,9 +3360,19 @@ func TestDocsClaimsDetectorNegativeControl(t *testing.T) {
 		"```",          // 16
 		"",             // 17
 		doccheckMarker, // 18 (d) no fenced block after it
+		"",             // 19
+		doccheckMarker, // 20 (e) declares a posture this replay cannot provide
+		"```bash",      // 21
+		// 22 — the block declares the gate off, but the caller wires only the
+		// default server. Replaying it there would measure the wrong posture, so
+		// the detector must REFUSE the block and say why.
+		"CR_REQUIRE_AGENT_SIG=false ./bin/crier serve",
+		"curl -s $BASE/health   # -> 200", // 23
+		"```",                             // 24
 	}, "\n")
 
-	res, executed, verdicts := replayDocRecipes("SYNTHETIC-RECIPES.md", synthetic, baseURL, &counting)
+	res, executed, verdicts := replayDocRecipes("SYNTHETIC-RECIPES.md", synthetic,
+		replayServers{defaultPosture: replayServer{baseURL: baseURL, client: &counting}})
 
 	if !has(res, "line=3", "carries no verdict") {
 		t.Errorf("negative control (a): a marked block whose curl step carries no '# -> NNN' verdict was NOT reported: %v", msgs(res))
@@ -3101,11 +3386,14 @@ func TestDocsClaimsDetectorNegativeControl(t *testing.T) {
 	if !has(res, "line=18", "no following fenced code block") {
 		t.Errorf("negative control (d): a marker with no fenced block was NOT reported: %v", msgs(res))
 	}
+	if !has(res, "line=22", "no gate-off server wired") {
+		t.Errorf("negative control (e): a block that declares CR_REQUIRE_AGENT_SIG=false was NOT refused when no gate-off server was wired (it must never be replayed against the enforcing server): %v", msgs(res))
+	}
 	if executed < 3 {
 		t.Errorf("negative control (c): only %d recipe step(s) executed — the replay never issued the requests", executed)
 	}
-	if verdicts != 2 {
-		t.Errorf("negative control: counted %d verdicts, want 2 (block a has none, b has 1, c has 1, d has none)", verdicts)
+	if verdicts != 3 {
+		t.Errorf("negative control: counted %d verdicts, want 3 (block a has none, b 1, c 1, d none, e 1)", verdicts)
 	}
 	if hits.Load() < 1 {
 		t.Error("negative control (c): NO request reached the live server — the positive control is vacuous")
@@ -3119,6 +3407,75 @@ func TestDocsClaimsDetectorNegativeControl(t *testing.T) {
 	}
 	t.Logf("recipe replay negative control: executed=%d verdicts=%d live_server_requests=%d findings=%d",
 		executed, verdicts, hits.Load(), len(res))
+}
+
+// TestDoccheckPostureRouting is the positive control for the posture seam: the
+// SAME unsigned delivery is replayed as 401 against the enforcing server (the
+// block says nothing) and as 201 against a server the block asks for with
+// "CR_REQUIRE_AGENT_SIG=false". Routing is what makes both verdicts true at
+// once; if a block were silently replayed on the wrong server, one of the two
+// would fail — which is exactly why the docs state posture per block instead of
+// retargeting the claims.
+func TestDoccheckPostureRouting(t *testing.T) {
+	parallelBoot(t)
+	defaultBase, defaultClient, _ := bootDocsClaimsServer(t)
+	registerAgent(t, defaultClient, defaultBase, "bob")
+
+	gateOffBase, gateOffClient, _ := bootDocsClaimsServerWith(t, map[string]string{"CR_REQUIRE_AGENT_SIG": "false"})
+	registerAgent(t, gateOffClient, gateOffBase, "bob")
+
+	synthetic := strings.Join([]string{
+		"# posture routing",
+		"",
+		doccheckMarker,
+		"```bash",
+		`curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"p":1}}'   # -> 401`,
+		"```",
+		"",
+		doccheckMarker,
+		"```bash",
+		"# this walkthrough is not about sender proof",
+		"CR_REQUIRE_AGENT_SIG=false ./bin/crier serve",
+		`curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"p":1}}'   # -> 201`,
+		"```",
+	}, "\n")
+
+	res, executed, verdicts := replayDocRecipes("SYNTHETIC-POSTURE.md", synthetic, replayServers{
+		defaultPosture: replayServer{baseURL: defaultBase, client: defaultClient},
+		gateOff: func() (replayServer, error) {
+			return replayServer{baseURL: gateOffBase, client: gateOffClient}, nil
+		},
+	})
+	for _, r := range res {
+		t.Errorf("posture routing finding: %s", r.msg)
+	}
+	if executed != 2 || verdicts != 2 {
+		t.Fatalf("replay executed=%d verdicts=%d, want 2 and 2 — both postures must really be exercised", executed, verdicts)
+	}
+}
+
+// TestDoccheckContradictoryPostureIsReported proves a block that names BOTH
+// postures is refused: one block is replayed against one server, so silently
+// taking the last line would hide a mixed recipe.
+func TestDoccheckContradictoryPostureIsReported(t *testing.T) {
+	synthetic := strings.Join([]string{
+		doccheckMarker,
+		"```bash",
+		"CR_REQUIRE_AGENT_SIG=false ./bin/crier serve",
+		`curl -s $BASE/agents/bob/inbox   # -> 401`,
+		"CR_REQUIRE_AGENT_SIG=true",
+		"```",
+	}, "\n")
+	res, _, _ := replayDocRecipes("SYNTHETIC-MIXED.md", synthetic, replayServers{})
+	found := false
+	for _, r := range res {
+		if strings.Contains(r.msg, "contradictory boot postures") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a block declaring both postures was NOT reported: %v", res)
+	}
 }
 
 // countingTransport records every request that actually reaches the wire, so the

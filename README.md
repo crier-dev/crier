@@ -878,15 +878,25 @@ curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application
 # that identity under a new id. Re-running the quickstart with the same key is safe:
 # skip the register step, or delete the agent first to start over (DF-CRIER-302).
 
-# 2. Deliver a message to its inbox. `ttl_seconds` is optional: absent keeps the
-#    24h default, 0 means the message never expires and is reported as
+# 2. Deliver a message to its inbox. An inbox delivery is agent-owned exactly
+#    like a read, so under the default posture it proves the SENDER's key: sign
+#    "POST\n/agents/agent-1/inbox\n<unix seconds>" with agent-1's own key and
+#    send the trio. Unsigned it answers 401 before anything is stored — the
+#    body's `sender` claim is not proof.
+#    `ttl_seconds` is optional: absent keeps the 24h default, 0 means the message
+#    never expires and is reported as
 #    "expires_at":null (the key is present, the value is null — never the zero
 #    time). `transport` in the body is
 #    always present: "inbox" here, "webhook" when the target has a webhook
 #    configured (then the inbox is bypassed — see §5 of the architecture notes).
+DELIVER_TS=$(date +%s)
 curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${DELIVER_TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-agent.key POST /agents/agent-1/inbox "$DELIVER_TS")" \
   -d '{"payload":{"hello":"world"},"ttl_seconds":3600}'
 # 201 {"id":"...","transport":"inbox","expires_at":"..."}  (expires_at = created_at + ttl_seconds)
+# Drop the trio and it is 401 missing agent signature headers: reaching the
+# inbox as a named sender requires that identity's key (INT-018).
 
 # 3. Publish to a relay topic (pub/sub). `X-Agent-ID` is the header the relay
 #    requires — the per-agent rate limiter keys on it and a publish without it
@@ -903,8 +913,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/relay/publish "$
 # 202 — drop the trio and it is still 202; drop `X-Agent-ID` and it is 401.
 
 # 4. Retrieve — agent-scoped endpoints require per-agent request signatures by
-#    default (CR_REQUIRE_AGENT_SIG=true). This covers inbox retrieve/ack/stats
-#    AND DELETE /agents/{id}. Headers:
+#    default (CR_REQUIRE_AGENT_SIG=true). This covers inbox delivery (step 2),
+#    inbox retrieve/ack/stats AND DELETE /agents/{id}. Headers:
 #      X-Agent-ID  agent id
 #      X-Agent-Ts  unix seconds (must be within ±30s of the server clock)
 #      X-Agent-Sig hex ed25519 signature over "METHOD\nPATH\nTS"
@@ -1702,18 +1712,28 @@ done
 ```
 
 Then the scenario, against a running server. `make docs-check` (CR-GAP-062)
-replays every `curl` line of the marked blocks below against its own
-default-posture server, so each `# -> NNN` verdict is measured rather than
-asserted (the setup lines above are yours to run — the gate boots its own
-server). The `public_key` values are the ones a recorded run of that loop
-printed: paste the hex your own run printed into the same field and every status
-below is identical.
+replays every `curl` line of the marked blocks below against its own server, so
+each `# -> NNN` verdict is measured rather than asserted (the setup lines above
+are yours to run — the gate boots its own server). The `public_key` values are
+the ones a recorded run of that loop printed: paste the hex your own run printed
+into the same field and every status below is identical.
+
+**This walkthrough starts Crier with `CR_REQUIRE_AGENT_SIG=false`**, and each
+block below says so in its opening comment: the subject here is detection and
+containment, not sender proof, so the deliveries it makes carry no signature.
+That is a deliberate posture, not an omission — on a server with the gate on (the
+default) an unsigned delivery is refused `401` before the detection layer sees
+it, because ordinary inbox delivery now proves the sender's key too (INT-018).
+A deployment that keeps the gate on signs these same deliveries with the
+`peer-N.key` files the loop above wrote; this walkthrough trades that signature
+for the raw unsigned traffic the detectors are easiest to read on.
 
 The cast — seven agents, each registered with the public half of its own keygen
 key:
 
 <!-- doccheck -->
 ```bash
+# Server posture for this walkthrough: CR_REQUIRE_AGENT_SIG=false (see above).
 curl -s -X POST $BASE/agents \
      -d '{"id":"peer-1","public_key":"f746c357e41d2cfa1da2ef87943af5beac435ef339de65a85b57d86338fc2e65"}'   # -> 201
 curl -s -X POST $BASE/agents \
@@ -1736,6 +1756,7 @@ in 60s) and `new_peer_burst` (3 first-ever pairs in 60s) thresholds measure:
 
 <!-- doccheck -->
 ```bash
+# Server posture for this walkthrough: CR_REQUIRE_AGENT_SIG=false (see above).
 curl -s -X POST $BASE/agents/peer-1/inbox \
      -d '{"sender":"compromised","payload":{"x":1}}'   # -> 201
 curl -s -X POST $BASE/agents/peer-2/inbox \
@@ -1754,6 +1775,7 @@ separately:
 
 <!-- doccheck -->
 ```bash
+# Server posture for this walkthrough: CR_REQUIRE_AGENT_SIG=false (see above).
 curl -s $BASE/alerts     # -> 200
 curl -s -X POST $BASE/agents/compromised/kill-switch \
      -d '{"reason":"fan-out to 5 new peers"}'   # -> 200
@@ -1765,6 +1787,7 @@ that refused:
 
 <!-- doccheck -->
 ```bash
+# Server posture for this walkthrough: CR_REQUIRE_AGENT_SIG=false (see above).
 curl -s -X POST $BASE/agents/peer-1/inbox \
      -d '{"sender":"compromised","payload":{"x":1}}'   # -> 403
 curl -s -X POST $BASE/agents/compromised/inbox \
@@ -1775,6 +1798,7 @@ And the signed log the operator keeps still verifies end to end:
 
 <!-- doccheck -->
 ```bash
+# Server posture for this walkthrough: CR_REQUIRE_AGENT_SIG=false (see above).
 curl -s $BASE/delivery-log/verify     # -> 200
 ```
 
@@ -1805,6 +1829,13 @@ claimable messages first; messages of equal priority keep arrival order, and the
 default queue is plain FIFO — so a client that never sends the field sees exactly
 the ordering it saw before the field existed (`"priority":0` is not even on the
 wire: the key is omitted at the default).
+
+None of the deliveries below carries a signature — with the sender gate on (the
+default) each one is refused `401` before the priority is even read, so the
+statuses shown are what a **signed** delivery gets. Run the block against a
+server started with `CR_REQUIRE_AGENT_SIG=false` to see them unsigned, or add
+the trio from the [quickstart](#quick-start) (`X-Agent-ID` = the sender, whose
+key signs `POST\n/agents/{id}/inbox\n<ts>`).
 
 ```bash
 BASE=http://127.0.0.1:8767
@@ -1838,6 +1869,11 @@ curl -s -X POST $BASE/agents/agent-1/inbox -d '{"payload":{},"priority":10}'
 `CR_RATE_LIMIT_GLOBAL_PER_MINUTE` (default **0 = no budget**) is a shed on the
 delivery path itself, across every agent and every sender. Set it and a delivery
 over budget is refused before any transport, guard call or store write:
+
+The same posture applies here: an unsigned delivery is refused `401` at the
+sender gate, which runs before this budget, so the `201`/`429` pair below is what
+**signed** deliveries get (or what any delivery gets on a server started with
+`CR_REQUIRE_AGENT_SIG=false`).
 
 ```bash
 export CR_RATE_LIMIT_GLOBAL_PER_MINUTE=3
@@ -1959,6 +1995,12 @@ The two isolation properties are the point, and both are measured:
   traffic cannot consume the process-wide guard concurrency or trip the shared
   circuit for the realms that are guarded.
 
+Both deliveries here are ordinary inbox deliveries, so with the sender gate on
+(the default) they must be signed by the sender they name; unsigned they answer
+`401` before the namespace field is read, and the `403 NAMESPACE_MISMATCH` below
+is what a signed crossing attempt gets. Run the block with
+`CR_REQUIRE_AGENT_SIG=false` to see it unsigned.
+
 ```bash
 BASE=http://127.0.0.1:8767
 # register into a realm (a realm the server does not declare is refused)
@@ -1999,7 +2041,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` — see `internal/middleware/auth.go`) require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_SERVICE_DELIVERY_ALLOWLIST` | _(unset — legacy delivery)_ | Exact directed `sender>recipient,...` pairs. Every listed recipient mandates registered-sender Ed25519 proof over method/path/time plus the exact raw-body SHA-256, within ±30s. Body sender must match signed X-Agent-ID; human fields/reply_to cannot grant service authority. See [signed service deliveries](docs/service-delivery-auth.md). |
 | `CR_SERVICE_DELIVERY_AUDIENCE` | _(unset — required iff the allowlist is nonempty)_ | Relay audience for [signed service deliveries](docs/service-delivery-auth.md) — **required when `CR_SERVICE_DELIVERY_ALLOWLIST` is nonempty** (startup fails without it) and ignored when the allowlist is empty/unset. Clients send it as the `X-Crier-Audience` header on every protected delivery; a missing or mismatched value is refused `401` before the allowlist pair is consulted, and signing clients (crier-mcp bridge, Python client) fold it into the signature transcript. Pick one stable opaque name per relay and share it with every service client, e.g. `internal` or `partner-integrators` — it identifies the intended relay, it is not a secret. |
-| `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |
+| `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints: inbox **delivery** (the sender the body names must prove that key — INT-018), inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}. Set `false` only for trusted single-user dev setups. |
 | `CR_REQUIRE_MESH_AUTH` | `false` | Require the ed25519 challenge/response handshake on `GET /mesh/connect/{agentID}` (DF-CRIER-287): a connecting peer must sign a single-use nonce with the private key whose public half the registry holds for that agent id, and is not admitted (and not listed by `GET /mesh/peers`) until the signature verifies. **Default off, deliberately** — existing single-host clients do no handshake, and turning it on requires every connecting agent to hold its key. With it on, a `REQUEST` whose `source.agent_id` is not the authenticated peer is refused `FORBIDDEN` and a reply may only come from the peer the request was addressed to. See [Authentication (opt-in)](#authentication-opt-in) for the migration note. |
 | `CR_MESH_AUTH_TIMEOUT_S` | `10` | How long a mesh connect challenge stays valid — the client must answer with `AUTH_RESPONSE` inside this window, after which the server answers `AUTH_FAILED` and closes the socket. Only read when `CR_REQUIRE_MESH_AUTH=true`. |
 | `CR_MESH_ALLOWED_ORIGINS` | _(unset — all origins allowed)_ | The **mesh's own** WebSocket `Origin` allowlist (`scheme://host:port`, comma-separated; `*` allows all), separate from `CR_WS_ALLOWED_ORIGINS` — which keeps covering the relay. When set, a mesh upgrade that *carries* an `Origin` header must name a listed origin (otherwise `403` before any frame), while a client that sends no `Origin` at all — every agent client, including this repo's — still connects. `GET /status` reports the mode as `mesh_origin_policy`. |

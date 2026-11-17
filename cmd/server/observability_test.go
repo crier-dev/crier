@@ -243,6 +243,12 @@ func TestMetricsIncrementOnLiveTraffic(t *testing.T) {
 	t.Setenv("CR_ENABLE_PPROF", "")
 	t.Setenv("CR_ENABLE_METRICS", "true")
 	t.Setenv("CR_GUARD_ENABLED", "false") // no LLM on the deliver path
+	// INT-018: this test measures metric movement, not the auth posture — its
+	// probe agent is registered with a FIXED placeholder key it holds no
+	// private half for, so the delivery is made unsigned under the legacy
+	// posture. Enforcement itself is covered by internal/registry's
+	// deliver_sender_sig_test.go.
+	t.Setenv("CR_REQUIRE_AGENT_SIG", "false")
 	baseURL := bootObservabilityServer(t)
 	client := &http.Client{Timeout: 10 * time.Second}
 
@@ -310,6 +316,9 @@ func TestWebhookOutcomeMetricIncrements(t *testing.T) {
 	t.Setenv("CR_ENABLE_PPROF", "")
 	t.Setenv("CR_ENABLE_METRICS", "true")
 	t.Setenv("CR_GUARD_ENABLED", "false")
+	// INT-018: the webhook metric is the subject; the probe delivery is
+	// unsigned and holds no signing key, so enforcement is explicitly off.
+	t.Setenv("CR_REQUIRE_AGENT_SIG", "false")
 
 	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
@@ -427,6 +436,10 @@ func TestGuardDecisionsMetricIncrements(t *testing.T) {
 	t.Setenv("CR_ENABLE_METRICS", "true")
 	t.Setenv("CR_GUARD_ENABLED", "true")
 	t.Setenv("DEEPSEEK_API_KEY", "")
+	// INT-018: metric accounting is the subject here, not sender auth; the
+	// probe key is a placeholder with no private half, so the delivery stays
+	// unsigned under the legacy posture.
+	t.Setenv("CR_REQUIRE_AGENT_SIG", "false")
 	baseURL := bootObservabilityServer(t)
 	client := &http.Client{Timeout: 15 * time.Second}
 

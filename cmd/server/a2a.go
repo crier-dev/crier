@@ -836,7 +836,7 @@ func (h *a2aHandler) deliverTo(agentID string, req *a2a.DeliveryRequest, parent 
 	if err != nil {
 		return 0, nil, fmt.Errorf("encode the crier deliver request: %w", err)
 	}
-	inner, err := http.NewRequestWithContext(parent, http.MethodPost,
+	inner, err := http.NewRequestWithContext(registry.InProcessDelivery(parent), http.MethodPost,
 		"/agents/"+agentID+"/inbox", bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, fmt.Errorf("build the crier deliver request: %w", err)

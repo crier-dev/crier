@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -13,6 +15,20 @@ import (
 
 	"github.com/crier-dev/crier/internal/permissions"
 )
+
+// signedDeliverHeaders proves the sender key over the deliver transcript
+// ("<METHOD>\n<path>\n<ts>") so the delivery passes INT-018's sender gate when
+// per-agent signing is enforced. The transcript does not cover the body, so the
+// headers stay valid for the envelope sendAs merges before sending.
+func signedDeliverHeaders(agentID string, priv ed25519.PrivateKey, path string) map[string]string {
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	sig := ed25519.Sign(priv, []byte(http.MethodPost+"\n"+path+"\n"+ts))
+	return map[string]string{
+		HeaderAgentID:  agentID,
+		HeaderAgentTS:  ts,
+		HeaderAgentSig: hex.EncodeToString(sig),
+	}
+}
 
 func TestDispatchPeekSnapshotsDoNotMutateHints(t *testing.T) {
 	t.Parallel()
@@ -101,7 +117,12 @@ func TestDispatchAuthorizedRouterCompletesOnlyOneMessage(t *testing.T) {
 	mem.agents[cr36Scheduler].PublicKey = HexKey(schedulerPub)
 	a.handler.SetRequireAgentSig(true)
 	for i := 0; i < 2; i++ {
-		status, body := a.sendAs(t, cr36Router, "prin_sched", cr36Scheduler, dispatchBody(cr36ExplicitModel, cr36ExplicitProvider, ""), nil)
+		// Deliveries are signed by the agent they claim to come from: with
+		// enforcement on the ordinary deliver path proves the sender key too
+		// (INT-018).
+		status, body := a.sendAs(t, cr36Router, "prin_sched", cr36Scheduler,
+			dispatchBody(cr36ExplicitModel, cr36ExplicitProvider, ""),
+			signedDeliverHeaders(cr36Router, routerKey, "/agents/"+cr36Router+"/inbox"))
 		require.Equal(t, http.StatusCreated, status, body)
 	}
 	router := NewRemoteStore(a.server.URL, cr36Router, "", WithSigningKey(routerKey))
@@ -111,7 +132,8 @@ func TestDispatchAuthorizedRouterCompletesOnlyOneMessage(t *testing.T) {
 	require.Len(t, batch, 2)
 	reply, err := json.Marshal(map[string]any{"payload": map[string]string{"result": "completed"}, "reply_to": batch[0].ID})
 	require.NoError(t, err)
-	status, body := a.sendAs(t, cr36Scheduler, "prin_router", cr36Router, string(reply), nil)
+	status, body := a.sendAs(t, cr36Scheduler, "prin_router", cr36Router, string(reply),
+		signedDeliverHeaders(cr36Scheduler, schedulerKey, "/agents/"+cr36Scheduler+"/inbox"))
 	require.Equal(t, http.StatusCreated, status, body)
 	answers, _, err := scheduler.Retrieve(cr36Scheduler, time.Minute, 10)
 	require.NoError(t, err)

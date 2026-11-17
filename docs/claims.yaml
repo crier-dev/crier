@@ -818,7 +818,12 @@ claims:
     # HandleUpdateAgent, which calls the same requireAgent gate as DELETE).
     # The anchor is the corrected sentence; the probe drives the newly
     # documented surface itself.
-    quote: "require per-agent ed25519 signatures on agent-scoped endpoints: inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}`"
+    # INT-018: the row now also names inbox DELIVERY, because ordinary delivery
+    # proves the sender's registered key under this same knob (the sender the
+    # body names must be the signed X-Agent-ID). The probe and its 401
+    # expectation are unchanged — PATCH /agents/{id} is still the measured
+    # surface — so this anchor retargets the prose, not the assertion.
+    quote: "require per-agent ed25519 signatures on agent-scoped endpoints: inbox delivery (the sender's own key, INT-018), inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}`"
     expect: "401"
     xfail: null
   - id: STATUS-GUIDE-WEBHOOK-UNKNOWN-FIELD-400
@@ -899,7 +904,10 @@ claims:
   - id: ROUTE-GUIDE-EXTERNAL-INBOX-DELIVER
     kind: route
     doc: docs/integration-guide.md
-    quote: "| Deliver into the inbox | `POST /agents/{id}/inbox` | open | bearer | bearer — **no signature** |"
+    # INT-018: the deliver row now carries the sender's signature requirement —
+    # ordinary delivery proves the key of the sender the body names. The route
+    # probe is unchanged (only a 404 fails); the anchor follows the corrected row.
+    quote: "| Deliver into the inbox | `POST /agents/{id}/inbox` | open | bearer | bearer **+ signature** (the sender's own key; INT-018) |"
     expect: "/agents/{id}/inbox"
     xfail: null
   - id: ROUTE-GUIDE-EXTERNAL-INBOX-RETRIEVE
@@ -1008,9 +1016,12 @@ claims:
   - id: ROUTE-GUIDE-MUSTER-DELIVER
     kind: route
     doc: docs/integration-guide.md
-    # INT-MUSTER-002/003: deliver needs NO signature in any configuration — that
-    # is what makes the inbox a mailbox a generated producer can write to.
-    quote: '| `POST /agents/{id}/inbox` (deliver) | bearerAuth | `201` — **no signature in any configuration** | — |'
+    # INT-MUSTER-002/003 claimed deliver as signature-free in every configuration,
+    # because it was. INT-018 put the sender gate on ordinary delivery, so the row
+    # now states the measured pair — 401 unsigned on a config C relay (nothing
+    # stored), 201 once the sender's key signs — and names the spec gap: the
+    # operation does not declare agentSignature yet while the relay enforces it.
+    quote: '| `POST /agents/{id}/inbox` (deliver) | bearerAuth — **enforced at runtime, scheme not yet declared** | `401` (nothing stored) | `201` |'
     expect: "/agents/{id}/inbox"
     xfail: null
   - id: ROUTE-GUIDE-MUSTER-RETRIEVE

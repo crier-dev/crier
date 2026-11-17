@@ -22,7 +22,7 @@ MUSTER_BRIDGE_REQUIRE_SIG=false bash examples/muster-bridge/run-demo.sh   # conf
 |------|--------|----------|
 | 3/9 | discover the spec — the two served documents | `GET /openapi.json` → 200, `GET /openapi.yaml` → 200 (both auth-exempt: a spec fetch needs no token) |
 | 4/9 | register the consumer with its ed25519 public key | `POST /agents` → 201 **unsigned**; without `public_key` → 400 `{"error":"public_key is required"}` in config C |
-| 5/9 | deliver two messages into its inbox | `POST /agents/{id}/inbox` → 201, 201 **unsigned** |
+| 5/9 | deliver two messages into its inbox | `POST /agents/{id}/inbox` → 201, 201 — **signed as the sender** in config C, **unsigned** in config B |
 | 6/9 | retrieve — `GET /agents/{id}/inbox` | config C: **401** unsigned (`missing agent signature headers`); config B: 200 with the batch |
 | 7/9 | sign the request — the leg no generated client can do | signed retrieve → 200, with the repo's OpenSSL 3 helper over `"METHOD\n<path>\n<unix-seconds>"` |
 | 8/9 | ack the lease, then drain-check | signed `POST /agents/{id}/inbox/ack` → 204, `GET /agents/{id}/inbox/stats` → 200 |
@@ -39,7 +39,7 @@ MUSTER_BRIDGE_REQUIRE_SIG=false bash examples/muster-bridge/run-demo.sh   # conf
 | `GET /status` | 200 (401 without the token) | — |
 | `GET /agents`, `GET /agents/{id}` | 200 (401 without the token) | — |
 | `POST /agents` | 201 | — |
-| `POST /agents/{id}/inbox` (deliver) | 201 — no signature in any config | — |
+| `POST /agents/{id}/inbox` (deliver) | **401** — the sender must prove its key (config C); 201 unsigned in config B | 201 |
 | `GET /relay/topics`, `GET /mesh/peers`, `GET /fed/peers` | 200 | — |
 | `POST /relay/publish` | 202 | — |
 | `GET /agents/{id}/inbox` (retrieve) | **401** | 200 |
@@ -48,10 +48,13 @@ MUSTER_BRIDGE_REQUIRE_SIG=false bash examples/muster-bridge/run-demo.sh   # conf
 | `PATCH /agents/{id}` | **401** | 200 |
 | `DELETE /agents/{id}` | **401** | 204 |
 
-The spec and the live server agree on that split, including
-`GET /agents/{id}/inbox/stats`: `docs/openapi.yaml` declares `agentSignature` on
-it and an unsigned call is refused with 401 (INT-MUSTER-003 was filed because an
-earlier note believed that operation was unsigned — it is not).
+The spec and the live server agree on that split for the five declared
+operations, including `GET /agents/{id}/inbox/stats`: `docs/openapi.yaml` declares
+`agentSignature` on it and an unsigned call is refused with 401 (INT-MUSTER-003
+was filed because an earlier note believed that operation was unsigned — it is
+not). One row is enforced without being declared: ordinary **delivery** proves the
+sender's key (INT-018) even though the deliver operation does not yet declare
+`agentSignature` — until it does, treat deliver as one of the signed operations.
 
 With `MUSTER_BRIDGE_REQUIRE_SIG=false` (config B) the same matrix is measured
 with enforcement off: the five signature-required operations answer 200 / 200 /
@@ -68,10 +71,10 @@ end.
 generated from the spec can set headers; it cannot sign with a key it does not
 have, and the server binds the signature to the method, the path and the
 `X-Agent-ID` (a signature minted for one path is refused on another; a
-signature presented as a different agent is refused 403). That is why step 7/9
-uses the repo's documented OpenSSL 3 helper — see the integration guide §3
-(signing helper) and §10 (this path), and `examples/demo.sh` for the same
-helper in the register/deliver/retrieve/ack round trip.
+signature presented as a different agent is refused 403). That is why steps 5/9
+(deliver) and 7/9 (retrieve) use the repo's documented OpenSSL 3 helper — see the
+integration guide §3 (signing helper) and §10 (this path), and `examples/demo.sh`
+for the same helper in the register/deliver/retrieve/ack round trip.
 
 ## Requirements and knobs
 

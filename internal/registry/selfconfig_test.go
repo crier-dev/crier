@@ -510,6 +510,18 @@ func TestDeliver_WebhookConfigure_PassScenario(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The controller identity (agent-a) with its OWN registered key: the
+	// configure delivery below is an ordinary inbox delivery and, with
+	// per-agent signing enforced (INT-018), it must prove the sender key the
+	// body names — the same way agent-b proves its key on the PATCH.
+	controllerPub, controllerPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Register(&Agent{ID: "agent-a", PublicKey: HexKey(controllerPub)}); err != nil {
+		t.Fatal(err)
+	}
+
 	handler := NewHandler(store)
 	handler.SetRequireAgentSig(true)
 	driver := webhook.NewDriver(webhook.NewClient(2*time.Second, nil), webhook.NewMemoryQueue(), webhook.DriverConfig{
@@ -526,7 +538,8 @@ func TestDeliver_WebhookConfigure_PassScenario(t *testing.T) {
 	defer ts.Close()
 	crierURL = ts.URL
 
-	// The controller delivers a configure directive (blocking).
+	// The controller delivers a configure directive (blocking), signed with
+	// its own registered key (INT-018: ordinary deliver proves its sender).
 	payload := json.RawMessage(`{"directive":"enable solver-v2","target_capability":"solver-v2","schema":{"response_map":"raw"}}`)
 	dbody, _ := json.Marshal(deliverRequest{
 		Payload:      payload,
@@ -534,7 +547,17 @@ func TestDeliver_WebhookConfigure_PassScenario(t *testing.T) {
 		DeliveryMode: "blocking",
 		Kind:         webhook.KindConfigure,
 	})
-	resp, err := http.Post(ts.URL+"/agents/agent-b/inbox", "application/json", bytes.NewReader(dbody))
+	dts := fmt.Sprintf("%d", time.Now().Unix())
+	dsig := ed25519.Sign(controllerPriv, []byte("POST\n/agents/agent-b/inbox\n"+dts))
+	dreq, err := http.NewRequest(http.MethodPost, ts.URL+"/agents/agent-b/inbox", bytes.NewReader(dbody))
+	if err != nil {
+		t.Fatalf("deliver configure: build request: %v", err)
+	}
+	dreq.Header.Set("Content-Type", "application/json")
+	dreq.Header.Set(HeaderAgentID, "agent-a")
+	dreq.Header.Set(HeaderAgentTS, dts)
+	dreq.Header.Set(HeaderAgentSig, hex.EncodeToString(dsig))
+	resp, err := http.DefaultClient.Do(dreq)
 	if err != nil {
 		t.Fatalf("deliver configure: %v", err)
 	}
