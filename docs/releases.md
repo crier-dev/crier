@@ -288,6 +288,23 @@ Tier-1 battery does not cover (gofmt, shell/YAML, Makefile/Dockerfile, MCP
 launcher stdout). The committed E2E battery (`scripts/e2e-battery.sh`) is the
 widest local gate.
 
+### Reading a coverage red
+
+`make coverage-check` (and `make coverage`) echo the suite's full `go test`
+output and retain it in `.coverage-test-output.log` at the repo root —
+gitignored, so it never dirties the tree; override the path with
+`COVERAGE_LOG=`. Nothing is cut to a fixed window any more, so a failure is
+never hidden by how far down the log it sits. When the suite is red the target
+names the failing package import paths, the failing test names, and the total
+measured from that failed run beside the 70 % threshold, then prints the
+retained log's path — the Coverage CI job's failing step identifies its own
+cause instead of needing a re-run. A green run prints the parseable one-liner
+
+    coverage: NN.N percent (threshold 70.0 percent)
+
+`make coverage-selftest` proves both shapes on scratch fixtures, including one
+whose failing package and test sit below 40+ lines of suite output.
+
 ## What not to do
 
 - **Do not re-tag a published version.** Two commits under one version number
