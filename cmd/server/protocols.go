@@ -1,5 +1,7 @@
 // protocols.go — the ONE place a protocol surface is mounted
-// (specs/CRIER-PROTOCOLS.md §3, INT-007).
+// (specs/CRIER-PROTOCOLS.md §3; the mounted set per gate combination is pinned
+// by TestProtocolRouteCensusParity against cmd/server/testdata/protocol-census.json,
+// spec §2 R-A1).
 //
 // The five first-wave adapters (relay, mesh, a2a, dagger, federation) live
 // here because they mount through the unexported registration helpers that
@@ -163,16 +165,25 @@ func (p daggerProtocol) RegisterRoutes(r *mux.Router, _ protocol.Deps) error {
 
 // federationProtocol mounts the /fed/peers listing.
 //
-// Enabled reproduces the pre-refactor mounting exactly (main.go's
-// `peerService == nil` branch): the listing is mounted on EVERY boot where
-// the peer-records management surface (CR-CHAT-023, configureFederationPeers
-// in federation_peers.go) does not own /fed/* — with no federation configured
-// at all it still answers, listing this relay alone. Spec §3's gate formula
-// (`len(Links) > 0 || RecordsFile != ""`) does not describe that behavior —
-// and the binding route-census parity (§2 R-A1, §7.1) requires byte-identical
-// routes — so parity wins and the deviation is recorded in the INT-007
-// report. CR_FED_LINKS changes the handler's client, not the mounted set:
-// the census is insensitive to the fed-links axis either way.
+// Enabled is the shipped mounting rule, and the spec §3 row is its authority
+// (INT-023): the listing mounts on EVERY boot where no peer-records file is
+// configured — with no federation configured at all it still answers, listing
+// this relay alone, exactly as the pre-refactor `peerService == nil` branch
+// did. Set CR_FED_RECORDS_FILE and the peer-records management surface
+// (CR-CHAT-023, configureFederationPeers in federation_peers.go) owns every
+// /fed/* path itself, GET /fed/peers included, so this adapter mounts nothing
+// and no path is served by two registrations.
+//
+// The pre-census formula (`len(Links) > 0 || RecordsFile != ""`) is NOT the
+// rule: on a bare boot (no links, no records file) it would leave the server
+// with no /fed/peers at all, which contradicts the whole-server route census
+// spec §2 R-A1 binds — TestProtocolRouteCensusParity against
+// cmd/server/testdata/protocol-census.json records GET /fed/peers as mounted
+// on every combination it pins. TestFederationGateMatrix pins the rule across
+// (CR_FED_LINKS set/unset) × (CR_FED_RECORDS_FILE set/unset), config read,
+// mounted set and booted-server ownership alike, so a future inversion goes
+// red. CR_FED_LINKS changes the handler's client, not the mounted set: the
+// census is insensitive to the fed-links axis either way.
 type federationProtocol struct {
 	cfg       *config.Config
 	fedClient *federation.Client

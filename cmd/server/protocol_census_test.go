@@ -42,6 +42,11 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/gorilla/mux"
+
+	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/federation"
 )
 
 var censusUpdate = flag.Bool("census-update", false, "rewrite the protocol route-census golden from a live boot")
@@ -152,7 +157,8 @@ var censusPaths = []censusPath{
 	// Federation protocol. The /fed/peers listing is mounted on every boot
 	// where the peer-records management surface (CR_FED_RECORDS_FILE) does
 	// not own /fed/*; CR_FED_LINKS changes the handler's client, not the
-	// mounted set.
+	// mounted set. The four (links × records) positions of that rule are
+	// pinned directly by TestFederationGateMatrix (spec §3, R-A7).
 	{methods: []string{"GET"}, path: "/fed/peers", probeURL: "/fed/peers"},
 }
 
@@ -399,6 +405,164 @@ func TestRelayAndMeshGatesRemoveTheirRoutes(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestFederationGateMatrix pins the federation row of spec §3 — and the code's
+// ONLY federation predicate — across both axes the gate can read:
+// (CR_FED_LINKS set/unset) × (CR_FED_RECORDS_FILE set/unset). The rule
+// (spec §2 R-A1, R-A7): the legacy /fed/peers listing mounts exactly when no
+// peer-records file is configured; with one configured, the operator-managed
+// peer-records surface owns /fed/* and the adapter mounts nothing. This is why
+// the pre-census `len(Links) > 0 || RecordsFile != ""` formula is wrong — at
+// links=off/records=off it would leave a bare boot with no /fed/peers at all,
+// contradicting the whole-server census the golden pins.
+//
+// Each position asserts two independent things, and the records axis is then
+// proved once more against a REAL boot:
+//
+//  1. the CONFIG READ — config.LoadFrom maps CR_FED_RECORDS_FILE onto the
+//     field Enabled() reads, so a renamed/mistyped variable shows here;
+//  2. the PROTOCOL LAYER's mounted set — the /fed/peers route exists in the
+//     mux registerProtocols builds exactly when Enabled() is true;
+//  3. the BOOTED SERVER's owner of GET /fed/peers — the legacy listing answers
+//     200 with a `peers` array when the adapter owns it, and the operator-gated
+//     peer-records surface refuses with FED_OPERATOR_REQUIRED when records mode
+//     owns it. The path itself is mounted in both postures (records mode
+//     replaces the listing, it does not orphan the path), which is why a bare
+//     "404 means off" probe could not pin this gate on its own. This level runs
+//     once per RECORDS position, not per combo: CR_FED_LINKS changes the
+//     listing handler's client, never which surface owns the path.
+func TestFederationGateMatrix(t *testing.T) {
+	instanceKey := docsClaimsInstanceKey(t)
+
+	for _, tc := range []struct {
+		name        string
+		links       string
+		recordsOn   bool
+		wantEnabled bool
+	}{
+		{name: "links=off,records=off", links: "", recordsOn: false, wantEnabled: true},
+		{name: "links=on,records=off", links: "http://127.0.0.1:1", recordsOn: false, wantEnabled: true},
+		{name: "links=off,records=on", links: "", recordsOn: true, wantEnabled: false},
+		{name: "links=on,records=on", links: "http://127.0.0.1:1", recordsOn: true, wantEnabled: false},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			var recordsFile string
+			if tc.recordsOn {
+				recordsFile = filepath.Join(t.TempDir(), "federation-peers.json")
+			}
+			lookup := func(key string) string {
+				switch key {
+				case "CR_FED_LINKS":
+					return tc.links
+				case "CR_FED_RECORDS_FILE":
+					return recordsFile
+				}
+				return ""
+			}
+
+			// (1) The config read: the env axis reaches the field the gate reads.
+			cfg, err := config.LoadFrom(lookup)
+			if err != nil {
+				t.Fatalf("config.LoadFrom: %v", err)
+			}
+			if got := cfg.Federation.RecordsFile == ""; got != !tc.recordsOn {
+				t.Fatalf("CR_FED_RECORDS_FILE=%q loaded as RecordsFile=%q — the axis did not reach the field the gate reads",
+					recordsFile, cfg.Federation.RecordsFile)
+			}
+			if got := (federationProtocol{cfg: &cfg}).Enabled(); got != tc.wantEnabled {
+				t.Errorf("federationProtocol.Enabled() = %v with CR_FED_LINKS=%q CR_FED_RECORDS_FILE=%q, want %v (spec §3, R-A7)",
+					got, tc.links, recordsFile, tc.wantEnabled)
+			}
+
+			// (2) The protocol layer's mounted set.
+			deps := testDeps(t)
+			deps.Config = &cfg
+			deps.LocalPeer = func() federation.Peer { return federation.Peer{} }
+			if len(cfg.Federation.Links) > 0 {
+				deps.FedClient = federation.NewClient(cfg.Federation.Links, 0, "")
+			}
+			r := mux.NewRouter()
+			if err := registerProtocols(r, deps, nil); err != nil {
+				t.Fatalf("registerProtocols: %v", err)
+			}
+			walked, err := routeWalkCensus(r)
+			if err != nil {
+				t.Fatalf("walk mux: %v", err)
+			}
+			mounted := 0
+			for _, entry := range walked {
+				if entry == "GET /fed/peers" {
+					mounted++
+				}
+			}
+			if want := map[bool]int{true: 1, false: 0}[tc.wantEnabled]; mounted != want {
+				t.Errorf("protocol layer mounted GET /fed/peers %d time(s), want %d — the mounted set must follow Enabled() (spec §3, R-A7)\nprotocol routes:\n%s",
+					mounted, want, strings.Join(walked, "\n"))
+			}
+		})
+	}
+
+	// (3) The booted server's owner of the path, once per records position.
+	t.Run("boot:records=off", func(t *testing.T) {
+		assertFederationPeersOwnership(t, "", "", true)
+	})
+	t.Run("boot:records=on", func(t *testing.T) {
+		assertFederationPeersOwnership(t, instanceKey, filepath.Join(t.TempDir(), "federation-peers.json"), false)
+	})
+}
+
+// assertFederationPeersOwnership boots the real server in the named records
+// posture and asserts WHO answers GET /fed/peers: the legacy listing (200 with
+// a `peers` array) when the federation adapter owns the path, the
+// operator-gated peer-records surface (FED_OPERATOR_REQUIRED) when records mode
+// does.
+func assertFederationPeersOwnership(t *testing.T, instanceKey, recordsFile string, wantListing bool) {
+	t.Helper()
+
+	base := startTestServerWithEnv(t, map[string]string{
+		"CR_FED_LINKS":         "",
+		"CR_FED_RECORDS_FILE":  recordsFile,
+		"CR_FED_SELF_KEY_FILE": instanceKey,
+		"CR_A2A_ENABLED":       "",
+		"CR_DAGGER_URL":        "",
+	})
+
+	resp, err := http.Get(base + "/fed/peers")
+	if err != nil {
+		t.Fatalf("GET /fed/peers: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read GET /fed/peers body: %v", err)
+	}
+	// The path is mounted in BOTH postures: records mode replaces the listing,
+	// it does not remove the route.
+	if resp.StatusCode == http.StatusNotFound {
+		t.Fatalf("GET /fed/peers answered 404 with CR_FED_RECORDS_FILE=%q — the path must exist in both postures: listing when the adapter owns it, peer records when records mode does",
+			recordsFile)
+	}
+	if wantListing {
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET /fed/peers status %d, want 200 — the legacy listing owns the path when the gate is on (body: %s)", resp.StatusCode, body)
+		}
+		var listed struct {
+			Peers []json.RawMessage `json:"peers"`
+		}
+		if err := json.Unmarshal(body, &listed); err != nil || len(listed.Peers) == 0 {
+			t.Errorf("GET /fed/peers body is not the legacy listing (err=%v, peers=%d): %s", err, len(listed.Peers), body)
+		}
+		return
+	}
+	if resp.StatusCode == http.StatusOK {
+		t.Errorf("GET /fed/peers answered 200 with CR_FED_RECORDS_FILE set — records mode must own the path, not the listing (body: %s)", body)
+	}
+	if !strings.Contains(string(body), "FED_OPERATOR_REQUIRED") {
+		t.Errorf("GET /fed/peers status %d, body does not name FED_OPERATOR_REQUIRED — expected the operator-gated peer-records surface: %s",
+			resp.StatusCode, body)
 	}
 }
 

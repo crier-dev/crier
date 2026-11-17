@@ -1,6 +1,6 @@
 # CRIER-PROTOCOLS — First-class protocol adapter layer (A2A included)
 
-Status: DRAFT v2 · 2026-11-17 · INT-022 gave relay and mesh real gates (`CR_RELAY_ENABLED` / `CR_MESH_ENABLED`, default `true`) · v1 2026-11-08 · Owner ruling 2026-11-08 (multi-protocol/harness support) · INT-007
+Status: DRAFT v3 · 2026-11-17 · INT-023 made the §3 federation row the authority (the shipped `RecordsFile == ""` predicate is the rule, pinned by `TestFederationGateMatrix`) · v2 2026-11-17 · INT-022 gave relay and mesh real gates (`CR_RELAY_ENABLED` / `CR_MESH_ENABLED`, default `true`) · v1 2026-11-08 · Owner ruling 2026-11-08 (multi-protocol/harness support) · INT-007
 
 ## 1. Purpose
 
@@ -96,7 +96,7 @@ surface in the closed set is removable:
 | `mesh` | `cfg.MeshEnabled` — `CR_MESH_ENABLED` | `true` | `GET /mesh/connect/{agentID}` and `GET /mesh/peers`. Default ON for the same reason. This is the SURFACE gate; `CR_REQUIRE_MESH_AUTH` and `CR_MESH_ALLOWED_ORIGINS` keep constraining a mounted mesh and are untouched by it. |
 | `a2a` | `cfg.A2AEnabled` — `CR_A2A_ENABLED` | `false` | Two-half opt-in (`A2A-OPTION.md` §1/§4). |
 | `dagger` | `cfg.Dagger.URL != ""` — `CR_DAGGER_URL` | unset (= absent) | The surface IS a client of the named executor. |
-| `federation` | `cfg.Federation.RecordsFile == ""` | `true` | The `/fed/peers` listing mounts unless the peer-records management surface (`CR_FED_RECORDS_FILE`, `CHAT-FEDERATION.md`) owns `/fed/*`. Spec §3's older `len(Links) > 0 \|\| RecordsFile != ""` formula never described the mounted set — §2 R-A1 (byte-identical census) wins, and the deviation is recorded in the INT-007 report. `CR_FED_LINKS` changes the handler's client, not the mounted set. |
+| `federation` | `cfg.Federation.RecordsFile == ""` — `CR_FED_RECORDS_FILE` unset; any value, `auto` included, turns records mode on | `true` | The legacy `/fed/peers` listing. **Operator rule: leave `CR_FED_RECORDS_FILE` unset to get the federation listing; set it and the operator-managed peer-records surface replaces the listing on the same path.** The listing mounts on every boot where no records file is configured — with no federation configured at all it still answers, listing this relay alone — because that is the route set the binding whole-server census (§2 R-A1) pins: `TestProtocolRouteCensusParity` against `cmd/server/testdata/protocol-census.json` records `GET /fed/peers` as mounted on every combination it pins, so this adapter must mount it on a bare boot too. With `CR_FED_RECORDS_FILE` set, `configureFederationPeers` (`cmd/server/federation_peers.go`, `CHAT-FEDERATION.md`) owns every `/fed/*` path — `GET /fed/peers` included, answered through the operator gate — and this adapter mounts nothing, so no path is served by two registrations. `CR_FED_LINKS` changes the listing handler's client, never the mounted set. `TestFederationGateMatrix` (§7.6) pins all four `(links × records)` positions. |
 
 The two gates added by INT-022 are read in `Enabled()` only: `RegisterRoutes` is unchanged, and the
 services are still constructed at boot (a nil service with an enabled gate stays a startup refusal,
@@ -151,6 +151,17 @@ surface off must get it off.
 4. Test that a protocol whose `RegisterRoutes` returns an error prevents server start.
 5. Test that adding a new throwaway protocol implementing `Protocol` requires no edit to
    `cmd/server/main.go` (only `BuildAll`).
+6. **Federation gate matrix:** `TestFederationGateMatrix` pins the `federation` row of §3 across
+   `{CR_FED_LINKS set/unset} × {CR_FED_RECORDS_FILE set/unset}`. Every position asserts two
+   things: the config read (`config.LoadFrom` maps the variable onto the field the gate reads) and
+   the PROTOCOL LAYER's mounted set (the `/fed/peers` route exists exactly when `Enabled()` is
+   true). The records axis is then proved once more against a REAL boot, once per records
+   position: the legacy listing answers `200` with a `peers` array when the adapter owns the path,
+   and the operator-gated peer-records surface refuses with `FED_OPERATOR_REQUIRED` when records
+   mode owns it. The boot level does not vary `CR_FED_LINKS`, because that variable changes the
+   listing handler's client and never which surface owns the path. Inverting the predicate goes
+   red at the config read and the mounted set for every position it contradicts, and at the boot
+   level for the position it swaps, so the formula cannot drift back to the pre-census shape.
 
 ## 8. Coverage table
 
@@ -162,6 +173,7 @@ surface off must get it off.
 | R-A4 | New protocol needs no main.go edit | test: throwaway protocol via BuildAll only |
 | R-A5 | Disabled protocol = zero routes + one log line | test: census parity per gate combo |
 | R-A6 | Relay and mesh are removable like the other three | test: census combos `relay=off` / `mesh=off` / both off + `TestRelayAndMeshGatesRemoveTheirRoutes` (route-level 404 when off, 200 when on) |
+| R-A7 | The federation listing mounts exactly when no peer-records file is configured (`RecordsFile == ""`), and records mode replaces it rather than duplicating it | test: `TestFederationGateMatrix` — `(CR_FED_LINKS × CR_FED_RECORDS_FILE)` matrix over the config read, the protocol layer's mounted set, and the booted server's owner of `GET /fed/peers` |
 
 Out of scope (binding): gRPC or REST A2A bindings (A2A-OPTION §7 still binding); wrapping
 `harness.Registry` as a Protocol; MCP transport changes (stays a separate stdio binary).
