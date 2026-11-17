@@ -14,7 +14,7 @@ func TestGatedRouteTableIsUniqueAndNamesKnownConfig(t *testing.T) {
 	seen := map[string]bool{}
 	known := map[string]bool{
 		"CR_DAGGER_URL": true, "CR_DETECT_ENABLED": true,
-		"CR_PERMISSIONS_ADMIN_TOKEN": true,
+		"CR_PERMISSIONS_ADMIN_TOKEN": true, "CR_A2A_ENABLED": true,
 	}
 	for _, route := range gatedRoutes {
 		if seen[route.Path] {
@@ -101,6 +101,7 @@ func TestDefaultPostureNamesEveryGatedRefusal(t *testing.T) {
 		"CR_PERMISSIONS_ADMIN_TOKEN": "",
 		"CR_AUTH_TOKEN":              "",
 		"CR_REQUIRE_AGENT_SIG":       "false",
+		"CR_A2A_ENABLED":             "",
 	})
 	client := &http.Client{}
 	cases := []struct {
@@ -109,6 +110,8 @@ func TestDefaultPostureNamesEveryGatedRefusal(t *testing.T) {
 		status int
 		gate   string
 	}{
+		{http.MethodGet, "/.well-known/agent-card.json", http.StatusNotFound, "CR_A2A_ENABLED"},
+		{http.MethodPost, "/a2a", http.StatusNotFound, "CR_A2A_ENABLED"},
 		{http.MethodGet, "/dagger/runs", http.StatusNotFound, "CR_DAGGER_URL"},
 		{http.MethodGet, "/delivery-log", http.StatusNotFound, "CR_DETECT_ENABLED"},
 		{http.MethodPost, "/agents/gated-probe/kill-switch", http.StatusNotFound, "CR_DETECT_ENABLED"},

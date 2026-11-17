@@ -462,9 +462,15 @@ claims:
     # CRIER-TAGS-1 added GET /tags; CRIER-READS-1 added /sessions/<built-in function id>/reads and
     # its /unread sibling (CRIER-TAGS §3). CRIER-INGRESS-1 declared the
     # /ingress/messages path (CRIER-INGRESS §4), and HARNESS-CRIER-001 declared
-    # GET /harness/consumer-census, so the count is 71.
-    quote: "71 paths"
-    expect: 71
+    # GET /harness/consumer-census, so the count was 71.
+    # INT-A2A-002/003 then declared the two opt-in A2A surfaces the router has
+    # mounted behind CR_A2A_ENABLED since those rows shipped — GET
+    # /.well-known/agent-card.json and POST /a2a, one operation each, two NEW
+    # paths (the OPT-IN runtime gate is real, but they are declared operations
+    # in the document all the same, exactly as the dagger and detection routes
+    # are), so the count is 73.
+    quote: "73 paths"
+    expect: 73
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -513,9 +519,12 @@ claims:
     # CRIER-TAGS-1 added GET /tags; CRIER-READS-1 added /sessions/<built-in function id>/reads and
     # its /unread sibling (CRIER-READS §3). CRIER-INGRESS-1 added the one
     # POST /ingress/messages operation (CRIER-INGRESS §4), and HARNESS-CRIER-001
-    # added GET /harness/consumer-census, so the count is 90.
-    quote: "90 operations"
-    expect: 90
+    # added GET /harness/consumer-census, so the count was 90.
+    # INT-A2A-002/003 then declared the two opt-in A2A operations —
+    # a2aAgentCard (GET /.well-known/agent-card.json) and a2aJSONRPC
+    # (POST /a2a) — so the count is 92.
+    quote: "92 operations"
+    expect: 92
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count

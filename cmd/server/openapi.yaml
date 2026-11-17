@@ -32,6 +32,8 @@ tags:
     description: WebSocket peer mesh — connect and list peers.
   - name: federation
     description: "Cross-relay federation: the peer list, plus the OPT-IN operator-managed instance lifecycle (CR_FED_RECORDS_FILE) — pin a peer, patch its state/direction/label, and run the mutual instance handshake that links it. Every lifecycle operation is operator-gated and absent unless the peer store is configured."
+  - name: a2a
+    description: "A2A (agent-to-agent) interoperability as an OPT-IN extra (CR_A2A_ENABLED, specs/A2A-OPTION.md): the well-known discovery Agent Card and the JSON-RPC 2.0 binding, which is the ONLY A2A interface crier serves (no HTTP+JSON/REST binding, no third route). Both paths exist only while the switch is set — with it unset nothing A2A-related is registered and every existing route behaves exactly as before — and the switch is only half the gate: a request must also name an agent whose registry row opted in via its own `a2a` block. One crier origin hosts many agents, so A2A addresses its target with `tenant` = the registry id the card publishes as AgentInterface.tenant."
   - name: sessions
     description: "Chat sessions (CR-CHAT-019): the session object, the ordered cross-agent transcript, membership and fan-out into a session, per specs/CHAT-INTERFACE.md §4. Every surface is realm-scoped, and a message sent into a session is delivered through the SHIPPED inbox path — there is no second delivery path."
   - name: groups
@@ -1286,6 +1288,200 @@ paths:
         "403":
           description: "The named federation refusal: FED_OPERATOR_REQUIRED (operator credential absent or wrong), FED_HANDSHAKE_OUT_OF_ORDER (no pending challenge for this responder nonce — start was never run, or the process restarted), FED_HANDSHAKE_REPLAY (the challenge was already consumed), FED_HANDSHAKE_EXPIRED (challenge older than 30 s, or transcript timestamp outside ±30 s), FED_HANDSHAKE_NONCE_MISMATCH (the transcript does not match the pending challenge byte for byte), FED_NO_LINK (no operator-pinned peer with that initiator id), FED_PEER_REVOKED (the peer is revoked), FED_BAD_SIGNATURE (either proof fails, or the pinned key id no longer matches)."
         "404": {description: "This peer lifecycle surface is not mounted on this server: CR_FED_RECORDS_FILE is unset."}
+
+  # ── A2A interoperability (opt-in, INT-A2A-002/003) ──
+  # The TWO surfaces crier serves for A2A (agent-to-agent), and nothing else:
+  # the well-known discovery card and the JSON-RPC 2.0 binding (specs/
+  # A2A-OPTION.md §5.2, §5.4). Both exist ONLY while CR_A2A_ENABLED is set;
+  # with the switch unset neither path is registered at all and each answers
+  # the router's JSON 404 naming this gate.
+  #
+  # The flag is only HALF the gate: every request must also name an agent whose
+  # registry row opted in through its own `a2a` block
+  # (`{"a2a":{"enabled":true}}` on POST /agents or PATCH /agents/{id}), and an
+  # id that is not such a row is refused exactly as an unknown id is — the bus
+  # does not tell A2A clients which agents exist but stayed out.
+  #
+  # Neither path adds a requirement to any existing route: both inherit the
+  # deployment's middleware chain unchanged (so with CR_AUTH_TOKEN set they need
+  # the same Bearer header as everything else), and neither is on the auth-exempt
+  # list in internal/middleware/auth.go.
+  /.well-known/agent-card.json:
+    get:
+      x-crier-gate: CR_A2A_ENABLED
+      operationId: a2aAgentCard
+      tags: [a2a]
+      summary: Serve one agent's A2A Agent Card (discovery)
+      description: |-
+        The A2A Agent Card for ONE opted-in agent, projected from that agent's
+        registry row on every request by internal/a2a.BuildCard: there is no
+        card store, no cache and no copy that could disagree with
+        GET /agents/{id}. Skills are the row's capability tags verbatim
+        (`id`, `name` and `tags` are the tag; `description` states where the
+        entry comes from), `capabilities.streaming` is true because the
+        JSON-RPC binding served alongside this card answers
+        SendStreamingMessage, and `capabilities.pushNotifications` is true
+        exactly when the row carries a webhook — the push channel the A2A
+        push-configuration operations are a view over.
+
+        A crier origin hosts many agents on one origin, so the discovery path
+        cannot name one on its own: `agent_id` is REQUIRED and its absence is
+        400, which keeps "you did not say which agent" distinguishable from
+        "the route is not registered" (a plain 404).
+
+        The body is served as `application/a2a+json` with
+        `Cache-Control: private, max-age=60` and a content-derived `ETag` (the
+        SHA-256 prefix of the exact bytes served), so the steady state is a
+        conditional GET: echo the tag in `If-None-Match` and 304 comes back
+        with validators and no body. `private`, never `public` — the card is
+        served behind this server's own auth, so a shared cache must never hand
+        one client's authorized response to another.
+
+        `provider`, `iconUrl` and `signatures` are absent BY CONSTRUCTION: crier
+        has no provider identity to state, serves no icon, and does not compute
+        the JWS an AgentCardSignature is.
+      parameters:
+        - name: agent_id
+          in: query
+          required: true
+          description: The registry id whose card to serve — the same id the card then publishes as AgentInterface.tenant, which is the `params.tenant` an A2A JSON-RPC request addresses.
+          schema: {type: string}
+        - name: If-None-Match
+          in: header
+          required: false
+          description: Conditional-GET validator. The comparison is WEAK (RFC 9110 §13.1.2) and `*` matches any current card; a match answers 304 with the refreshed validators and no body.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The Agent Card for that agent — name/description/supportedInterfaces/version/capabilities/defaultInputModes/defaultOutputModes/skills always present, documentationUrl/securitySchemes/securityRequirements and capabilities.extensions only when crier has something to state.
+          headers:
+            Cache-Control:
+              description: '"private, max-age=60" — one client''s authorized card, never a shared one.'
+              schema: {type: string}
+            ETag:
+              description: A strong content-derived tag (quoted hex) — the served bytes hashed, so any change to the projection changes the tag.
+              schema: {type: string}
+          content:
+            application/a2a+json:
+              schema: {$ref: '#/components/schemas/A2AAgentCard'}
+        "304":
+          description: Not Modified — the request's If-None-Match covers the current card. Empty body; the validators are current.
+          headers:
+            ETag:
+              description: The current card's tag (the caller's copy is up to date).
+              schema: {type: string}
+        "400": {description: "Missing required query parameter agent_id (`agent_id` blank or absent) — an Agent Card is per agent, so this path cannot resolve one on its own."}
+        "401": {description: "No Authorization header, a non-Bearer scheme, or an invalid token (middleware refusal). This route is NOT auth-exempt."}
+        "404": {description: "No card here, and one answer for both causes: the id is not a registry row on this relay, OR the row has not opted in (`a2a.enabled` unset/false). Also the answer when this server was started without CR_A2A_ENABLED, in which case the path is not registered at all."}
+        "500": {description: "registry storage unavailable — the store could not answer, which is a different fact from \"no such agent\" and is never reported as 404."}
+  /a2a:
+    post:
+      x-crier-gate: CR_A2A_ENABLED
+      operationId: a2aJSONRPC
+      tags: [a2a]
+      summary: A2A JSON-RPC 2.0 binding — messages, task lifecycle and push-notification configuration
+      description: |-
+        The A2A JSON-RPC 2.0 binding (specs/A2A-OPTION.md §5.4): the interface
+        the served Agent Card advertises as AgentInterface.url with
+        `protocolBinding: JSONRPC`. ONE method — POST — serving every operation
+        of the protocol this server implements.
+
+        MESSAGE FRAMING. The answer is ALWAYS HTTP 200 with the binding's media
+        type and a JSON-RPC 2.0 envelope carrying either `result` or `error`:
+        the correlation is the request's `id`, and an HTTP status would be a
+        second, coarser answer to a question the JSON-RPC layer already answers
+        precisely (an unknown method, an invalid `params`, a refused delivery
+        and an unsupported A2A-Version are all 200s). Only failures that never
+        reach the JSON-RPC layer keep an HTTP status of their own: 415 for an
+        unsupported Content-Type, 413 for a body over 4 MiB (4 194 304 bytes),
+        400 for an unreadable body, 401 from the auth middleware and 404 when
+        this server was started without CR_A2A_ENABLED (path not registered).
+
+        A request's `id` is REQUIRED — this binding serves no JSON-RPC
+        notifications — and may be a string or a number. `jsonrpc` must be
+        "2.0"; envelope, `params` and every nested object are decoded STRICTLY,
+        so a misspelled member is refused (naming the field, e.g.
+        `message.parts[1].raw`) rather than ignored. Batch requests are refused
+        (-32600): every A2A operation here is one request.
+
+        A2A service parameters travel as headers, not as body members:
+        `A2A-Version` is negotiated BEFORE the method is looked at (a version
+        this server does not serve is -32009 whatever was asked for; absent,
+        this server's own version, and a minor/patch spelling of it, are
+        served), and `X-Agent-ID` names the SENDING agent for crier's own
+        delivery attribution.
+
+        ONE ORIGIN, MANY AGENTS. Every method's `params` names its target with
+        `tenant` — the registry id the Agent Card publishes as
+        AgentInterface.tenant. A tenant that names no opted-in row is refused
+        -32602 with the same message an unknown id gets, so A2A clients cannot
+        enumerate agents that stayed out of the protocol.
+
+        METHODS SERVED (the full set; anything else is -32601):
+
+        | method | params | result |
+        |---|---|---|
+        | `SendMessage` | A2ASendMessageParams | A2ASendMessageResponse — exactly one of `task` (the delivery was accepted; track it) or `message` (a blocking target answered inline) |
+        | `SendStreamingMessage` | A2ASendMessageParams | `text/event-stream`: one A2AStreamResponse per frame (a Message-only stream for an inline answer, otherwise the task first and then its status/artifact updates) |
+        | `GetTask` | A2AGetTaskParams | A2ATask |
+        | `ListTasks` | A2AListTasksParams | A2AListTasksResult |
+        | `CancelTask` | A2ACancelTaskParams | A2ATask in TASK_STATE_CANCELED |
+        | `SubscribeToTask` | A2ASubscribeToTaskParams | `text/event-stream`: the task, then A2ATaskStatusUpdateEvent / A2ATaskArtifactUpdateEvent frames until a terminal state |
+        | `CreateTaskPushNotificationConfig` | A2ACreatePushConfigParams | A2ATaskPushNotificationConfig |
+        | `GetTaskPushNotificationConfig` | A2APushConfigRefParams | A2ATaskPushNotificationConfig |
+        | `ListTaskPushNotificationConfigs` | A2AListPushConfigsParams | A2AListPushConfigsResponse |
+        | `DeleteTaskPushNotificationConfig` | A2APushConfigRefParams | A2ADeletePushConfigResult |
+
+        The task-lifecycle methods translate into crier's EXISTING record (an
+        A2A task IS an inbox entry; there is no second task store), and the
+        push-configuration methods are a VIEW over the agent's existing webhook
+        config written through PATCH /agents/{id}'s own handler — no second
+        store, no second delivery path. `GetExtendedAgentCard` is NOT served
+        here (-32601): the extended card is the one A2A surface still unbuilt.
+
+        STREAMING. A streaming method answers `text/event-stream` (200) with
+        `Cache-Control: no-store`; each frame is `data: <JSON-RPC response>`
+        followed by a blank line, and the budget for one stream is 120 s — the
+        same request-level ceiling crier applies elsewhere. Reaching the budget
+        is NOT a terminal state: the last frame says where the task stands and
+        that it is still open, and the client polls GetTask or re-subscribes.
+        HTTP-level refusals of a streaming request are ordinary JSON bodies
+        with their own status, exactly as for a non-streaming one.
+      parameters:
+        - name: A2A-Version
+          in: header
+          required: false
+          description: The client's A2A protocol version. Negotiated before the method is dispatched; absent, "1.0" and a minor/patch spelling of it are served (the protocol's own compatibility rule is major-scoped), anything else is JSON-RPC -32009 inside a 200.
+          schema: {type: string}
+        - name: X-Agent-ID
+          in: header
+          required: false
+          description: crier's own convention naming the SENDING agent for the delivery the request causes. It is delivery attribution only — the TARGET is always params.tenant — and is not an A2A protocol field.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/a2a+json:
+            schema: {$ref: '#/components/schemas/A2AJSONRPCRequest'}
+          application/json:
+            schema: {$ref: '#/components/schemas/A2AJSONRPCRequest'}
+          # No Content-Type at all is accepted as JSON; any OTHER explicit
+          # media type is 415 rather than a guess.
+      responses:
+        "200":
+          description: One JSON-RPC 2.0 response envelope (result or error — exactly one). A streaming method answers the SSE form instead.
+          content:
+            application/a2a+json:
+              schema: {$ref: '#/components/schemas/A2AJSONRPCResponse'}
+            text/event-stream:
+              description: 'SendStreamingMessage and SubscribeToTask only: Server-Sent Events, one `data: <JSON-RPC response>` frame per line group, `Cache-Control: no-store`, closed at a terminal task state or at the 120 s stream budget.'
+              schema:
+                type: string
+        "400": {description: "The request body could not be read at all. Every refusal the JSON-RPC layer can state — parse error (-32700), invalid request (-32600), method not found (-32601), invalid params (-32602), internal error (-32603), the A2A codes (-32001..-32009) and crier's own -32050 delivery refusal — arrives as HTTP 200 with an `error` envelope instead."}
+        "401": {description: "No Authorization header, a non-Bearer scheme, or an invalid token (middleware refusal). This route is NOT auth-exempt."}
+        "404": {description: "This server was started without CR_A2A_ENABLED, so the binding is not registered at all and the router answers its own 404 (which names the gate)."}
+        "413": {description: "The request body exceeds the 4 MiB (4 194 304 byte) binding ceiling. Refused with 413 instead of read into memory unbounded — this is a request-size ceiling, not a message-size policy."}
+        "415": {description: "An explicit Content-Type that is neither application/a2a+json nor application/json. A client that labelled its body something else did not mean to send JSON, so it is refused rather than guessed at."}
 
   # ── Agent Registry ──
   /agents:
@@ -8987,3 +9183,628 @@ components:
             enforced before parsing (a larger body is refused with 400 and
             nothing is contained).
 
+    # ── A2A (agent-to-agent) shapes, INT-A2A-002/003 ──
+    # Every member below is transcribed from internal/a2a's own Go structs
+    # (card.go, rpc.go, parts.go, send.go, task.go, push.go) and from what the
+    # two handlers in cmd/server serialize — not from a summary of the A2A
+    # specification. The JSON names are the camelCase the binding emits.
+    A2AAgentCard:
+      type: object
+      description: |-
+        The A2A AgentCard (spec §4.4.1) projected from ONE registry row. Field
+        presence follows §5.7: the REQUIRED members are always serialized,
+        optional ones only when crier has something to state — never as an
+        empty placeholder, which is also what keeps the body stable enough to
+        serve a content-derived ETag.
+      required: [name, description, supportedInterfaces, version, capabilities, defaultInputModes, defaultOutputModes, skills]
+      properties:
+        name:
+          type: string
+          description: The registry id, verbatim.
+        description:
+          type: string
+          description: |-
+            What the card describes and where it came from — the row's id and
+            its capability tags, plus the deployment's idempotency statement.
+            crier's registry stores no description field, so no agent-authored
+            prose is invented here.
+        supportedInterfaces:
+          type: array
+          description: The declared A2A interfaces. Today exactly one — the JSON-RPC binding.
+          items: {$ref: '#/components/schemas/A2AAgentInterface'}
+        version:
+          type: string
+          description: The build identity serving the card (internal/buildinfo). The registry row carries no version of its own, so this is the only version crier can state.
+        documentationUrl:
+          type: string
+          description: "`<origin>/docs` — the same self-contained API index the server hosts. Omitted when no absolute origin can be built."
+        capabilities: {$ref: '#/components/schemas/A2AAgentCapabilities'}
+        securitySchemes:
+          type: object
+          description: |-
+            The security schemes this deployment declares, keyed by crier's own
+            OpenAPI component names (`bearerAuth`, `agentSignature`).
+            `bearerAuth` is declared — and REQUIRED — only when CR_AUTH_TOKEN is
+            in force; `agentSignature` is only DECLARED when
+            CR_REQUIRE_AGENT_SIG is in force (a generic A2A client holds no
+            crier private key, so requiring it would advertise a scheme that
+            client must fail).
+          additionalProperties:
+            type: object
+            description: Exactly one member — the discriminated scheme (spec §4.5.1).
+            properties:
+              httpAuthSecurityScheme:
+                type: object
+                description: spec §4.5.3 — an RFC 7235-style HTTP authentication scheme.
+                required: [scheme]
+                properties:
+                  description: {type: string}
+                  scheme: {type: string, example: Bearer}
+                  bearerFormat: {type: string}
+              apiKeySecurityScheme:
+                type: object
+                description: spec §4.5.2 — an API-key-style header (crier's own X-Agent-Sig).
+                required: [location, name]
+                properties:
+                  description: {type: string}
+                  location: {type: string, example: header}
+                  name: {type: string, example: X-Agent-Sig}
+        securityRequirements:
+          type: array
+          description: |-
+            The requirement objects, each a map of scheme name to its scope
+            list. crier's bearer token has no scopes, and the list is emitted
+            explicitly EMPTY rather than dropped — "this scheme needs no
+            scopes" is the reading crier means.
+          items:
+            type: object
+            required: [schemes]
+            properties:
+              schemes:
+                type: object
+                additionalProperties:
+                  type: object
+                  required: [list]
+                  properties:
+                    list:
+                      type: array
+                      items: {type: string}
+        defaultInputModes:
+          type: array
+          description: The media types this agent accepts by default — `application/json` for every crier row.
+          items: {type: string}
+        defaultOutputModes:
+          type: array
+          description: The media types this agent produces by default — `application/json`.
+          items: {type: string}
+        skills:
+          type: array
+          description: One entry per capability tag on the registry row; the card invents no capability the row does not carry. Empty when the row advertises none.
+          items: {$ref: '#/components/schemas/A2AAgentSkill'}
+    A2AAgentInterface:
+      type: object
+      description: One declared A2A interface (spec §4.4.6).
+      required: [url, protocolBinding, protocolVersion]
+      properties:
+        url:
+          type: string
+          description: Absolute URL of the interface — `<origin>/a2a`, built from the origin the client actually reached this server on (crier sits behind whatever proxy the operator put in front of it, so it cannot guess a public hostname).
+        protocolBinding:
+          type: string
+          description: The binding kind. `JSONRPC` is the only one crier serves.
+          enum: [JSONRPC]
+        tenant:
+          type: string
+          description: The registry id. A client MUST include it as `params.tenant` of every request to this interface — the mechanism that routes one A2A request to the right agent on a bus hosting many.
+        protocolVersion:
+          type: string
+          description: The A2A protocol version this interface speaks (`1.0`).
+    A2AAgentCapabilities:
+      type: object
+      description: The capability set (spec §4.4.3). Both booleans are ALWAYS serialized so a reader sees the server's stated answer rather than inferring one from an omission.
+      required: [streaming, pushNotifications]
+      properties:
+        streaming:
+          type: boolean
+          description: True whenever this card is served at all — the JSON-RPC binding that ships with it answers SendStreamingMessage as Server-Sent Events, and a `false` here would (per §3.3.4) require the server to refuse an operation it really serves.
+        pushNotifications:
+          type: boolean
+          description: True exactly when the registry row carries a crier webhook — the push-delivery channel the A2A push-configuration operations are a view over. An agent with no webhook has no push channel and says so.
+        extensions:
+          type: array
+          description: A2A protocol extensions the agent declares (§4.6.1). Omitted when empty, and empty today — crier declares no extension.
+          items:
+            type: object
+            required: [uri]
+            properties:
+              uri: {type: string}
+              description: {type: string}
+              required: {type: boolean}
+              params: {type: object, additionalProperties: true}
+    A2AAgentSkill:
+      type: object
+      description: One of the agent's skills (spec §4.4.5), projected from a crier capability tag — one-way, and the registry stays the source of truth.
+      required: [id, name, description, tags]
+      properties:
+        id:
+          type: string
+          description: The capability tag verbatim — the identifier the agent publishes on the bus.
+        name:
+          type: string
+          description: The tag too; crier's registry stores tags, not display names.
+        description:
+          type: string
+          description: What the skill is and where it comes from — a fact about the row, not an invented capability claim (the registry carries no per-skill prose to quote).
+        tags:
+          type: array
+          description: The tag itself, because `tags` is the field §4.4.5 requires for keyword matching.
+          items: {type: string}
+    A2AJSONRPCRequest:
+      type: object
+      description: |-
+        A JSON-RPC 2.0 request envelope (§9.3). Decoding is STRICT: an unknown
+        member of this envelope, of `params`, or of any nested object is
+        refused (-32600 for the envelope, -32602 for `params`), never ignored.
+        A batch (a top-level array) is refused -32600.
+      required: [jsonrpc, method, id]
+      additionalProperties: false
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+          description: Must be exactly "2.0"; anything else is -32600.
+        id:
+          description: |-
+            The request's correlation id — REQUIRED, because this binding
+            serves no JSON-RPC notifications. A string or a number; null,
+            absent, an object or an array is -32600.
+          oneOf:
+            - type: string
+            - type: number
+        method:
+          type: string
+          description: The A2A operation name (see the operation's method table). An unknown name is -32601; `GetExtendedAgentCard` is not served.
+        params:
+          type: object
+          description: The method's own params object — one of the `A2A*Params` schemas in the method table. Its nested objects are decoded strictly too, and a refusal names the offending path (e.g. `message.parts[1].raw`).
+          additionalProperties: true
+    A2AJSONRPCResponse:
+      type: object
+      description: A JSON-RPC 2.0 response envelope. Exactly one of `result` and `error` is present (§9.4, §9.5); every response — result or error — is HTTP 200.
+      required: [jsonrpc, id]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id:
+          type: string
+          description: "The id of the request being answered — null only for a parse error, where no id could be read."
+        result:
+          description: |-
+            The method's result — the A2A*Result/A2A*Response schema the method
+            table names (for example A2ASendMessageResponse for SendMessage, an
+            A2ATask for GetTask, A2AListTasksResult for ListTasks). Absent on an
+            error response.
+        error: {$ref: '#/components/schemas/A2ARPCError'}
+    A2ARPCError:
+      type: object
+      description: |-
+        The JSON-RPC 2.0 error object (§9.5): a numeric code, a message, and
+        optional detail objects. Codes this binding can produce: -32700 parse
+        error, -32600 invalid request, -32601 method not found, -32602 invalid
+        params, -32603 internal error, -32001 task not found, -32002 task not
+        cancelable, -32003 push notifications not supported, -32004 unsupported
+        operation, -32009 version not supported, and crier's own implementation-
+        defined -32050 delivery refused (the delivery engine's verbatim answer,
+        with its status and body, for a refusal A2A has no name for).
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          description: The JSON-RPC / A2A numeric code (see the schema description for the set this binding produces).
+        message:
+          type: string
+          description: A human-readable sentence stating the refusal.
+        data:
+          type: array
+          description: |-
+            Detail objects, each carrying an `@type`: google.rpc.ErrorInfo
+            (`type.googleapis.com/google.rpc.ErrorInfo`, with `reason`, `domain`
+            and `metadata`), google.rpc.BadRequest
+            (`type.googleapis.com/google.rpc.BadRequest`, with one
+            `fieldViolations` entry per offending field), or crier's own
+            `type.googleapis.com/crier.DeliveryRefusal` carrying the delivery
+            engine's status (`crierStatus`) and body (`crierBody`).
+          items:
+            type: object
+            required: ["@type"]
+            properties:
+              "@type": {type: string}
+              reason: {type: string}
+              domain: {type: string}
+              metadata: {type: object, additionalProperties: {type: string}}
+              fieldViolations:
+                type: array
+                items:
+                  type: object
+                  required: [field, description]
+                  properties:
+                    field: {type: string}
+                    description: {type: string}
+              crierStatus: {type: integer}
+              crierBody:
+                description: The delivery engine's own response body, verbatim.
+    A2APart:
+      type: object
+      description: |-
+        One section of an A2A Message or Artifact (§4.1.6), in the JSON shape
+        A2A v1.0.0 serializes (camelCase). Exactly ONE of text | raw | url |
+        data must be present: none, or two, is -32602 naming the part's path.
+        Decoding is strict, so an unknown member is a refusal.
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+          description: Inline text content. The member is present EVEN WHEN the string is empty — a text part with empty content is not the same thing as a part with no content member.
+        raw:
+          type: string
+          description: Inline binary content, base64, carried as sent.
+        url:
+          type: string
+          description: A file reference. crier stores the URI and never dereferences it.
+        data:
+          description: Structured JSON content.
+        metadata:
+          type: object
+          additionalProperties: true
+        filename: {type: string}
+        mediaType: {type: string}
+    A2AMessage:
+      type: object
+      description: One unit of A2A communication (§4.1.4).
+      required: [messageId, role, parts]
+      additionalProperties: false
+      properties:
+        messageId:
+          type: string
+          description: The client's own message id.
+        contextId:
+          type: string
+          description: The conversation this message belongs to. crier supplies the task id when the client names no context, which §3.4.1 sanctions.
+        taskId:
+          type: string
+          description: The task this message addresses, when it addresses one. A message naming a task is answered ABOUT that task before anything is delivered — an unknown task is -32001, and a task that is terminal or still open is -32004 (crier cannot represent a continuation).
+        role:
+          type: string
+          enum: [ROLE_USER, ROLE_AGENT]
+          description: The sender's role. Any other value is -32602.
+        parts:
+          type: array
+          description: At least one part.
+          items: {$ref: '#/components/schemas/A2APart'}
+        metadata:
+          type: object
+          additionalProperties: true
+        extensions:
+          type: array
+          items: {type: string}
+        referenceTaskIds:
+          type: array
+          items: {type: string}
+    A2ATaskStatus:
+      type: object
+      description: The state, plus the optional message and timestamp (§4.1.2).
+      required: [state]
+      properties:
+        state:
+          type: string
+          description: |-
+            The A2A task lifecycle state, as the protoJSON enum NAME (§5.5).
+            Which state a task is in is read from crier's own record, and every
+            task a read returns names that record in
+            `metadata.crier.state_basis`.
+          enum:
+            - TASK_STATE_SUBMITTED
+            - TASK_STATE_WORKING
+            - TASK_STATE_COMPLETED
+            - TASK_STATE_FAILED
+            - TASK_STATE_CANCELED
+            - TASK_STATE_REJECTED
+            - TASK_STATE_UNSPECIFIED
+        message: {$ref: '#/components/schemas/A2AMessage'}
+        timestamp: {type: string, description: RFC 3339 UTC timestamp of the state change.}
+    A2ATask:
+      type: object
+      description: The core unit of action (§4.1.1). In crier the id IS the delivery's own message id — the inbox entry, or the pushed delivery — because there is no second task store to disagree with it.
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          description: The task id (= the inbox entry's message id).
+        contextId: {type: string}
+        status: {$ref: '#/components/schemas/A2ATaskStatus'}
+        artifacts:
+          type: array
+          items: {$ref: '#/components/schemas/A2AArtifact'}
+        history:
+          type: array
+          description: Recent messages, bounded by the request's `historyLength`.
+          items: {$ref: '#/components/schemas/A2AMessage'}
+        metadata:
+          type: object
+          description: |-
+            Task metadata, including crier's own `crier` block — the facts a
+            task's reported state came from (`state_basis`, `answered`,
+            `transport`, …) — so a client can see the evidence behind the
+            state rather than only the state.
+          additionalProperties: true
+    A2AArtifact:
+      type: object
+      description: A task output (§4.1.7).
+      required: [artifactId, parts]
+      properties:
+        artifactId: {type: string}
+        name: {type: string}
+        parts:
+          type: array
+          items: {$ref: '#/components/schemas/A2APart'}
+        metadata: {type: object, additionalProperties: true}
+    A2ASendMessageResponse:
+      type: object
+      description: The `result` of SendMessage (§9.4.1) — exactly one of a Task (the work is being processed and tracked) or a direct Message (a blocking target answered in one step, and there is no task to track). The oneof is enforced by construction, so one member is always present and the other absent.
+      properties:
+        task: {$ref: '#/components/schemas/A2ATask'}
+        message: {$ref: '#/components/schemas/A2AMessage'}
+    A2ASendMessageParams:
+      type: object
+      description: The `params` object of SendMessage and SendStreamingMessage (§3.2.1).
+      required: [tenant, message]
+      additionalProperties: false
+      properties:
+        tenant:
+          type: string
+          description: The target agent — the registry id the Agent Card publishes as AgentInterface.tenant. Required; a tenant naming no opted-in row is -32602 with the same message an unknown id gets.
+        message: {$ref: '#/components/schemas/A2AMessage'}
+        configuration:
+          type: object
+          description: §3.2.2's optional send configuration. Decoded strictly.
+          additionalProperties: false
+          properties:
+            acceptedOutputModes:
+              type: array
+              description: Read and NOT honoured — crier does not re-encode a payload, and a part's media type is the one the producing agent chose (§3.2.2 makes it a SHOULD).
+              items: {type: string}
+            taskPushNotificationConfig:
+              description: |-
+                An INLINE push configuration. Refused rather than silently
+                ignored, because a send delivers and never configures. An agent
+                with no push channel gets -32003; one that has a channel gets
+                -32004 naming the four operations that DO configure it.
+            historyLength:
+              type: integer
+              description: How many recent history messages the returned Task carries. Unset = this server's default; 0 = no history.
+            returnImmediately:
+              type: boolean
+              description: Ask not to wait. In this binding `true` maps onto crier's own request-level override — the deliver field `delivery_mode` set to `async` — so the delivery is queued instead of waiting on the target's webhook.
+        metadata:
+          type: object
+          description: |-
+            Request-level parameters, strictly decoded: an unknown key is
+            refused (-32602), never silently accepted. Accepted keys map onto
+            crier's existing deliver fields — `deliveryMode` (`sync` waits for
+            the target's webhook), `timeoutMs`, `ttlSeconds`, `sender`,
+            `requestId`, `threadId` — so none of them is a new behaviour.
+          additionalProperties: true
+    A2AGetTaskParams:
+      type: object
+      description: The `params` of GetTask (§9.4.3) — a read, which never leases the entry.
+      required: [tenant, id]
+      additionalProperties: false
+      properties:
+        tenant: {type: string, description: The target agent's registry id.}
+        id: {type: string, description: The task id. Required.}
+        historyLength:
+          type: integer
+          description: How many recent history messages to include. Unset = the server default; 0 = none.
+    A2AListTasksParams:
+      type: object
+      description: The `params` of ListTasks (§9.4.4) — the tasks ONE agent's inbox holds, with the specification's filters, ordering and cursor pagination.
+      required: [tenant]
+      additionalProperties: false
+      properties:
+        tenant: {type: string, description: The target agent's registry id.}
+        contextId: {type: string, description: Only tasks in this A2A context.}
+        status:
+          type: string
+          description: Only tasks in this state. An unknown state is -32602.
+          enum:
+            - TASK_STATE_SUBMITTED
+            - TASK_STATE_WORKING
+            - TASK_STATE_COMPLETED
+            - TASK_STATE_FAILED
+            - TASK_STATE_CANCELED
+            - TASK_STATE_REJECTED
+            - TASK_STATE_UNSPECIFIED
+        pageSize:
+          type: integer
+          description: Page size; out of range (1..100) is -32602.
+          minimum: 1
+          maximum: 100
+        pageToken:
+          type: string
+          description: The `nextPageToken` of the previous page.
+        historyLength:
+          type: integer
+          description: How many history messages each listed task carries.
+        statusTimestampAfter:
+          type: string
+          description: Only tasks whose status last moved after this RFC 3339 timestamp.
+        includeArtifacts:
+          type: boolean
+          description: Include each task's artifacts. False omits the member entirely; true includes it even when empty, which is what makes the parameter observable.
+    A2ACancelTaskParams:
+      type: object
+      description: The `params` of CancelTask (§9.4.5).
+      required: [tenant, id]
+      additionalProperties: false
+      properties:
+        tenant: {type: string, description: The target agent's registry id.}
+        id: {type: string, description: The task id to cancel. Required.}
+        metadata: {type: object, additionalProperties: true}
+    A2ASubscribeToTaskParams:
+      type: object
+      description: The `params` of SubscribeToTask (§9.4.6).
+      required: [tenant, id]
+      additionalProperties: false
+      properties:
+        tenant: {type: string, description: The target agent's registry id.}
+        id: {type: string, description: The task id to subscribe to. Required; a terminal task is -32004 (there are no updates left to stream).}
+    A2AListTasksResult:
+      type: object
+      description: The `result` of ListTasks (§3.1.4). `nextPageToken` is always present and empty on the final page, as the specification requires.
+      required: [tasks, nextPageToken, pageSize, totalSize]
+      properties:
+        tasks:
+          type: array
+          items: {$ref: '#/components/schemas/A2AListTask'}
+        nextPageToken: {type: string}
+        pageSize:
+          type: integer
+          description: The page size ACTUALLY used, so a page that ran out of items is not reported as a full one.
+        totalSize:
+          type: integer
+          description: How many tasks matched BEFORE pagination.
+    A2AListTask:
+      description: One task in a ListTasks response — a Task, plus `artifacts` when `includeArtifacts` asked for it (present even when empty in that case, and absent entirely otherwise).
+      allOf:
+        - {$ref: '#/components/schemas/A2ATask'}
+        - type: object
+          properties:
+            artifacts:
+              type: array
+              items: {$ref: '#/components/schemas/A2AArtifact'}
+    A2ATaskStatusUpdateEvent:
+      type: object
+      description: One status change on a stream (§4.2.1).
+      required: [taskId, contextId, status]
+      properties:
+        taskId: {type: string}
+        contextId: {type: string}
+        status: {$ref: '#/components/schemas/A2ATaskStatus'}
+        metadata: {type: object, additionalProperties: true}
+    A2ATaskArtifactUpdateEvent:
+      type: object
+      description: One artifact delta on a stream (§4.2.2).
+      required: [taskId, contextId, artifact]
+      properties:
+        taskId: {type: string}
+        contextId: {type: string}
+        artifact: {$ref: '#/components/schemas/A2AArtifact'}
+        append: {type: boolean}
+        lastChunk: {type: boolean}
+        metadata: {type: object, additionalProperties: true}
+    A2AStreamResponse:
+      type: object
+      description: |-
+        The streaming payload of ONE Server-Sent Events frame — the `result` of
+        the JSON-RPC envelope written as a `data:` line. Exactly one member is
+        set (the oneof is enforced by construction).
+      properties:
+        task: {$ref: '#/components/schemas/A2ATask'}
+        message: {$ref: '#/components/schemas/A2AMessage'}
+        statusUpdate: {$ref: '#/components/schemas/A2ATaskStatusUpdateEvent'}
+        artifactUpdate: {$ref: '#/components/schemas/A2ATaskArtifactUpdateEvent'}
+    A2ATaskPushNotificationConfig:
+      type: object
+      description: |-
+        The §4.3.1 push-notification configuration, in v1.0's FLATTENED shape
+        (the configuration's own fields live on the container). In crier this is
+        a VIEW over the agent's existing webhook config: one configuration per
+        agent, addressed by an id derived from (agent, url) — never stored, so
+        changing the url genuinely retires the old id.
+      required: [url]
+      properties:
+        tenant:
+          type: string
+          description: The agent this configuration belongs to (the registry id).
+        id:
+          type: string
+          description: The derived configuration id (`wh-` plus a digest of agent+url). A client-supplied id that is not this value is -32602 — there is no second configuration for it to address.
+        taskId:
+          type: string
+          description: The task the client addressed the operation with, echoed back. crier's push configuration is per AGENT, so the same configuration serves every task of that agent; no per-task configuration exists.
+        url:
+          type: string
+          description: The endpoint a notification is POSTed to — the agent's `webhook.url`, the same field that routes an ordinary delivery. Required on a create.
+        token:
+          type: string
+          description: Never returned and never accepted — crier's webhook config references a secret by name (auth_value_ref) rather than carrying a per-task token, and a token stored but never sent would be a silent lie.
+        authentication: {$ref: '#/components/schemas/A2APushAuthentication'}
+    A2APushAuthentication:
+      type: object
+      description: The §4.3.2 authentication detail — a scheme, never a credential.
+      required: [scheme]
+      additionalProperties: false
+      properties:
+        scheme:
+          type: string
+          description: An IANA HTTP authentication scheme (case-insensitive). crier's webhook config can honour `none` and `Bearer`; any other scheme is refused.
+        credentials:
+          type: string
+          description: NEVER accepted — a secret is not stored in a registry row, so a credential posted here is refused (-32602) rather than stored or silently dropped. Never returned either.
+    A2ACreatePushConfigParams:
+      type: object
+      description: The `params` of CreateTaskPushNotificationConfig (§3.1.7) — the flattened configuration the client asks for. Decoded strictly.
+      required: [tenant, url]
+      additionalProperties: false
+      properties:
+        tenant: {type: string, description: The target agent's registry id (required — a tenant naming no opted-in row is -32602).}
+        taskId: {type: string, description: The task the operation addresses. crier's configuration is per agent, so this is addressing, not a per-task configuration.}
+        id:
+          type: string
+          description: Optional; if sent it MUST equal the derived id, else -32602. Omit it and the server assigns it.
+        url: {type: string, description: The push endpoint. Required.}
+        token:
+          type: string
+          description: Not a field of a crier push configuration — a non-empty token is -32602 (use `authentication` for the scheme the notification is sent with).
+        authentication: {$ref: '#/components/schemas/A2APushAuthentication'}
+    A2APushConfigRefParams:
+      type: object
+      description: The `params` of GetTaskPushNotificationConfig and DeleteTaskPushNotificationConfig (§3.1.8, §3.1.10) — both address ONE configuration, by task AND id, and both members are required.
+      required: [tenant, taskId, id]
+      additionalProperties: false
+      properties:
+        tenant: {type: string, description: The target agent's registry id.}
+        taskId: {type: string, description: The task the client is addressing. Required.}
+        id: {type: string, description: The configuration id (the derived `wh-…` value). A value this server did not derive for the agent's current url is a not-found answer, not a silent match.}
+    A2AListPushConfigsParams:
+      type: object
+      description: The `params` of ListTaskPushNotificationConfigs (§3.1.9).
+      required: [tenant, taskId]
+      additionalProperties: false
+      properties:
+        tenant: {type: string, description: The target agent's registry id.}
+        taskId: {type: string, description: Required.}
+        pageSize:
+          type: integer
+          description: Must be at least 1 when sent (crier serves at most one configuration per agent, so the page is never full).
+        pageToken:
+          type: string
+          description: Must be absent or empty — crier serves at most one configuration per agent, so this operation is never paged and issues no page token; a non-empty value is -32602.
+    A2AListPushConfigsResponse:
+      type: object
+      description: The §3.1.9 result — this agent's push configurations. crier has exactly one per agent, so this is one entry or the operation answered -32003 (no push channel).
+      required: [configs]
+      properties:
+        configs:
+          type: array
+          items: {$ref: '#/components/schemas/A2ATaskPushNotificationConfig'}
+        nextPageToken:
+          type: string
+          description: Always absent — one configuration per agent means no next page and no token is ever issued.
+    A2ADeletePushConfigResult:
+      type: object
+      description: §3.1.10's confirmation of deletion (implementation-specific).
+      required: [deleted, id]
+      properties:
+        deleted: {type: boolean}
+        id: {type: string}
+        tenant: {type: string}

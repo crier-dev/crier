@@ -6,6 +6,13 @@ and gate table in `cmd/server/gates.go` is checked against that document.
 
 ## Optional surfaces
 
+- `CR_A2A_ENABLED` arms the A2A surfaces — `GET
+  /.well-known/agent-card.json?agent_id=<id>` and `POST /a2a`. When it is
+  unset, neither path is registered and a request receives JSON
+  `{"error":"not found","gate":"CR_A2A_ENABLED"}`. The switch is only half the
+  gate: both paths also refuse an agent whose registry row did not opt in
+  (404 for the card, `-32602` for the JSON-RPC binding), and that refusal is
+  deliberately indistinguishable from an unknown id.
 - `CR_DAGGER_URL` arms the `/dagger/*` control surface. When it is unset, a
   request receives JSON `{"error":"not found","gate":"CR_DAGGER_URL"}`.
 - `CR_DETECT_ENABLED` arms `/delivery-log`, `/delivery-log/verify`, `/alerts`,
