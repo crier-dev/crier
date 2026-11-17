@@ -4447,3 +4447,45 @@ tasks:
   status: complete
   created_at: '2026-11-17T07:54:06.352084+00:00'
   completed_at: '2026-11-17T08:32:29.633104+00:00'
+- id: INT-018-R1
+  title: 'Remaining unsigned-delivery surfaces after the sender gate: e2e-battery,
+    onboard-connection claim, demo.sh, A2A in-process exemption'
+  criteria:
+  - scripts/e2e-battery.sh either signs its deliveries under CR_REQUIRE_AGENT_SIG=true
+    or states the line posture and runs green; scripts/onboard-connection.sh claim
+    re-measured to the 401; examples/demo.sh signs or documents CR_REQUIRE_AGENT_SIG=false;
+    specs/A2A-OPTION.md records the in-process exemption decision; go build/vet/test
+    ./... -count=1 rc=0
+  status: complete
+  created_at: '2026-11-17T11:54:36.595436+00:00'
+  completed_at: '2026-11-17T13:04:30.334195+00:00'
+- id: INT-022
+  title: 'Relay and mesh have no enable gate: Enabled() returns true unconditionally'
+  criteria:
+  - Give relay and mesh real config gates defaulting ON, wired like the a2a/dagger/federation
+    gates, with a route-census parity subtest per gate combination proving routes
+    disappear when the gate is off (or record the exception in specs/CRIER-PROTOCOLS.md
+    section 3 with a docs-claims test); go build/vet/test ./... -count=1 rc=0
+  status: complete
+  created_at: '2026-11-17T11:54:37.904954+00:00'
+  completed_at: '2026-11-17T13:04:23.174535+00:00'
+- id: INT-023
+  title: Federation gate inverted vs spec section 3 and a dangling INT-007 report
+    citation
+  criteria:
+  - Reconcile code and spec in one stated direction, remove the dangling INT-007 report
+    reference from spec and code comments, and pin the chosen federation gate formula
+    across CR_FED_LINKS x CR_FED_RECORDS_FILE combinations with a red-proved test;
+    go build/vet/test ./... -count=1 rc=0
+  status: complete
+  created_at: '2026-11-17T12:37:21.931496+00:00'
+  completed_at: '2026-11-17T13:08:31.120079+00:00'
+- id: INT-025
+  title: A2A JSON-RPC SendMessage end-to-end proof
+  criteria:
+  - Verify that cmd/server tests exercise POST /a2a SendMessage through the task lifecycle
+    (submitted->working->completed) and that an evidence record exists; no new code
+    required if the premise is stale
+  status: complete
+  created_at: '2026-11-17T13:09:23.392669+00:00'
+  completed_at: '2026-11-17T13:09:27.303523+00:00'
