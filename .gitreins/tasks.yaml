@@ -4503,3 +4503,14 @@ tasks:
   status: complete
   created_at: '2026-11-17T15:39:51.405883+00:00'
   completed_at: '2026-11-17T16:14:18.400093+00:00'
+- id: README-018
+  title: 'INSTALL.md section 3 must stop declaring the prebuilt release install dead:
+    v0.6.1 publishes 8 verified assets and the quoted 404 URL answers 200'
+  criteria:
+  - 'INSTALL.md section 3 (Path A) rewritten to the measured live state: no dead-path
+    WARNING, no quoted 404 that now answers 200, install instructions a stranger can
+    follow today; every release/asset claim re-measured with gh release view or curl
+    -I; make docs-check exit 0; README.md untouched; only INSTALL.md in the commit'
+  status: complete
+  created_at: '2026-11-17T21:23:54.244288+00:00'
+  completed_at: '2026-11-17T21:45:29.144908+00:00'

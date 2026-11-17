@@ -2664,3 +2664,8 @@
 {"event_type":"task_updated","task_id":"RELEASE-027","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T18:16:59Z","detail":"{\"status\":\"in_progress\"}","id":1794692633205781929}
 {"event_type":"task_updated","task_id":"README-017","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T18:16:59Z","detail":"{\"status\":\"in_progress\"}","id":1794692633205781930}
 {"event_type":"task_updated","task_id":"README-018","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T18:16:59Z","detail":"{\"status\":\"in_progress\"}","id":1794692633205781931}
+{"event_type":"task_updated","task_id":"README-017","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T21:24:35Z","detail":"{\"status\":\"blocked\"}","id":1794692633205781932}
+{"event_type":"task_completed","task_id":"QA-CRIER-067","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T21:44:58Z","detail":"{\"status\":\"complete\"}","id":1794692633205781933}
+{"event_type":"task_completed","task_id":"README-018","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T21:51:46Z","detail":"{\"status\":\"complete\"}","id":1794692633205781934}
+{"event_type":"task_updated","task_id":"RELEASE-027","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T21:51:59Z","detail":"{\"status\":\"blocked\"}","id":1794692633205781935}
+{"event_type":"task_completed","task_id":"QA-CRIER-065","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T21:57:20Z","detail":"{\"status\":\"complete\"}","id":1794692633205781936}

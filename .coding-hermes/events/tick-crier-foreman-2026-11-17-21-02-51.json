@@ -1,0 +1,35 @@
+{
+  "tick": "crier-foreman-2026-11-17-21-02-51",
+  "mode": "wave (resume)",
+  "block": "QA-CRIER-068",
+  "wave_id": "crier-foreman-2026-11-17-17-45-01",
+  "resumed": true,
+  "resume_reason": "the 17-45-01 tick crashed after preparing the manifest, worktrees and briefs and marking six rows in_progress; no live worker process remained. A resumed wave re-dispatches the same six rows instead of composing a fresh one (doctrine 15/17).",
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg 7.07 -> 8 free -> min(6 lane cap, WAVE_BUDGET 11) = 6",
+  "worker_model_requested": "openai/gpt-6.1-terra@xkiro",
+  "worker_model_used": "glm-5.3-flash@zai-glm-default",
+  "model_substitution_evidence": "probe at 21:14Z: -m openai/gpt-6.1-terra --provider xkiro returned no answer text and state.db session_model_usage billed the turn to zai-org/GLM-4.7-Flash at https://api.synthetic.new/v1/ - the requested lane did not serve. Workers were then dispatched on glm-5.3-flash and served model identity verified at https://api.z.ai/api/coding/paas/v4.",
+  "rows": [
+    {"id": "README-018", "outcome": "closed", "attempts": 2, "commit": "7c979fcf3c5d4ac8b029967218e8a1aef1d53d54", "merge": "a54f1e6f", "judge": "attempt 1 FAIL at run 64204ea9 (preamble still declared the prebuilt path dead); attempt 2 PASS verdict 41def177", "gate": "make docs-check exit 0 on the merged tree"},
+    {"id": "QA-CRIER-067", "outcome": "closed", "commit": "d0d9442a4f318665ff9fae15910e2f1332224c60", "merge": "d675a5e", "judge": "PASS verdict 297f77a7 at run 2f3d7a62", "gate": "bash -n + new test_bunker_qa_compose_order.sh 26/26 PASS (20 FAIL against pre-fix 8f3f324)"},
+    {"id": "QA-CRIER-065", "outcome": "closed", "commit": "aa73102", "merge": "0b4c62a", "judge": "PASS verdict 39f12e50 at run 6fd59d79", "gate": "bash -n + new test_bunker_qa_spawn_secret.sh PASS"},
+    {"id": "QA-CRIER-8-R2", "outcome": "see verdict", "commit": "51a768d", "merge": "3ef447d", "judge": "tier-2 run started this tick", "gate": "bash -n + new test_bunker_qa_corruption_state.sh PASS on the merged tree"},
+    {"id": "README-017", "outcome": "blocked", "commit": "1f7d0a57 (worktree only, NOT merged)", "reason": "direction (b) removes the pinned install example, so scripts/check-release-pin.sh REFUSES and that gate is a release-workflow leg (.github/workflows/release.yml:141): merging would red the v0.7.0 release run. Honesty-now vs the RELEASE-017 pin gate is an owner/releng posture decision."},
+    {"id": "RELEASE-027", "outcome": "blocked (already landed)", "commit": "2168a41a (merged earlier at 366eb952)", "reason": "stale-premise re-dispatch: git merge-base --is-ancestor 2168a41a origin/main = YES. Restored to blocked on AC4 red-CI evidence, which needs a deliberately failing public CI run (owner/releng)."}
+  ],
+  "gates": {
+    "local": "PASS: crier go build ./... and go vet ./... exit 0 on the merged tree; make docs-check exit 0; coding-hermes-tools bash -n clean and all three new batteries PASS on the merged master",
+    "remote_ci": "green: crier-dev/crier runs on a54f1e6f (21:45Z) and c2e45331 show success (one job still in_progress at report time); no failure not created by this tick"
+  },
+  "remote_parity": {"origin_main": "0 unpushed after every push", "coding_hermes_tools_master": "0 unpushed (3ef447d)"},
+  "blockers": [
+    {"what": "README-017", "owner": "owner/releng posture decision on the RELEASE-017 pin gate", "disposition": "awaiting"},
+    {"what": "RELEASE-027 AC4 red-CI evidence", "owner": "owner/releng (forcing a red run on a public repo)", "disposition": "awaiting"},
+    {"what": "xkiro openai/* 503 model_maintenance until 2026-11-19T16:25Z", "owner": "provider", "disposition": "awaiting; lanes fall back to glm-5.3-flash"}
+  ],
+  "notes": [
+    "QA rows are implemented in the code-owning repo coding-hermes-tools; their tier-2 verdicts are mirrored into crier/.gitreins/history/<date>/<run>/ with PROVENANCE.json naming the source path, so the crier board binds the real verdict instead of inventing a crier-side run id.",
+    "boardctl cannot resolve a foreign-repo commit hash, so QA row SHAs are carried in worker_summary."
+  ]
+}

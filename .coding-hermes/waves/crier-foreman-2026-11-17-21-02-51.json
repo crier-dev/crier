@@ -1,0 +1,43 @@
+{
+  "tick_id": "crier-foreman-2026-11-17-21-02-51",
+  "project": "crier",
+  "block": "QA-CRIER-068",
+  "mode": "wave",
+  "resumes": "crier-foreman-2026-11-17-17-45-01",
+  "resume_evidence": {
+    "observed_at": "2026-11-17T21:1xZ (this tick)",
+    "live_worker_processes": 0,
+    "worktree_states": {
+      "crier-README-017": "1 commit ahead (1f7d0a57 docs(readme) pre-release disclosure) + dirty .gitreins/tasks.yaml",
+      "crier-README-018": "no commit; INSTALL.md modified, uncommitted; dirty .gitreins/tasks.yaml",
+      "crier-RELEASE-027": "no commit; only untracked scratch dir zzrel027tmp/",
+      "coding-hermes-tools-QA-CRIER-065": "no commit; bunker-qa.sh modified + new untracked test_bunker_qa_spawn_secret.sh",
+      "coding-hermes-tools-QA-CRIER-067": "clean, no work",
+      "coding-hermes-tools-QA-CRIER-8-R2": "clean, no work"
+    },
+    "classification": "prior tick crashed after manifest + worktree + brief preparation and after marking rows in_progress; workers never landed work (2 partial uncommitted trees, 3 empty). Doctrine 15: finish the crashed session's operation - resume the same wave id and the same six rows."
+  },
+  "wave_budget": 11,
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg 7.07 -> ceil=8 -> 8 free; min(6 lane cap, WAVE_BUDGET 11) = 6.",
+  "worker_model_requested": "openai/gpt-6.1-terra@xkiro",
+  "worker_model_used": "glm-5.3-flash@zai-glm-default",
+  "model_substitution": "Probe at 2026-11-17T21:14Z: hermes chat -m openai/gpt-6.1-terra --provider xkiro returned a session with NO answer text and state.db session_model_usage shows the turn was billed to zai-org/GLM-4.7-Flash at https://api.synthetic.new/v1/ - i.e. the requested xkiro/terra lane did not serve; the router silently redirected. Matches the 503 model_maintenance window (until 2026-11-19T16:25Z) recorded by ticks 15-26-50, 16-40-16 and 17-45-01. The prompt's own exception clause (switch only on actual unavailable/rate-limited failure) fires. glm-5.3-flash@zai-glm-default verified serving in prior ticks.",
+  "rows": [
+    {"id": "README-017", "action": "foreman-verify-merge", "worktree": "/home/kara/worktrees/crier-README-017", "branch": "wt/README-017", "base_sha": "1d3d45f0", "commit": "1f7d0a57", "note": "worker already committed direction (b); foreman verifies gates and decides merge vs park on the pin-gate refusal"},
+    {"id": "README-018", "action": "resume-worker", "worktree": "/home/kara/worktrees/crier-README-018", "branch": "wt/README-018", "base_sha": "1d3d45f0", "brief": "/home/kara/.hermes/cache/scratch/brief-crier-README-018.txt", "resume_note": "/home/kara/.hermes/cache/scratch/note-README-018.txt"},
+    {"id": "RELEASE-027", "action": "dispatch-worker", "worktree": "/home/kara/worktrees/crier-RELEASE-027", "branch": "wt/RELEASE-027", "base_sha": "1d3d45f0", "brief": "/home/kara/.hermes/cache/scratch/brief-crier-RELEASE-027.txt", "resume_note": "/home/kara/.hermes/cache/scratch/note-RELEASE-027.txt"},
+    {"id": "QA-CRIER-065", "action": "resume-worker", "worktree": "/home/kara/worktrees/coding-hermes-tools-QA-CRIER-065", "branch": "wt/QA-CRIER-065", "base_sha": "8f3f324", "brief": "/home/kara/.hermes/cache/scratch/brief-QA-CRIER-065.txt", "resume_note": "/home/kara/.hermes/cache/scratch/note-QA-CRIER-065.txt"},
+    {"id": "QA-CRIER-067", "action": "dispatch-worker", "worktree": "/home/kara/worktrees/coding-hermes-tools-QA-CRIER-067", "branch": "wt/QA-CRIER-067", "base_sha": "8f3f324", "brief": "/home/kara/.hermes/cache/scratch/brief-QA-CRIER-067.txt", "resume_note": "/home/kara/.hermes/cache/scratch/note-QA-CRIER-067.txt"},
+    {"id": "QA-CRIER-8-R2", "action": "dispatch-worker", "worktree": "/home/kara/worktrees/coding-hermes-tools-QA-CRIER-8-R2", "branch": "wt/QA-CRIER-8-R2", "base_sha": "8f3f324", "brief": "/home/kara/.hermes/cache/scratch/brief-QA-CRIER-8-R2.txt", "resume_note": "/home/kara/.hermes/cache/scratch/note-QA-CRIER-8-R2.txt"}
+  ],
+  "independence": "No depends_on edges among the six rows (verified from the rows: all depends_on empty). Repo split: three rows in /home/kara/coding-hermes-tools (distinct cells of bunker-qa.sh plus three distinct new test files), three in /home/kara/crier (README.md / INSTALL.md / Makefile+ci.yml - disjoint files; README-018 forbidden from renaming headings so the README inbound anchor cannot collide).",
+  "known_risks": [
+    "README-017: the committed direction (b) removes the pinned install example, so scripts/check-release-pin.sh now REFUSES (exit 2, zero matches never grade green). Merge is only allowed if that gate is not a CI leg; otherwise the change parks as a pre-cut blocker on RELEASE-026.",
+    "QA-CRIER-*/065/067/8-R2 live in coding-hermes-tools, not crier; their gitreins lifecycle tasks already exist and are in_progress (no duplicate creation).",
+    "workers never push; merges are foreman-only, serial, gated per merge",
+    "Deployed ~/.hermes/scripts/bunker-qa.sh diverges from the repo copy (~106 lines both directions) - never blind-deploy at merge."
+  ],
+  "created_at": "2026-11-17T21:20:00Z",
+  "status": "dispatching"
+}
