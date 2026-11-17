@@ -199,10 +199,11 @@ REG_BODY="$REG_BODY}"
 call POST "$BASE_URL$REG_PATH" "$REG_BODY"
 step register POST "$REG_PATH" "$MUSTER_REGISTER_PATH"
 
-# ── 2. deliver
+# ── 2. deliver (SIGNED — INT-018: an unsigned deliver is 401 under the default gate)
 DEL_PATH="$(mount "$MUSTER_DELIVER_PATH")"
 DEL_BODY="{\"$DELIVER_PAYLOAD_KEY\":$(cat "$PAYLOAD_FILE")}"
-call POST "$BASE_URL$DEL_PATH" "$DEL_BODY"
+sig_args POST "$DEL_PATH"
+call POST "$BASE_URL$DEL_PATH" "$DEL_BODY" "${SIG_ARGS[@]}"
 step deliver POST "$DEL_PATH" "$MUSTER_DELIVER_PATH"
 
 # ── 3. signed retrieve

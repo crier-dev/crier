@@ -110,14 +110,23 @@
 #                             telegram|whatsapp|signal
 #
 # THE PRINTED SEND COMMAND
-#   Deliver needs NO per-agent signature in any auth configuration (measured and
-#   re-measured by the selftest: POST /agents/<id>/inbox answers 201 with no
-#   X-Agent-* headers at all) — the only optional header is the bearer one above.
-#   The command is printed twice: human-readable (continuations), and as a single
-#   machine-readable line
-#       SEND_CMD_ONE_LINE=curl -sS -X POST '…' … -w '\n%{http_code}\n'
+#   Deliver is agent-owned exactly like a read, so under the default posture
+#   (CR_REQUIRE_AGENT_SIG=true) it must prove the delivering identity's key:
+#   an UNSIGNED POST /agents/<id>/inbox answers
+#     401 {"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}
+#   before anything is stored (MEASURED on the default server; re-measured by the
+#   selftest), and the bearer token — when one is configured — is a SECOND,
+#   independent requirement, never a substitute for the signature.
+#   This script therefore prints a SIGNED command: it signs
+#   "POST\n/agents/<id>/inbox\n<unix-seconds>" with the connection key it already
+#   holds and sends the X-Agent-ID / X-Agent-Ts / X-Agent-Sig trio (OpenSSL >= 3
+#   for `pkeyutl -sign -rawin`). The command is printed twice: human-readable
+#   (continuations), and as a single machine-readable line
+#       SEND_CMD_ONE_LINE=TS=$(date +%s); …; curl -sS -X POST '…' … -w '\n%{http_code}\n'
 #   which is the exact line scripts/onboard-connection-selftest.sh extracts and
 #   executes. It prints the response body followed by the HTTP status code.
+#   A server booted with CR_REQUIRE_AGENT_SIG=false would also accept an unsigned
+#   delivery, but that is not the default posture and not what this script prints.
 #
 # THE CONNECTION CONFIG FILE (again: never contains the token)
 #   {
@@ -129,7 +138,7 @@
 #     "tags": ["platform:telegram", "connection:ops-bot", "topic:telegram-ops-bot"],
 #     "registration": "registered" | "already-registered" | "conflict-key-mismatch",
 #     "bearer_auth_configured": false,
-#     "send_command": "curl -sS -X POST …",
+#     "send_command": "TS=$(date +%s); …; curl -sS -X POST …",   # the SIGNED one-line form
 #     "updated_at": "…Z"
 #   }
 #
@@ -224,9 +233,14 @@ ENVIRONMENT
   CRIER_CONFIG_PATH        override the config path
   CRIER_ONBOARD_PLATFORMS  extra platforms, space-separated
 
-DELIVER NEEDS NO SIGNATURE — the send command this script prints carries the
-Content-Type header and, when a token is configured, the Bearer header. Nothing
-else: an unsigned POST /agents/<id>/inbox answers 201.
+SEND A MESSAGE — the printed command SIGNS the delivery. An inbox delivery is
+agent-owned exactly like a read, so on a server with the default posture
+(CR_REQUIRE_AGENT_SIG=true) an UNSIGNED POST /agents/<id>/inbox answers
+401 {"error":"missing agent signature headers …"} and nothing is stored. The
+command therefore signs "POST\n/agents/<id>/inbox\n<unix-seconds>" with the
+connection key (OpenSSL >= 3) and sends the X-Agent-ID / X-Agent-Ts /
+X-Agent-Sig trio; when a token is configured it carries the Bearer header as
+well — the two requirements are independent.
 
 EXIT CODES
   0 registered / already registered with the key on disk (idempotent re-run)
@@ -502,8 +516,10 @@ case "$CODE" in
     ;;
   401)
     _err "the server at $CRIER_URL answered 401 to GET /agents/$AGENT_ID — auth is enforced."
-    _err "  set CR_AUTH_TOKEN to the server's token and re-run (register/deliver"
-    _err "  themselves need no per-agent signature, but they do need this bearer token)."
+    _err "  set CR_AUTH_TOKEN to the server's token and re-run. Register itself needs"
+    _err "  no per-agent signature, but DELIVER does when CR_REQUIRE_AGENT_SIG=true"
+    _err "  (the default): the send command this script prints signs it with the"
+    _err "  connection key, and the bearer token stays a separate requirement."
     exit "$EX_FAIL"
     ;;
   200)
@@ -558,7 +574,23 @@ case "$CODE" in
     ;;
 esac
 
-# ── 3. the printed send command (deliver needs no signature) ──────────────────
+# ── 3. the printed send command (SIGNED — INT-018) ────────────────────────────
+#
+# MEASURED, not assumed (INT-018-R1): with CR_REQUIRE_AGENT_SIG=true — the
+# DEFAULT posture — an UNSIGNED POST /agents/<id>/inbox answers
+#   401 {"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}
+# before anything is stored; a SIGNED deliver answers 201. This script holds the
+# connection's own private key (generated or reused in step 1, with the matching
+# public key on the registry row), so the command it prints SIGNS the delivery
+# instead of describing one the default server refuses: ed25519 over
+# "POST\n/agents/<id>/inbox\n<unix-seconds>", sent as the X-Agent-ID /
+# X-Agent-Ts / X-Agent-Sig trio. The body's `sender` names the same identity, so
+# the signed-sender rule (403 on a mismatch) is satisfied. OpenSSL >= 3 is
+# required for `pkeyutl -sign -rawin`.
+#
+# The unsigned form is not wrong everywhere — a server booted with
+# CR_REQUIRE_AGENT_SIG=false still accepts it — but it is not what the default
+# server answers, so it is not what this script prints.
 
 SEND_URL="$CRIER_URL/agents/$AGENT_ID/inbox"
 SEND_BODY="{\"payload\":{\"text\":\"hello from $AGENT_ID\"},\"sender\":\"$AGENT_ID\"}"
@@ -568,7 +600,13 @@ if [ -n "$AUTH_TOKEN" ]; then
   AUTH_PART="-H \"Authorization: Bearer \${CR_AUTH_TOKEN}\" "
   HUMAN_AUTH_LINE=1
 fi
-SEND_CMD_ONE_LINE="curl -sS -X POST '$SEND_URL' -H 'Content-Type: application/json' ${AUTH_PART}-d '$SEND_BODY' -w '\\n%{http_code}\\n'"
+# The three signing steps, kept in variables so the human-readable block below
+# prints them verbatim instead of re-deriving the quoting.
+SIGN_TS_LINE="TS=\$(date +%s)"
+SIGN_PL_LINE="PL=\$(mktemp); printf '%s\n%s\n%s' POST '/agents/$AGENT_ID/inbox' \"\$TS\" > \"\$PL\""
+SIGN_SIG_LINE="SIG=\$(openssl pkeyutl -sign -rawin -inkey '$KEY_PATH' -in \"\$PL\" | xxd -p -c 128); rm -f \"\$PL\""
+SEND_SIGN_PREFIX="$SIGN_TS_LINE; $SIGN_PL_LINE; $SIGN_SIG_LINE; "
+SEND_CMD_ONE_LINE="${SEND_SIGN_PREFIX}curl -sS -X POST '$SEND_URL' -H 'Content-Type: application/json' ${AUTH_PART}-H \"X-Agent-ID: $AGENT_ID\" -H \"X-Agent-Ts: \$TS\" -H \"X-Agent-Sig: \$SIG\" -d '$SEND_BODY' -w '\\n%{http_code}\\n'"
 
 AUTH_STATE="disabled (no CR_AUTH_TOKEN set — requests need no Authorization header)"
 [ -n "$AUTH_TOKEN" ] && AUTH_STATE="bearer (CR_AUTH_TOKEN is set — the printed command carries the Bearer header)"
@@ -609,15 +647,23 @@ printf '  curl -sS -o crier-openapi.json %s/openapi.json\n' "$CRIER_URL"
 printf '  openapi-mcp -spec ./crier-openapi.json -base-url %s\n' "$CRIER_URL"
 
 step "send a message to this connection (ready to run)"
+printf '  # 1) sign the delivery: ed25519 over "POST\\n/agents/%s/inbox\\n<ts>"\n' "$AGENT_ID"
+printf '  #    (OpenSSL >= 3, pkeyutl -sign -rawin). The trio rides on the request.\n'
+printf '  %s\n' "$SIGN_TS_LINE"
+printf '  %s\n' "$SIGN_PL_LINE"
+printf '  %s\n' "$SIGN_SIG_LINE"
+printf '  # 2) deliver. Expect: 201 {"id":"…","transport":"inbox",…}\n'
 printf "  curl -sS -X POST '%s' \\\\\n" "$SEND_URL"
 printf "    -H 'Content-Type: application/json' \\\\\n"
 if [ -n "$HUMAN_AUTH_LINE" ]; then
   printf '    -H "Authorization: Bearer ${CR_AUTH_TOKEN}" \\\n'
 fi
+printf '    -H "X-Agent-ID: %s" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG" \\\n' "$AGENT_ID"
 printf "    -d '%s' \\\\\n" "$SEND_BODY"
 printf "    -w '\\\\n%%{http_code}\\\\n'\n"
-printf '  # deliver needs NO per-agent signature in any auth config — the 201 below\n'
-printf '  # is the whole contract. Expect: 201 {"id":"…","transport":"inbox",…}\n'
+printf '  # An UNSIGNED deliver is 401 on a gate-on server (the default):\n'
+printf '  # "missing agent signature headers" — nothing is stored. The signature is\n'
+printf '  # what makes this 201, and the bearer token (when set) is a separate requirement.\n'
 printf '\n'
 printf '  # machine-readable one-line form (the selftest executes exactly this line):\n'
 printf '%s\n' "SEND_CMD_ONE_LINE=$SEND_CMD_ONE_LINE"
@@ -629,10 +675,11 @@ if [ "$REGISTRATION" = "conflict-key-mismatch" ]; then
   printf '!!   key on disk      : %s\n' "$PUBKEY"
   printf '!!   registered key   : %s\n' "${REG_PUBKEY:-<none reported by the server>}"
   printf '!! This run did NOT re-register and did NOT modify the registration.\n'
-  printf '!! Consequence: the mailbox stays reachable and DELIVER still works (it is\n'
-  printf '!! unsigned), but every SIGNED call as %s (inbox retrieve, ack, PATCH,\n' "$AGENT_ID"
-  printf '!! DELETE) will 401, because the private half of the registered key is not\n'
-  printf '!! the one at %s.\n' "$KEY_PATH"
+  printf '!! Consequence: with CR_REQUIRE_AGENT_SIG=true (the default) the mailbox\n'
+  printf '!! refuses the calls this connection makes. DELIVER is signed too now\n'
+  printf '!! (INT-018), so a send as %s answers 401 "signature\n' "$AGENT_ID"
+  printf '!! verification failed", as do inbox retrieve, ack, PATCH and DELETE —\n'
+  printf '!! the private half of the registered key is not the one at %s.\n' "$KEY_PATH"
   printf '!! Resolve by choosing one deliberately:\n'
   printf '!!   * keep the registered key: restore that private key at %s, or\n' "$KEY_PATH"
   printf '!!   * move to the key on disk: unregister the agent, then re-run this\n'

@@ -16,7 +16,12 @@
 #       match the docs — and the delivered message is then confirmed inside the
 #       connection's inbox with a SIGNED stats call made with the connection's
 #       own private key, which is what proves the registered public key and the
-#       key on disk are one identity;
+#       key on disk are one identity. The server this script starts keeps the
+#       DEFAULT signature posture (CR_REQUIRE_AGENT_SIG=true — it is not set in
+#       the boot environment), so the printed command carries the X-Agent-*
+#       signing trio and an UNSIGNED deliver to the same inbox is asserted to be
+#       401 in the same cell: the gate is measured in both directions rather
+#       than assumed (INT-018);
 #   (c) A RE-RUN CANNOT CLOBBER an existing registration: the key on disk is
 #       deliberately swapped for a fresh one, the re-run must exit 3 with the
 #       loud KEY MISMATCH block, and the REGISTRY must still hold the ORIGINAL
@@ -333,9 +338,23 @@ printf '      response: %s\n' "$(printf '%s' "$SEND_OUT" | head -c 300)"
 check_eq "201" "$SEND_CODE" "[4] the PRINTED send command delivers (expect 201)"
 check_contains "$SEND_OUT" '"transport":"inbox"' "[4] the delivery landed in the inbox transport"
 case "$SEND_CMD" in
-  *X-Agent-*) bad "[4] the printed command carries X-Agent-* headers — deliver needs no signature" ;;
-  *) ok "[4] the printed command carries no signature headers (deliver needs none)" ;;
+  *X-Agent-*) ok "[4] the printed command carries the X-Agent-* signing trio (deliver is signed under INT-018)" ;;
+  *) bad "[4] the printed command carries NO X-Agent-* headers — a gate-on server (the default) answers an unsigned deliver 401" ;;
 esac
+
+# The gate, measured in the other direction on the SAME inbox: with the default
+# posture this server refuses an unsigned delivery BEFORE anything is stored
+# (INT-018). Pinning the 401 here is what makes the 201 above evidence that the
+# signature is load-bearing rather than decorative — and it fails loudly if the
+# gate ever silently stops being enforced.
+UNSIGNED_CODE="$(curl -sS --max-time 20 -o "$WORKDIR/unsigned.out" -w '%{http_code}' \
+  -X POST "$CRIER/agents/$AGENT_ID/inbox" -H 'Content-Type: application/json' \
+  -d '{"payload":{"text":"unsigned probe"}}' 2>/dev/null)"
+check_eq "401" "$UNSIGNED_CODE" \
+  "[4] an UNSIGNED deliver to the same inbox is 401 on the default (gate-on) server"
+check_contains "$(cat "$WORKDIR/unsigned.out" 2>/dev/null)" \
+  'missing agent signature headers' \
+  "[4] the 401 body names the missing agent signature headers"
 
 # The delivered message must be in the connection's inbox, and the connection's
 # OWN private key must open it — that is what proves the registered public key,

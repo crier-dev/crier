@@ -40,10 +40,13 @@ different key must be refused. A server that ignored signatures would pass every
 positive step and fail those two.
 
 Two identities on one bus (`clients/python/two_agents.py`) is the smallest
-honest version of what crier is for: alice delivers to bob, bob's key reads and
-acks it, alice's key is refused (403) when it targets bob's inbox, and an
-unsigned delivery is still accepted — the signature gates the **read**, not the
-write.
+honest version of what crier is for: alice delivers to bob — signing the
+delivery with alice's own key, because under the default posture
+(`CR_REQUIRE_AGENT_SIG=true`) an unsigned delivery is refused 401 before
+anything is stored (INT-018) — bob's key reads and acks it, alice's key is
+refused (403) when it targets bob's inbox, and the script closes with the
+negative control that proves the gate is real: a second delivery from a keyless
+client is refused and bob never sees it.
 
 ```bash
 ./bin/crier keygen -out alice.key -id alice

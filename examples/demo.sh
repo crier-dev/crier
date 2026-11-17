@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Crier integration demo — register → deliver → signed retrieve → ack round-trip.
+# Crier integration demo — register → signed deliver → signed retrieve → ack round-trip.
 #
 # Requirements:
 #   - a running crier server (default http://localhost:8767, override with CRIER_URL)
@@ -19,7 +19,9 @@
 #
 # The inbox endpoints require per-agent ed25519 request signatures by default
 # (CR_REQUIRE_AGENT_SIG=true). This script generates an ephemeral keypair,
-# registers the agent, and signs every retrieve/ack request with it:
+# registers the agent, and signs EVERY call it makes that is agent-owned —
+# deliver, retrieve and ack (INT-018: an unsigned deliver is 401 under the
+# default posture, so the demo cannot lean on "deliver needs no signature"):
 #   X-Agent-Sig = hex(ed25519_sign("<METHOD>\n<path>\n<unix-seconds>", privkey))
 # Timestamps must be within ±30s of the server clock.
 #
@@ -100,8 +102,21 @@ curl -sS -X POST "${AUTH_ARGS[@]}" "${CRIER_URL}/agents" -H 'Content-Type: appli
 #    the guard verdict it carries can be reported below (DF-CRIER-241). The
 #    printed transcript keeps the pre-existing shape: body, blank line, then
 #    the "POST /agents/<id>/inbox -> <code>" status line.
-echo "==> [4/6] deliver message"
+echo "==> [4/6] signed deliver message"
+# The delivery is SIGNED (INT-018): with the default CR_REQUIRE_AGENT_SIG=true an
+# UNSIGNED POST /agents/<id>/inbox answers 401 "missing agent signature headers"
+# and nothing is stored, so the demo signs the delivery with the same keypair it
+# registered — ed25519 over "POST\n/agents/<id>/inbox\n<unix-seconds>".
+DELIVER_TS=$(date +%s)
+printf 'POST\n/agents/%s/inbox\n%s' "${AGENT_ID}" "$DELIVER_TS" > "${WORKDIR}/deliver-payload.txt"
+DELIVER_SIG=$(openssl pkeyutl -sign -rawin -inkey "${WORKDIR}/agent.key" -in "${WORKDIR}/deliver-payload.txt" 2>/dev/null \
+  | xxd -p -c 128)
+[ -n "${DELIVER_SIG}" ] || {
+  echo "ERROR: signing the deliver produced an EMPTY signature — pkeyutl -sign -rawin needs OpenSSL >= 3 and a seekable payload file" >&2
+  exit 1
+}
 DELIVER=$(curl -sS -X POST "${AUTH_ARGS[@]}" "${CRIER_URL}/agents/${AGENT_ID}/inbox" -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: ${AGENT_ID}" -H "X-Agent-Ts: ${DELIVER_TS}" -H "X-Agent-Sig: ${DELIVER_SIG}" \
   -d '{"payload":{"hello":"world","n":42}}' \
   -w '\nHTTP_CODE:%{http_code}')
 DELIVER_BODY=$(printf '%s' "${DELIVER}" | grep -v '^HTTP_CODE:')
@@ -251,4 +266,4 @@ EMPTY=$(curl -sS "${AUTH_ARGS[@]}" "${CRIER_URL}/agents/${AGENT_ID}/inbox" \
   -w "\nHTTP_CODE:%{http_code}")
 echo "    response: $(echo "${EMPTY}" | grep -v 'HTTP_CODE:')"
 echo
-echo "==> demo round-trip complete: register -> deliver -> signed retrieve -> signed ack"
+echo "==> demo round-trip complete: register -> signed deliver -> signed retrieve -> signed ack"

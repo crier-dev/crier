@@ -1140,7 +1140,9 @@ Each failure has its own name and its own exit code, so a script branches on the
 4. **Auth** — the exempt-path list, the bearer requirement and the ed25519 agent-signature
    requirement are untouched: no existing route gains an A2A auth requirement, the A2A route
    inherits the same middleware chain as every other authenticated route (it is not added to the
-   exempt list), and neither the `a2a` block nor the card requires signing to be relaxed.
+   exempt list), and neither the `a2a` block nor the card requires signing to be relaxed. The ONE
+   place an A2A request reaches a delivery without a wire sender proof is the in-process translation
+   of `SendMessage`; that carve-out, and what closing it would take, is decided and bounded in §6.1.
 5. **Strict-decode discipline** — the `a2a` block is rejected (400, key named) on a malformed
    member rather than silently ignored, and a rejected registration leaves the registry untouched.
 6. **Storage** — the durable schema change is one additive nullable column
@@ -1191,6 +1193,72 @@ surface moved were amended (`a2a_jsonrpc_test.go`: the method the probe names as
 extended card, `GetExtendedAgentCard`, now that BOTH the task lifecycle and the push-notification
 methods are served, and a `taskId` naming no task is covered as the `-32001` §5.5.3 makes it); the
 non-regression gate and every crier route test are untouched.
+
+### 6.1 The sender-signature exemption for A2A-translated deliveries — decision (INT-018)
+
+**What the code does.** INT-018 put a sender gate on ordinary inbox delivery: with
+`CR_REQUIRE_AGENT_SIG=true` (the default) `POST /agents/{id}/inbox` must prove possession of the
+registered ed25519 key for the `X-Agent-ID` it names, or nothing is stored (401 before any side
+effect; `docs/openapi.yaml`'s `inboxDeliver` description states the contract). Four paths are outside
+that gate — the condition above `verifyAgentSignature` in `internal/registry/handler.go`:
+
+- a **protected service delivery**, whose `ServiceAuthority` was established with a MANDATORY
+  body-bound signature and an exact sender>recipient pair;
+- a request that arrived over a **federation link** (the hop header), whose remote actor is
+  authenticated by the peer/relay proof and is not a local agent at all (`specs/CHAT-FEDERATION.md`);
+- an **in-process protocol translation** (`registry.InProcessDelivery`).
+
+The A2A JSON-RPC binding is the in-process one. `a2aHandler.deliverTo` (`cmd/server/a2a.go`)
+re-issues a `SendMessage` as an in-process `POST /agents/{id}/inbox`, marking the context with
+`registry.InProcessDelivery(parent)` — the translated request is rebuilt by the binding with a fresh
+body and the route's own path, so it carries no `X-Agent-*` headers and never could. The marker is a
+context value and therefore cannot arrive over the wire: only in-process callers (today the A2A
+binding; in tests, code that sets it deliberately) can set it.
+
+**What the exemption does NOT do.** It does not authenticate the sender of an A2A message. On that
+path the sender is the identity the binding's own translation claims. The only authentication of a
+`SendMessage` is the outer chain the binding sits behind — the bearer token when `CR_AUTH_TOKEN` is
+set (the A2A route is NOT on the auth-exempt list, §6 clause 4) — plus the per-agent `a2a` opt-in
+(§4.2). So on a server with `CR_A2A_ENABLED=true` and a bearer token, a bearer-holding client can
+deliver as any sender without an ed25519 proof, which is precisely what an ordinary HTTP delivery is
+refused for under the gate. The asymmetry is real and narrow: the A2A *task-topic publish* leg is
+already stricter — `SetPublishAuthorizer` requires publisher proof for `a2a.task.` topics when the
+gate is on (`cmd/server/protocols.go`) — so the exemption covers the inbox-delivery leg only.
+
+**Decision (INT-018-R1).** The exemption is ACCEPTED as an explicitly bounded carve-out and is not to
+be widened. It is recorded here rather than left implicit in a context key because the gate is on by
+default and this is the only place a delivery can exist without a wire proof. It is exercised, not
+assumed: the conformance cell in `scripts/e2e-battery.sh` boots its second server with
+`CR_REQUIRE_AGENT_SIG=true` and drives `SendMessage` → Task → `GetTask` → `CancelTask` through the
+binding, so a change that closed this path by accident (an unconditional gate in `deliver()`) would
+fail the battery instead of shipping.
+
+**What would have to be true to close it.** All four, together:
+
+1. **A2A would have to carry a proof on the wire.** Today a `POST /a2a` is an anonymous JSON-RPC body
+   behind the bearer token. Closing the exemption means defining where an agent's ed25519 proof goes
+   on that request — the natural choice is the same `X-Agent-*` trio on the JSON-RPC POST, signed
+   over `"<METHOD>\n<a2a path>\n<unix-seconds>"` — and deciding whether the JSON-RPC body is bound
+   too (`X-Agent-Body-SHA256`, as the protected service-delivery path already requires). That is a
+   protocol decision for the A2A surface, not an internal flag: it changes what every A2A client has
+   to do.
+2. **The binding would have to propagate a VERIFIED identity, not a boolean.** The marker becomes
+   something like `registry.InProcessDeliveryAs(ctx, senderID)`, accepted by `deliver()` exactly the
+   way a verified `X-Agent-ID` is — including the existing rule that a body `sender` may not disagree
+   with the identity that proved its key (403). A boolean "trust me" marker can never become an
+   authenticated sender, so the SHAPE of the seam has to change, not just its value.
+3. **The precedence would have to be fail-closed.** An outer request carrying no proof must be
+   REFUSED (401) rather than falling through to the exempt leg: the exemption stops being
+   unconditional and becomes "an authenticated in-process identity is required". The three-way split
+   already exists in the condition; closing the third means dropping the `!inProcessDelivery(...)`
+   disjunct and letting the translated request carry a proof instead.
+4. **It would have to be measured both ways, and the cost accepted.** A gate-on server must refuse an
+   unsigned `SendMessage` naming the missing proof and store nothing, and accept a signed one — both
+   as battery cells — plus a non-regression pass proving the A2A conformance transcript is unchanged.
+   The cost is why this is a decision and not a fix: **every A2A client would need a crier agent
+   identity and its private key**, which is stricter than the A2A protocol itself asks for (A2A
+   clients authenticate TO a server; they are not required to be registered agents OF it). Until
+   someone decides that A2A clients must hold crier identities, this stays open and documented here.
 
 ## 7. Out of scope (binding non-goals for the whole series)
 

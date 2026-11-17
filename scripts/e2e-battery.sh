@@ -7,15 +7,20 @@
 #   health / version / status posture (memory backend, sig required, auth off)
 #   SECURITY negatives: unauthenticated /agents, keyless publish (rate limit on)
 #   existence-vs-auth: signed inbox GET for a never-registered id -> 404
-#   register -> duplicate 409 -> deliver 201 -> stats -> signed retrieve ->
-#   signed ack (lease_id + message_ids) -> empty retrieve
+#   register -> duplicate 409 -> SIGNED deliver 201 -> stats -> signed retrieve ->
+#   signed ack (lease_id + message_ids) -> empty retrieve. Under INT-018 the
+#   default posture (CR_REQUIRE_AGENT_SIG=true) refuses an UNSIGNED deliver with
+#   401 before anything is stored, so every delivery on a gate-on server in this
+#   battery is signed with the delivering identity's own key; deliveries on the
+#   gate-OFF federation/chaos servers are called out where they happen.
 #   relay: publish 202 (X-Agent-ID) -> topics listing -> WS receive ->
 #   wildcard WS receive (bat.* matches bat.<ts>)
 #   harness consumer census: every registered harness consumer is wired or
 #   explicitly archived; unclassified rows fail the leg
 #   ttl: deliver expires_at=1s -> retrieve after 2s -> zero messages
 #   foreign-agent inbox isolation: A and B register with their OWN keypairs ->
-#   deliver into A (no signature) -> A signed retrieve 200 with the payload
+#   deliver into A (signed as an identity that holds a registered key, INT-018)
+#   -> A signed retrieve 200 with the payload
 #   round-trip INTACT (base64-decoded == delivered) -> B signed retrieve of A's
 #   inbox -> 403 (cross-agent, B's own valid signature) -> B's own inbox 200
 #   empty -> A signed ack 204
@@ -230,7 +235,12 @@ sreq GET "/agents/ghost-e2e-xyz/inbox";       check "signed inbox of never-regis
 say "agent lifecycle"
 req POST /agents "{\"id\":\"$AGENT\",\"public_key\":\"$PUBHEX\",\"capabilities\":[\"e2e\"]}"; check "register 201" 201
 req POST /agents "{\"id\":\"$AGENT\",\"public_key\":\"$PUBHEX\"}";                            check "duplicate register 409" 409
-req POST "/agents/$AGENT/inbox" '{"payload":{"e2e":true,"n":1}}';                             check "deliver 201" 201 '"id"'
+# Deliveries on this server are SIGNED (INT-018): with CR_REQUIRE_AGENT_SIG=true
+# an unsigned POST /agents/{id}/inbox is 401 "missing agent signature headers"
+# before anything is stored, so every delivery here proves the delivering
+# identity's key. The body names no sender, so the signed X-Agent-ID is the
+# only sender claim and the body-vs-signed-sender rule (403) is not in play.
+sreq POST "/agents/$AGENT/inbox" '{"payload":{"e2e":true,"n":1}}';                              check "signed deliver 201" 201 '"id"'
 sreq GET "/agents/$AGENT/inbox/stats";       check "signed stats 200 (queue_depth>=1)" 200 '"queue_depth":1'
 sreq GET "/agents/$AGENT/inbox";             check "signed retrieve 200 (leased message)" 200 '"lease_id"'
 printf '%s' "$BODY" > "$WORKDIR/retrieve.json"
@@ -280,7 +290,8 @@ fi
 say "ttl expiry"
 TTL_AGENT="e2e-ttl-${AGENT}"
 req POST /agents "{\"id\":\"$TTL_AGENT\",\"public_key\":\"$PUBHEX\"}";  check "ttl agent register 201" 201
-req POST "/agents/$TTL_AGENT/inbox" '{"payload":{"ttl":true},"ttl_seconds":1}'; check "ttl deliver 201" 201
+# signed (INT-018): the battery identity holds the key this deliver proves.
+sreq POST "/agents/$TTL_AGENT/inbox" '{"payload":{"ttl":true},"ttl_seconds":1}'; check "signed ttl deliver 201" 201
 sleep 2
 sign GET "/agents/$TTL_AGENT/inbox" "$(date +%s)"
 req GET "/agents/$TTL_AGENT/inbox" "" -H "X-Agent-ID: $TTL_AGENT" -H "X-Agent-Ts: $SIGN_TS" -H "X-Agent-Sig: $SIGN_SIG"
@@ -291,11 +302,14 @@ else
 fi
 
 say "foreign-agent inbox isolation"
-# Two foreign identities (a second and third keypair, not the battery key):
-# deliver needs NO signature, so B's delivery lands in A's inbox, but the
-# signed reads are agent-owned — B's valid signature over A's path is refused
-# 403, and B's own inbox stays empty. The payload round-trip (base64-decode
-# the retrieved payload and compare to the delivered string) is the tick-142
+# Two foreign identities (a second and third keypair, not the battery key).
+# Delivery is signed (INT-018): the deliver below proves the BATTERY identity's
+# key — it is the delivering sender — while the recipient is A. The signed reads
+# are agent-owned either way — B's valid signature over A's path is refused
+# 403, and B's own inbox stays empty. (An UNSIGNED deliver here would be 401
+# before anything is stored, which is the gate this cell now exercises end to
+# end rather than assumes around.) The payload round-trip (base64-decode the
+# retrieved payload and compare to the delivered string) is the tick-142
 # precedent: retrieval must hand back the delivered bytes, not a re-encoding.
 FA="e2e-fa-${AGENT}"; FB="e2e-fb-${AGENT}"
 RT_PAYLOAD='{"round_trip":"cr-consensus-1","text":"foreign agent payload"}'
@@ -305,7 +319,7 @@ openssl genpkey -algorithm ED25519 -out "$WORKDIR/fb.key" 2>/dev/null
 PUBHEX_B="$(openssl pkey -in "$WORKDIR/fb.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
 req POST /agents "{\"id\":\"$FA\",\"public_key\":\"$PUBHEX_A\",\"capabilities\":[\"inbox\"]}"; check "foreign agent A register 201 (own keypair)" 201
 req POST /agents "{\"id\":\"$FB\",\"public_key\":\"$PUBHEX_B\"}";                                check "foreign agent B register 201 (different keypair)" 201
-req POST "/agents/$FA/inbox" "{\"payload\":$RT_PAYLOAD}"; check "deliver into A's inbox 201 (deliver needs no signature)" 201 '"id"'
+sreq POST "/agents/$FA/inbox" "{\"payload\":$RT_PAYLOAD}"; check "deliver into A's inbox 201 (signed as the battery identity, INT-018)" 201 '"id"'
 sreq_with "$WORKDIR/fa.key" "$FA" GET "/agents/$FA/inbox"
 check "A signed retrieve 200 (leased)" 200 '"lease_id"'
 printf '%s' "$BODY" > "$WORKDIR/fa_retrieve.json"
@@ -794,6 +808,18 @@ creq "$FEDA" GET "/agents/$FED_REMOTE"
 ccheck "chaos: the target is UNKNOWN on A (404) — any delivery to it must federate" 404
 
 # ── 1. the link is proven up: a real relayed delivery, peer response verbatim ─
+# POSTURE (INT-018-R1): BOTH relays in this cell boot with
+# CR_REQUIRE_AGENT_SIG=false — see the two `env -i …` boots above
+# (source relay A and destination relay B). That is deliberate, not an oversight:
+# this cell measures FEDERATION behaviour (hold, drain, exactly-once, terminal
+# receipt), and a delivery that crosses a link is authenticated by the peer/relay
+# proof, never by a local agent key (internal/registry/handler.go: a request
+# carrying the hop header is outside the sender gate). The 201 asserted below is
+# therefore the gate-OFF answer for a delivery that RELAYS; it is not, and must
+# never become, a claim about an unsigned direct deliver on a gate-on server —
+# that is 401, and the gate-on cells earlier in this battery assert exactly that.
+# Signed or not, this request would be identical here: with the gate off the
+# server does not verify agent signature headers on deliver.
 creq "$FEDA" POST "/agents/$FED_REMOTE/inbox" \
   "{\"payload\":{\"chaos\":\"baseline\",\"phase\":\"link-up\"},\"sender\":\"$FED_SENDER\",\"request_id\":\"chaos-baseline\"}"
 ccheck "chaos: baseline delivery RELAYS over the live link (the peer's 201 rides back)" 201 '"transport":"inbox"'

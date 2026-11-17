@@ -979,8 +979,10 @@ curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
 ```
 
 > Prefer the runnable script: [`examples/demo.sh`](examples/demo.sh) performs the
-> full register → deliver → signed retrieve → ack round-trip with an ephemeral
-> ed25519 keypair (openssl 3.x). Start the server, then run `./examples/demo.sh`.
+> full register → signed deliver → signed retrieve → ack round-trip with an
+> ephemeral ed25519 keypair (openssl 3.x). It works against a server in the
+> DEFAULT posture (`CR_REQUIRE_AGENT_SIG=true`), because it signs the delivery
+> as well as the reads. Start the server, then run `./examples/demo.sh`.
 >
 > The **relay subscribe leg** — which needs a WebSocket client and cannot be done
 > with `curl` alone — has its own zero-install driver:

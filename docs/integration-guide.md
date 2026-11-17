@@ -9,7 +9,7 @@ This is the maintained, user-facing companion to:
 - `docs/openapi.yaml` — the complete HTTP API contract
 - `docs/mesh-protocol.md` — the authoritative mesh wire format
 - `docs/architecture.md` / `docs/specs.md` — design and behavior specs
-- `examples/demo.sh` — the runnable register → deliver → retrieve → ack round-trip
+- `examples/demo.sh` — the runnable register → signed deliver → signed retrieve → ack round-trip
 - `examples/ws-mesh-demo/` — the runnable **zero-install** relay pub/sub + mesh
   demo: `run-demo.sh` plus a Go WebSocket client, nothing to install
 - `examples/muster-bridge/run-demo.sh` — the runnable **Muster onboarding** path

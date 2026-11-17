@@ -16,6 +16,13 @@ body key or a signature header changes the emitted client (the battery's cell
 proves that with a mutation, and asserts that every path the client targets is
 a path key of the spec document).
 
+Every agent-owned call the client makes is SIGNED (INT-018): retrieve, ack and
+deliver each send the document's own signature-header names over
+"<METHOD>\n<path>\n<unix-seconds>", because the document's deliver description
+states that the default posture (CR_REQUIRE_AGENT_SIG=true) refuses an unsigned
+delivery with 401 — a client that signed only the reads could not complete the
+round trip against a default server.
+
 FAIL CLOSED: a spec that cannot be read, cannot be parsed, is missing any of the
 four operations, or no longer declares the contract this flow needs (a path
 placeholder other than `{id}`, a deliver body with no payload key, an ack body
@@ -416,6 +423,14 @@ def derive(doc: dict, override_base_url: str) -> dict:
             "retrieve and ack disagree on their signature headers (%s vs %s)"
             % (", ".join(retrieve_headers), ", ".join(ack_headers))
         )
+    # The deliver operation is held to the SAME signing contract (its own
+    # description states that with CR_REQUIRE_AGENT_SIG on — the default — an
+    # ordinary delivery must prove the sender key over
+    # "<METHOD>\n<path>\n<unix-seconds>"), so the emitted client signs it with
+    # these names too. The document does not repeat the three header parameters
+    # on that operation, so the names are taken from the signature parameters it
+    # DOES declare on the inbox read operations, which were just proved to agree.
+    plan["operations"]["deliver"]["sign_headers"] = retrieve_headers
     return plan
 
 
@@ -547,10 +562,22 @@ call "$OP_REGISTER_METHOD" "$BASE_URL$REG_PATH" "$REG_BODY"
 step register "$OP_REGISTER_METHOD" "$REG_PATH" "$OP_REGISTER_PATH" "$HTTP_CODE"
 [ "$HTTP_CODE" = "201" ] || exit 1
 
-# 2. deliver — the payload rides under whatever key the spec's deliver schema names
+# 2. deliver — the payload rides under whatever key the spec's deliver schema
+#    names, and the request is SIGNED with the spec's own signing-header names.
+#    Why: the deliver operation's own description states that with
+#    CR_REQUIRE_AGENT_SIG on (the default) an ordinary delivery must prove the
+#    sender key it names — "X-Agent-ID must be a registered agent and
+#    X-Agent-Sig must verify over \"<METHOD>\n<path>\n<unix-seconds>\"" (INT-018).
+#    An unsigned deliver is 401 before anything is stored, so a generated client
+#    that only signed retrieve/ack could never complete the round trip on a
+#    default server. The header NAMES are still the document's: they are the
+#    signature parameters the spec declares on the inbox operations (retrieve /
+#    ack), which the generator asserts agree with each other, and the deliver
+#    op's description names the same three headers.
 DEL_PATH="$(fill "$OP_DELIVER_PATH")"
 DEL_BODY="{\"$DELIVER_PAYLOAD_KEY\":$(cat "$PAYLOAD_FILE")}"
-call "$OP_DELIVER_METHOD" "$BASE_URL$DEL_PATH" "$DEL_BODY"
+sig_args "$OP_DELIVER_METHOD" "$DEL_PATH"
+call "$OP_DELIVER_METHOD" "$BASE_URL$DEL_PATH" "$DEL_BODY" "${SIG_ARGS[@]}"
 step deliver "$OP_DELIVER_METHOD" "$DEL_PATH" "$OP_DELIVER_PATH" "$HTTP_CODE"
 [ "$HTTP_CODE" = "201" ] || exit 1
 
@@ -681,8 +708,8 @@ def main(argv=None) -> int:
             extra = " payload=%s" % entry["body_payload_key"]
         elif "body_lease_key" in entry:
             extra = " lease=%s ids=%s" % (entry["body_lease_key"], entry["body_ids_key"])
-        elif "sign_headers" in entry:
-            extra = " sign=%s" % ",".join(entry["sign_headers"])
+        if "sign_headers" in entry:
+            extra += " sign=%s" % ",".join(entry["sign_headers"])
         print("derived %-8s %-4s %s (operationId %s)%s" % (role, entry["method"], entry["path"], entry["operationId"], extra))
 
     if args.print_endpoints:
