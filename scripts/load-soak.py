@@ -534,6 +534,14 @@ class ServerUnderTest:
         ):
             env.pop(name, None)
         env["CR_LOG_LEVEL"] = "warn"
+        # INT-018: ordinary inbox delivery now proves the sender whenever
+        # CR_REQUIRE_AGENT_SIG is on. This harness measures TRANSPORT CAPACITY
+        # (deliveries/s, latency percentiles, RSS per socket) and its synthetic
+        # agents are registered without private halves, so it cannot sign — the
+        # gate is stated OFF here and the run report carries the posture it was
+        # measured under (run["posture"]["auth_required"]), rather than the
+        # stage silently failing on a dimension it does not measure.
+        env["CR_REQUIRE_AGENT_SIG"] = "false"
 
         self.log_handle = open(self.log_path, "wb")
         self.proc = subprocess.Popen(
