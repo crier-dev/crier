@@ -9,12 +9,14 @@ assumed from a developer machine.
 If you already have a Go toolchain and a checkout, you do not need this file —
 `make build` and the [README](README.md) are enough.
 
-**Two paths, and only one of them works today.** Read
+**Both paths work today.** Read
 [§3](#3-path-a--install-the-prebuilt-binaries-no-toolchain) before you copy its
-command: the prebuilt path is complete and verified, but the releases it installs
-from have **no published assets yet**, so on the public release it fails closed
-and installs nothing. [§4](#4-path-b--build-from-source) is the path that works
-right now.
+command: it installs the published release with one command and no toolchain —
+as of the 2026-11-17 verification, `releases/latest` serves **v0.6.1**, which
+carries **8 assets** (both binaries for linux/amd64, linux/arm64 and
+darwin/arm64, plus `install.sh` and `SHA256SUMS`), and the one-liner was
+measured end-to-end against it. [§4](#4-path-b--build-from-source) builds from
+source when you want binaries from the exact tree you cloned.
 
 ---
 
