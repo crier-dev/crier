@@ -16,11 +16,20 @@ import (
 var tracer = otel.Tracer(instrumentationName)
 
 // Start creates an application span using the shared crier instrumentation scope.
+//
+// The attrs copy below is load-bearing for R-T6 (specs/OBSERVABILITY-TRACING.md
+// §7 test 6). Handing the variadic parameter straight to trace.WithAttributes
+// makes it "leaking" to the escape analysis, so every caller heap-allocated its
+// attribute array even with tracing disabled — the disabled path measured 64 B
+// and one allocation per span start before the copy. Copying in the enabled
+// branch keeps the caller's array on the caller's stack, which makes the
+// disabled path allocation-free and is measured by TestDisabledPathAllocsPerRun.
 func Start(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	if !enabled.Load() {
 		return ctx, trace.SpanFromContext(ctx)
 	}
-	return tracer.Start(ctx, name, trace.WithAttributes(attrs...))
+	laundered := append([]attribute.KeyValue(nil), attrs...)
+	return tracer.Start(ctx, name, trace.WithAttributes(laundered...))
 }
 
 // Inject adds W3C trace context headers to an outbound request.

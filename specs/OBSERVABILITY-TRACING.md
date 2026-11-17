@@ -1,6 +1,7 @@
 # OBSERVABILITY-TRACING — OpenTelemetry trace export (opt-in, zero default overhead)
 
 Status: DRAFT v1 · 2026-11-08 · Owner ruling 2026-11-08 (agreed: trace export beside metrics) · INT-009
+· test 6 measured 2026-11-17 (INT-024)
 
 ## 1. Purpose
 
@@ -39,7 +40,10 @@ type Config struct {
 
 Package tracer used by all instrumentation sites:
 `var tracer = otel.Tracer("github.com/crier-dev/crier")` — resolves to the no-op provider until
-`Setup` installs the SDK, so disabled-mode spans are `noop.Span` (zero allocation, zero network).
+`Setup` installs the SDK, so disabled-mode spans are `noop.Span`. Disabled-mode `Start` allocates
+nothing (measured, §7 test 6); the only allocation left on the disabled path is the 64 B temporary
+of a call site's own post-hoc `span.SetAttributes(...)` argument, so "zero allocation" holds for
+this package and one 64 B per post-hoc attribute holds for instrumented sites.
 
 ## 4. Wiring
 
@@ -103,8 +107,67 @@ Attribute rules: **never** message payloads, prompt text, auth headers, or URL q
 4. Test that no span attribute key contains a message payload — assert the recorded attribute
    key set against the §4 allowlist for every instrumented site.
 5. Test startup refusal for `CR_TRACING_SAMPLE_RATIO=2` and `CR_TRACING_EXPORTER=grpc`.
-6. Benchmark: `go test -bench` on the deliver path with tracing disabled is within noise of
-   pre-change HEAD (assert with `-benchmem` before/after comparison recorded in the PR evidence).
+6. Disabled-path cost — **measured**, not asserted by construction. The earlier draft said "within
+   noise" and justified it with the fact that `Setup` early-returns before building an exporter,
+   which measures nothing about a request. Evidence lives in `internal/tracing/disabled_cost_test.go`.
+
+   Measurement with tracing at its default off (`Config{}`, `enabled == false`):
+
+   - `Start` with the attribute set the sites really pass: **0 B, 0 allocations** per span. Before
+     this measurement it was **64 B / 1 allocation**: the variadic `attrs` parameter was "leaking"
+     to the escape analysis because it went straight into `trace.WithAttributes`, so every caller
+     heap-allocated its attribute array even with tracing disabled. `Start` now copies the slice in
+     the enabled branch, which keeps the caller's array on the caller's stack.
+   - `HTTPMiddleware`, disabled: **0 B, 0 allocations** per request. It returns before calling
+     `routeName` and before wrapping the ResponseWriter.
+   - Post-hoc `span.SetAttributes(attribute.Int(...))` at a call site: **64 B, 1 allocation** per
+     call. This is the call site's own temporary argument array escaping through the sealed
+     `otel/trace.Span` interface — the same work the enabled path does to build attributes — not
+     this package's code, and not removable from here (`trace.Span` embeds an unexported otel
+     interface, so no local implementation or helper can keep that array on the stack). Proven to
+     be the array and not the interface call: with the attribute slice hoisted out of the loop the
+     identical sequence measures 0 B / 0 allocations.
+   - Net for the retrieve shape (`HTTPMiddleware` + `registry.retrieve` + `message_count`):
+     **64 B / 1 allocation**, and 57–106 ns/op against 5.8–9.8 ns/op for the same handler with no
+     tracing. The 64 B allocation, not the tracing logic, is what widens that gap on a loaded box.
+   - The retrieve site's `r = r.WithContext(ctx)` added no measurable allocation in this shape
+     (same 64 B as without it). It is kept because it is what carries the span into downstream
+     calls when tracing is on; the real handler passes that request to the store, where it may
+     escape, so this number is a floor for that line, not a guarantee.
+
+   Commands (machine: AMD Ryzen 7 7840HS, 16 threads; the box was **loaded** — loadavg 27–30 and
+   spiking to 40+ from a build/test fleet sharing it — so ns/op is noisy, allocations are the
+   deterministic part, and the figures below are observed bands, not a quiet-machine floor):
+
+   ```
+   go test ./internal/tracing -bench . -benchtime 200x -run '^$'
+   go test ./internal/tracing -bench . -benchtime 20000x -count=5 -run '^$'
+   ```
+
+   `-benchtime 200x` output (2026-11-17T08:02:12Z, loadavg 29.3):
+
+   ```
+   BenchmarkDisabledRequestShape/Baseline/NoTracing-16          200   15.03 ns/op    0 B/op   0 allocs/op
+   BenchmarkDisabledRequestShape/Middleware-16                   200   21.84 ns/op    0 B/op   0 allocs/op
+   BenchmarkDisabledRequestShape/StoreHelper-16                  200  189.2  ns/op   64 B/op   1 allocs/op
+   BenchmarkDisabledRequestShape/StoreHelperContextPropagation-16 200 163.6 ns/op   64 B/op   1 allocs/op
+   BenchmarkDisabledStoreHelper/Baseline/NoTracing-16             200    2.005 ns/op   0 B/op   0 allocs/op
+   BenchmarkDisabledStoreHelper/StartSetAttributesEnd-16          200  165.5  ns/op   64 B/op   1 allocs/op
+   BenchmarkDisabledStoreHelper/StartSetAttributesEndHoistedSlice-16 200 26.75 ns/op  0 B/op   0 allocs/op
+   ```
+
+   Five-run band at `-benchtime 20000x` (loadavg 27.8): baseline request 5.8–9.8 ns; middleware
+   9.9–15.0 ns (delta +2…+5 ns, ranges abut); `StoreHelper` 64.9–105.5 ns / 64 B / 1 alloc;
+   `StoreHelperContextPropagation` 57.2–105.7 ns / 64 B / 1 alloc; helper baseline 0.24–1.54 ns;
+   `StartSetAttributesEnd` 60.8–81.1 ns / 64 B / 1 alloc; hoisted-slice control 16.5–17.9 ns / 0 B.
+
+   A benchmark is not a gate, so `TestDisabledPathAllocsPerRun` carries the guarantee in plain
+   `go test`: `testing.AllocsPerRun` over `Start` (real attribute set), `Inject` and
+   `HTTPMiddleware` must return **0** allocations, and the instrumented-request ceiling must stay
+   at **≤ 1** (the documented `SetAttributes` array). Red-proved both directions: reverting the
+   `Start` copy fails with `disabled Start allocated 1 allocs/op, want 0` and
+   `instrumented request allocated 2 allocs/op, want <= 1`; adding one allocation to the disabled
+   middleware branch fails with `disabled middleware allocated 1 allocs/op, want 0`.
 
 ## 8. Coverage table
 
@@ -115,7 +178,7 @@ Attribute rules: **never** message payloads, prompt text, auth headers, or URL q
 | R-T3 | Inbound traceparent joins the trace | test: 3 |
 | R-T4 | No payload attributes, ever | test: 4 (check: §4 allowlist) |
 | R-T5 | Bad tracing config refuses startup | test: 5 |
-| R-T6 | Disabled overhead within noise | test: 6 |
+| R-T6 | Disabled overhead measured: 0 allocs in Start/Inject/middleware, 1×64 B per post-hoc SetAttributes | test: 6 (bench + `TestDisabledPathAllocsPerRun`) |
 | R-T7 | Tracing failures never affect delivery | check: §5 row 2 + error-catalog audit |
 
 Out of scope (binding): replacing or wrapping `internal/metrics` with the OTel meter; log
