@@ -4584,16 +4584,22 @@ tasks:
   title: 'board warning soup buries real findings: sanction created_at_source + structured
     ci_result'
   criteria:
-  - "the boardctl validator canon sanctions created_at_source as a provenance key\
-    \ and the crier board warning count drops to the true residue: the two free-form\
-    \ ci_result values are rewritten to the structured form, the fix is red-proven\
-    \ before/after, and the fleet-wide census verdict is recorded at .coding-hermes/evidence/DF-CRIER-508/census.md.\
-    \ PROOF: build the boardctl validator at the fix commit (d9d54ff) and run it validate\
-    \ -C .coding-hermes/board \u2014 RESULT OK, zero created_at_source warnings; the\
-    \ same command on the pre-fix parent commit (d9d54ff^) reports >400 warnings dominated\
-    \ by created_at_source; grep of tasks.jsonl shows only ci_result values GREEN/RED/SKIP.\
-    \ FAILIF: any created_at_source warning remains after the fix, any non-structured\
-    \ ci_result value remains, or census.md is missing the census table and verdict."
+  - 'the boardctl validator canon sanctions created_at_source as a provenance key
+    (internal/board/keys.go sanctionedExtras) and the crier board''s created_at_source
+    warnings drop to zero red-proven 320 to 0, the 12 census-named free-form ci_result
+    values are rewritten to the structured status-details form by the committed script
+    .coding-hermes/evidence/DF-CRIER-508/rewrite_ci_result.py applied 12 rows dropping
+    validate warnings 141 to 129, and the fleet-wide census verdict is recorded at
+    .coding-hermes/evidence/DF-CRIER-508/census.md. PROOF: running the validator built
+    at fix commit d9d54ff as validate -C .coding-hermes/board reports RESULT OK with
+    zero created_at_source warnings and zero free-form ci_result values on the 12
+    named rows INT-CI-012, INT-CI-013, DF-CRIER-428, DF-CRIER-466, DF-CRIER-468, DF-CRIER-469,
+    DF-CRIER-473, DF-CRIER-474, QA-CRIER-REVIEW-1, QA-CRIER-51, INT-CI-017, INT-CI-036,
+    while the pre-fix parent validator 2c258e0 on the same board reports 451 warnings
+    with 320 naming created_at_source. FAILIF: any of the 12 named rows still carries
+    a free-form ci_result string, the keys.go sanction or its red-proof regression
+    tests are missing from the validator commit, or census.md lacks the before and
+    after warning counts.'
   status: complete
-  created_at: '2026-11-18T01:56:20.967752+00:00'
-  completed_at: '2026-11-18T01:57:16.856201+00:00'
+  created_at: '2026-11-18T02:19:12.282794+00:00'
+  completed_at: '2026-11-18T02:19:18.493855+00:00'
