@@ -2676,3 +2676,7 @@
 {"event_type":"task_updated","task_id":"QA-CRIER-064","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T23:53:07Z","detail":"{\"status\":\"in_progress\"}","id":1794692633205781941}
 {"event_type":"task_updated","task_id":"RELEASE-018","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T23:53:08Z","detail":"{\"status\":\"in_progress\"}","id":1794692633205781942}
 {"event_type":"task_created","task_id":"DF-CRIER-508","actor":"foreman","tick_number":null,"timestamp":"2026-11-17T23:59:09Z","detail":"{\"id\":\"DF-CRIER-508\",\"status\":\"pending\"}","id":1794692633205781943}
+{"event_type":"task_completed","task_id":"RELEASE-018","actor":"foreman","tick_number":null,"timestamp":"2026-11-18T01:53:57Z","detail":"{\"status\":\"complete\"}","id":1794692633205781944}
+{"event_type":"task_completed","task_id":"QA-CRIER-064","actor":"foreman","tick_number":null,"timestamp":"2026-11-18T01:54:12Z","detail":"{\"status\":\"complete\"}","id":1794692633205781945}
+{"event_type":"task_updated","task_id":"RSS-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-18T01:54:12Z","detail":"{\"status\":\"blocked\"}","id":1794692633205781946}
+{"event_type":"task_updated","task_id":"BOARDCTL-HOOK-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-18T01:54:12Z","detail":"{\"status\":\"blocked\"}","id":1794692633205781947}
