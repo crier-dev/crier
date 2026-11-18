@@ -1,0 +1,17 @@
+=== PATH ===
+/home/kara/.local/share/vite-plus/bin
+/home/kara/.opencode/bin
+/home/kara/.local/bin
+/home/kara/bin
+/usr/local/sbin
+/usr/local/bin
+/usr/sbin
+/usr/bin
+/sbin
+/bin
+/snap/bin
+/home/kara/.lmstudio/bin
+=== AC1 LOOP ===
+/usr/local/bin/crier
+=== command -v ===
+/usr/local/bin/crier

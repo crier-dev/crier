@@ -1,0 +1,19 @@
+=== user unit ===
+EnvironmentFile=/home/kara/.hermes/secrets/crier-fleet.env
+ExecStart=/home/kara/crier/bin/crier -pidfile /home/kara/crier-fleet/crier.pid
+
+=== state (must match pre-fix invocation id / pid / start) ===
+ActiveState=active
+SubState=running
+InvocationID=1bbabecf8d5242e0952d39fe30748af8
+MainPID=15357
+NRestarts=2
+ExecMainStartTimestamp=Tue 2026-11-17 15:54:09 -05
+
+=== ExecStart binary identity (untouched) ===
+af60174fcc9c2c67ecfd8f82201bd2b7ee84523141dc4af992f4872ebee87427  /home/kara/crier/bin/crier
+
+=== live bus health on the unit's port 8767 (owner asserted) ===
+http=200
+{"status":"ok"}
+LISTEN 0      4096                                        *:8767             *:*    users:(("crier",pid=15357,fd=9))                         
