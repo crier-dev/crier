@@ -1,0 +1,25 @@
+=== PRE-FIX defect: the two stale copies, proven from the preserved backups ===
+AC-1 loop in a clean login shell BEFORE the fix printed two lines:
+  /home/kara/.local/bin/crier
+  /usr/local/bin/crier
+
+--- both were byte-identical 33963175-byte builds, Nov 4 03:23 ---
+total 66352
+drwxrwxr-x 2 kara kara     4096 Nov 17 19:03 .
+drwxrwxr-x 3 kara kara     4096 Nov 17 19:03 ..
+-rwxrwxr-x 1 kara kara 33963175 Nov  4 03:23 crier.local-bin.devbuild
+-rwxr-xr-x 1 kara kara 33963175 Nov  4 03:23 crier.usr-local-bin.devbuild
+28187855186833623c19fe3d719f5a5180e37abeceddb0cf0906f10908002b32  /home/kara/.local/share/crier-binary-backups/release-018-20261118T000352Z/crier.local-bin.devbuild
+28187855186833623c19fe3d719f5a5180e37abeceddb0cf0906f10908002b32  /home/kara/.local/share/crier-binary-backups/release-018-20261118T000352Z/crier.usr-local-bin.devbuild
+
+--- they were unidentifiable dev builds (this is the AC-2 failure) ---
+[/home/kara/.local/share/crier-binary-backups/release-018-20261118T000352Z/crier.local-bin.devbuild]
+	path	github.com/crier-dev/crier/cmd/server
+	mod	github.com/crier-dev/crier	(devel)	
+version: crier dev
+
+[/home/kara/.local/share/crier-binary-backups/release-018-20261118T000352Z/crier.usr-local-bin.devbuild]
+	path	github.com/crier-dev/crier/cmd/server
+	mod	github.com/crier-dev/crier	(devel)	
+version: crier dev
+

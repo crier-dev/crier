@@ -1,0 +1,27 @@
+captured_utc: 2026-11-18T00:05:53Z
+host: karaHermes-mde-7840hs
+user: uid=1000(kara) gid=1000(kara) groups=1000(kara),4(adm),24(cdrom),27(sudo),30(dip),44(video),46(plugdev),100(users),111(lpadmin),114(lxd),115(docker),973(ollama),990(render),991(kvm)
+
+=== AC-1: PATH loop (this session) ===
+/usr/local/bin/crier
+--- count ---
+1
+
+=== AC-2: go version -m (command -v crier) ===
+/usr/local/bin/crier
+	path	github.com/crier-dev/crier/cmd/server
+	mod	github.com/crier-dev/crier	v0.6.1	
+	build	vcs.revision=d7a68d01e85e86aa947b9a7c7a3fa2ad3c04e8f9
+	build	vcs.time=2026-11-11T21:16:33Z
+	build	vcs.modified=false
+
+=== AC-3: version invocation ===
+crier v0.6.1-d7a68d01
+
+=== installed binary identity ===
+-rwxr-xr-x 1 root root 29130914 Nov 17 19:04 /usr/local/bin/crier
+c298a2e7c9ad413d4d1ea8163801cd55159dbfbf3ca7bc0b581053a20283fdd3  /usr/local/bin/crier
+
+=== stray user-local copy absent ===
+ls: cannot access '/home/kara/.local/bin/crier': No such file or directory
+ABSENT

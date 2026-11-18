@@ -1,0 +1,32 @@
+=== release v0.6.1 assets ===
+v0.6.1
+crier-mcp_darwin_arm64 23990850
+crier-mcp_linux_amd64 24596642
+crier-mcp_linux_arm64 23330978
+crier_darwin_arm64 28214050
+crier_linux_amd64 29130914
+crier_linux_arm64 27394210
+install.sh 11221
+SHA256SUMS 595
+
+=== published SHA256SUMS ===
+30051730e856996510b53d0396f4f6ad88226acba9e0003fc949c24ac138e73f  crier_darwin_arm64
+886f3a2d7f7be3dffc80de0e685088eb909e78d681ededa5fff7295ef95e053d  install.sh
+9c678584155d19f0d24392a87a50a0b7e74da9a191234c98a642ffd63b0a8950  crier-mcp_linux_arm64
+c298a2e7c9ad413d4d1ea8163801cd55159dbfbf3ca7bc0b581053a20283fdd3  crier_linux_amd64
+cb972544798482b50cf89f2558aa3c97d55212c5730a23cd07f5174a676fdb23  crier-mcp_darwin_arm64
+d2f10c0803e4e07415fc4b53f37ce0e6eb89f711bb81b5ea4e870877f2fa8842  crier_linux_arm64
+e37af237231d443959ab9224d07384f3af8430d8692ecdbb8d17c9df822bbc8c  crier-mcp_linux_amd64
+
+=== downloaded asset sha256 (matches manifest) ===
+c298a2e7c9ad413d4d1ea8163801cd55159dbfbf3ca7bc0b581053a20283fdd3  /home/kara/.hermes/cache/scratch/rel018/crier_linux_amd64
+
+=== asset build stamps ===
+	path	github.com/crier-dev/crier/cmd/server
+	mod	github.com/crier-dev/crier	v0.6.1	
+	build	vcs.revision=d7a68d01e85e86aa947b9a7c7a3fa2ad3c04e8f9
+	build	vcs.time=2026-11-11T21:16:33Z
+	build	vcs.modified=false
+
+=== vcs.revision == v0.6.1 tag commit ===
+d7a68d01e85e86aa947b9a7c7a3fa2ad3c04e8f9
