@@ -4568,13 +4568,32 @@ tasks:
   criteria:
   - two of the previously ungraded crier tier-2 rows are re-run to a verdict whose
     criteria report examined=true
-  status: in_progress
+  status: complete
   created_at: '2026-11-17T23:49:16.947583+00:00'
+  completed_at: '2026-11-18T01:12:55.421557+00:00'
 - id: RELEASE-018
   title: crier on PATH is one release-identifiable binary
   criteria:
   - command -v crier resolves to exactly one binary whose go version -m reports a
     published module version and vcs.revision, with crier-fleet.service ExecStart
     untouched
-  status: in_progress
+  status: complete
   created_at: '2026-11-17T23:49:19.118445+00:00'
+  completed_at: '2026-11-18T01:35:26.214132+00:00'
+- id: DF-CRIER-508
+  title: 'board warning soup buries real findings: sanction created_at_source + structured
+    ci_result'
+  criteria:
+  - "the boardctl validator canon sanctions created_at_source as a provenance key\
+    \ and the crier board warning count drops to the true residue: the two free-form\
+    \ ci_result values are rewritten to the structured form, the fix is red-proven\
+    \ before/after, and the fleet-wide census verdict is recorded at .coding-hermes/evidence/DF-CRIER-508/census.md.\
+    \ PROOF: build the boardctl validator at the fix commit (d9d54ff) and run it validate\
+    \ -C .coding-hermes/board \u2014 RESULT OK, zero created_at_source warnings; the\
+    \ same command on the pre-fix parent commit (d9d54ff^) reports >400 warnings dominated\
+    \ by created_at_source; grep of tasks.jsonl shows only ci_result values GREEN/RED/SKIP.\
+    \ FAILIF: any created_at_source warning remains after the fix, any non-structured\
+    \ ci_result value remains, or census.md is missing the census table and verdict."
+  status: complete
+  created_at: '2026-11-18T01:56:20.967752+00:00'
+  completed_at: '2026-11-18T01:57:16.856201+00:00'
