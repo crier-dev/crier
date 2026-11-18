@@ -1,0 +1,342 @@
+{
+  "task_id": "QA-CRIER-60",
+  "task_title": "timeout-kill assertions not stress-resilient under cap and network cut",
+  "task_criteria": [
+    "timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.\n(A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).\n(B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.\n(C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.\nPROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md\nFAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep decides aliveness, the failure text omits the observed state or budget, or the evidence file's named gaps are reported as passes."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/worktrees/crier-QA-CRIER-064",
+  "branch": "wt/QA-CRIER-064",
+  "commit": "53ab9586cd645b7424ff7d73fe07529fd12acdf3",
+  "pass_class": "judged",
+  "tier2_skipped": false,
+  "working_tree_content_fingerprint": "44a60bf88c9a9d55b8ac6a639d2f6ee822da49d07e8c2f04d2cd8d8e37c4c323",
+  "working_tree_dirty_path_count": 1,
+  "items": [
+    {
+      "criterion": "timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.\n(A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).\n(B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.\n(C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.\nPROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md\nFAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep decides aliveness, the failure text omits the observed state or budget, or the evidence file's named gaps are reported as passes.",
+      "status": "PASS",
+      "detail": "(A) internal/harness/contract_test.go:976-988 waitDead polls procState (defined :990) and returns only on `errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z')`; the failure text at :987 is `pid %d is still live after the timeout kill \u2014 state=%q stat_error=%v budget=%s`, i.e. state + stat error + budget. boardbridge: bridge_test.go:181 waitProcessGroupDead, :195 liveProcessGroupMembers, :213 `if group == pgid && state != 'Z'`, :192 `t.Fatalf(\"process group %d still has live members after timeout kill: members=%v stat_error=%v\", ...)`. No ESRCH-based aliveness remains in either test file \u2014 `grep -rn 'processAlive|syscall.Kill|syscall.ESRCH' internal/boardbridge/ internal/harness/` returns only production kill paths (internal/harness/exec_unix.go:25, internal/boardbridge/bridge.go:200), not assertions. (B) contract_test.go:911 `pidsWaitBound = 5 * time.Second`; :919 readPIDs loops to `deadline := time.Now().Add(pidsWaitBound)` and only returns when `len(pids) >= pidsWanted`; failures at :941 (`read pids: %v (waited %s for %s to hold %d pids)`) and :943 (`... within %s: %q`, lastRaw) quote the bound and the last on-disk content. (C) .coding-hermes/evidence/QA-CRIER-60.md:39-42 records base 7458b4d1 `ok 5.017s \u2014 FAILURE NOT REPRODUCED` (boardbridge) and `ok 0.836s \u2014 FAILURE NOT REPRODUCED` (harness), merged edab98f8 `ok 5.067s` / `ok 7.853s`; :50-52 records the network-cut leg as an explicit named gap (\"this host cannot create a network namespace ... Recorded as a named gap, not a pass\"). Tests run fresh: `go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/` -> `ok github.com/crier-dev/crier/internal/boardbridge 5.073s` (exit 0); `go test -count=1 -run 'TestAdapterContract/(pi|codex)/DeliverTimeoutKillsProcessGroup' ./internal/harness/` -> `ok ... 0.821s` (exit 0); `go test -short -count=1 ./internal/boardbridge/ ./internal/harness/` -> `ok 6.097s` / `ok 8.789s`; `go vet ./internal/boardbridge/ ./internal/harness/` exit 0. [resolution 0.10; internal/boardbridge/bridge_test.go:147, internal/harness/contract_test.go:277, contract_test.go:990, bridge_test.go:192, .coding-hermes/evidence/QA-CRIER-60.md]"
+    },
+    {
+      "criterion": "The new aliveness helpers are actually reached by the two named entry points: TestTimeoutKillsProcessGroup calls waitProcessGroupDead (bridge_test.go:175) and TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup calls readPIDs + waitDead (contract_test.go:457,462), so the zombie-aware decision is on the live path, not dead code.",
+      "status": "PASS",
+      "detail": "bridge_test.go:175 `waitProcessGroupDead(t, pid, 5*time.Second)` is the last statement of TestTimeoutKillsProcessGroup; contract_test.go:457 `pids := readPIDs(t, filepath.Join(f.dir, \"pids\"))` and :462 `waitDead(t, pid, 5*time.Second)` sit inside the `t.Run(\"DeliverTimeoutKillsProcessGroup\", ...)` subtest at :441. `grep -rn 'waitProcessGroupDead|liveProcessGroupMembers|readProcStat' internal/` shows the only call sites are these, and the harness subtest run above (`ok ... 0.821s`) exercises them.",
+      "derived": true
+    },
+    {
+      "criterion": "A genuinely live process still fails loudly: waitDead only returns on ErrNotExist or state=='Z' (contract_test.go:981), otherwise t.Fatalf at :987; waitProcessGroupDead only returns when len(members)==0 with err==nil (bridge_test.go:186), otherwise t.Fatalf at :192. A live (state R/S) member is counted by liveProcessGroupMembers (bridge_test.go:213) so the assertion cannot pass on a surviving process.",
+      "status": "PASS",
+      "detail": "contract_test.go:981 `if errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z') { return }` \u2014 every other outcome (live state, EPERM, malformed stat) falls through to `t.Fatalf` at :987. bridge_test.go:186 `if err == nil && len(members) == 0 { return }` \u2014 a non-Z member keeps the loop running and ends in `t.Fatalf` at :192; :213 `if group == pgid && state != 'Z'` is what puts a live member in the list. The change therefore only reclassifies zombies/absent pids as dead, not live processes.",
+      "derived": true
+    },
+    {
+      "criterion": "The evidence file's claimed base/merged results are consistent with what the tree actually contains (the pre-fix code at base 7458b4d1 really did use syscall.Kill/ESRCH, and the merged tree really has the zombie-aware helpers), so the recorded runs are not fabricated against a different tree.",
+      "status": "PASS",
+      "detail": "`git cat-file -t 7458b4d1` -> commit and `git cat-file -t edab98f8` -> commit (both present). `git show 7458b4d1:internal/boardbridge/bridge_test.go` shows `err = syscall.Kill(-pid, 0)` / `if errors.Is(err, syscall.ESRCH)` and `git show 7458b4d1:internal/harness/contract_test.go` shows `processAlive` at :1062 with `err := syscall.Kill(pid, 0)` at :1063 \u2014 exactly the mechanism the evidence file quotes at lines 13-14. HEAD (merged) contains the zombie-aware helpers (commit 05f5e1bc, `git show 05f5e1bc --stat`: bridge_test.go +71/-\u2026, contract_test.go +34/-\u2026).",
+      "derived": true
+    }
+  ],
+  "merge_recommendation": "no_concerns_found",
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: gitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.pro",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "gitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 this key is ignored\ngitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.api_key_env: unknown key \u2014 this key is ignored\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/logs/guard-20261118T001550.353079Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/worktrees/crier-QA-CRIER-064/.gitreins/logs/guard-20261118T001550.353079Z.log"
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.\n(A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).\n(B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.\n(C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.\nPROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md\nFAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep decides aliveness, the failure text omits the observed state or budget, or the evidence file's named gaps are reported as passes.: (A) internal/harness/contract_test.go:976-988 waitDead polls procState (defined :990) and returns only on `errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z')`; the failure text at :987 is `pid %d is still live after the timeout kill \u2014 state=%q stat_error=%v budget=%s`, i.e. state + stat error + budget. boardbridge: bridge_test.go:181 waitProcessGroupDead, :195 liveProcessGroupMembers, :213 `if group == pgid && state != 'Z'`, :192 `t.Fatalf(\"process group %d still has live members after timeout kill: members=%v stat_error=%v\", ...)`. No ESRCH-based aliveness remains in either test file \u2014 `grep -rn 'processAlive|syscall.Kill|syscall.ESRCH' internal/boardbridge/ internal/harness/` returns only production kill paths (internal/harness/exec_unix.go:25, internal/boardbridge/bridge.go:200), not assertions. (B) contract_test.go:911 `pidsWaitBound = 5 * time.Second`; :919 readPIDs loops to `deadline := time.Now().Add(pidsWaitBound)` and only returns when `len(pids) >= pidsWanted`; failures at :941 (`read pids: %v (waited %s for %s to hold %d pids)`) and :943 (`... within %s: %q`, lastRaw) quote the bound and the last on-disk content. (C) .coding-hermes/evidence/QA-CRIER-60.md:39-42 records base 7458b4d1 `ok 5.017s \u2014 FAILURE NOT REPRODUCED` (boardbridge) and `ok 0.836s \u2014 FAILURE NOT REPRODUCED` (harness), merged edab98f8 `ok 5.067s` / `ok 7.853s`; :50-52 records the network-cut leg as an explicit named gap (\"this host cannot create a network namespace ... Recorded as a named gap, not a pass\"). Tests run fresh: `go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/` -> `ok github.com/crier-dev/crier/internal/boardbridge 5.073s` (exit 0); `go test -count=1 -run 'TestAdapterContract/(pi|codex)/DeliverTimeoutKillsProcessGroup' ./internal/harness/` -> `ok ... 0.821s` (exit 0); `go test -short -count=1 ./internal/boardbridge/ ./internal/harness/` -> `ok 6.097s` / `ok 8.789s`; `go vet ./internal/boardbridge/ ./internal/harness/` exit 0. [resolution 0.10; internal/boardbridge/bridge_test.go:147, internal/harness/contract_test.go:277, contract_test.go:990, bridge_test.go:192, .coding-hermes/evidence/QA-CRIER-60.md]\n  \u2713 The new aliveness helpers are actually reached by the two named entry points: TestTimeoutKillsProcessGroup calls waitProcessGroupDead (bridge_test.go:175) and TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup calls readPIDs + waitDead (contract_test.go:457,462), so the zombie-aware decision is on the live path, not dead code.: bridge_test.go:175 `waitProcessGroupDead(t, pid, 5*time.Second)` is the last statement of TestTimeoutKillsProcessGroup; contract_test.go:457 `pids := readPIDs(t, filepath.Join(f.dir, \"pids\"))` and :462 `waitDead(t, pid, 5*time.Second)` sit inside the `t.Run(\"DeliverTimeoutKillsProcessGroup\", ...)` subtest at :441. `grep -rn 'waitProcessGroupDead|liveProcessGroupMembers|readProcStat' internal/` shows the only call sites are these, and the harness subtest run above (`ok ... 0.821s`) exercises them.\n  \u2713 A genuinely live process still fails loudly: waitDead only returns on ErrNotExist or state=='Z' (contract_test.go:981), otherwise t.Fatalf at :987; waitProcessGroupDead only returns when len(members)==0 with err==nil (bridge_test.go:186), otherwise t.Fatalf at :192. A live (state R/S) member is counted by liveProcessGroupMembers (bridge_test.go:213) so the assertion cannot pass on a surviving process.: contract_test.go:981 `if errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z') { return }` \u2014 every other outcome (live state, EPERM, malformed stat) falls through to `t.Fatalf` at :987. bridge_test.go:186 `if err == nil && len(members) == 0 { return }` \u2014 a non-Z member keeps the loop running and ends in `t.Fatalf` at :192; :213 `if group == pgid && state != 'Z'` is what puts a live member in the list. The change therefore only reclassifies zombies/absent pids as dead, not live processes.\n  \u2713 The evidence file's claimed base/merged results are consistent with what the tree actually contains (the pre-fix code at base 7458b4d1 really did use syscall.Kill/ESRCH, and the merged tree really has the zombie-aware helpers), so the recorded runs are not fabricated against a different tree.: `git cat-file -t 7458b4d1` -> commit and `git cat-file -t edab98f8` -> commit (both present). `git show 7458b4d1:internal/boardbridge/bridge_test.go` shows `err = syscall.Kill(-pid, 0)` / `if errors.Is(err, syscall.ESRCH)` and `git show 7458b4d1:internal/harness/contract_test.go` shows `processAlive` at :1062 with `err := syscall.Kill(pid, 0)` at :1063 \u2014 exactly the mechanism the evidence file quotes at lines 13-14. HEAD (merged) contains the zombie-aware helpers (commit 05f5e1bc, `git show 05f5e1bc --stat`: bridge_test.go +71/-\u2026, contract_test.go +34/-\u2026).\nBoth flaky entry points now decide aliveness from /proc state (Z or ErrNotExist) with bounded, loud budgets, readPIDs is bounded and quotes the bound plus last on-disk content, and the evidence file records the base/merged runs honestly with the network-cut leg named as a gap rather than a pass; the named tests pass fresh (ok 5.073s boardbridge, ok 0.821s harness). [uncovered failure paths: failure mode 1 (The network-cut leg of the original claim was never exercised, so the fix's behaviour under a network cut is unproven): detected_by is empty \u2014 uncovered failure path]",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.\n(A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).\n(B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.\n(C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.\nPROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md\n\n\u2026 [4137 chars omitted \u2014 3 line(s)] \u2026\n  \u2713 The evidence file's claimed base/merged results are consistent with what the tree actually contains (the pre-fix code at base 7458b4d1 really did use syscall.Kill/ESRCH, and the merged tree really has the zombie-aware helpers), so the recorded runs are not fabricated against a different tree.: `git cat-file -t 7458b4d1` -> commit and `git cat-file -t edab98f8` -> commit (both present). `git show 7458b4d1:internal/boardbridge/bridge_test.go` shows `err = syscall.Kill(-pid, 0)` / `if errors.Is(err, syscall.ESRCH)` and `git show 7458b4d1:internal/harness/contract_test.go` shows `processAlive` at :1062 with `err := syscall.Kill(pid, 0)` at :1063 \u2014 exactly the mechanism the evidence file quotes at lines 13-14. HEAD (merged) contains the zombie-aware helpers (commit 05f5e1bc, `git show 05f5e1bc --stat`: bridge_test.go +71/-\u2026, contract_test.go +34/-\u2026).\nBoth flaky entry points now decide aliveness from /proc state (Z or ErrNotExist) with bounded, loud budgets, readPIDs is bounded and quotes the bound plus last on-disk content, and the evidence file records the base/merged runs honestly with the network-cut leg named as a gap rather than a pass; the named tests pass fresh (ok 5.073s boardbridge, ok 0.821s harness). [uncovered failure paths: failure mode 1 (The network-cut leg of the original claim was never exercised, so the fix's behaviour under a network cut is unproven): detected_by is empty \u2014 uncovered failure path]",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.\n(A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).\n(B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.\n(C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.\nPROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md\nFAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep decides aliveness, the failure text omits the observed state or budget, or the evidence file's named gaps are reported as passes.",
+                "status": "PASS",
+                "detail": "(A) internal/harness/contract_test.go:976-988 waitDead polls procState (defined :990) and returns only on `errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z')`; the failure text at :987 is `pid %d is still live after the timeout kill \u2014 state=%q stat_error=%v budget=%s`, i.e. state + stat error + budget. boardbridge: bridge_test.go:181 waitProcessGroupDead, :195 liveProcessGroupMembers, :213 `if group == pgid && state != 'Z'`, :192 `t.Fatalf(\"process group %d still has live members after timeout kill: members=%v stat_error=%v\", ...)`. No ESRCH-based aliveness remains in either test file \u2014 `grep -rn 'processAlive|syscall.Kill|syscall.ESRCH' internal/boardbridge/ internal/harness/` returns only production kill paths (internal/harness/exec_unix.go:25, internal/boardbridge/bridge.go:200), not assertions. (B) contract_test.go:911 `pidsWaitBound = 5 * time.Second`; :919 readPIDs loops to `deadline := time.Now().Add(pidsWaitBound)` and only returns when `len(pids) >= pidsWanted`; failures at :941 (`read pids: %v (waited %s for %s to hold %d pids)`) and :943 (`... within %s: %q`, lastRaw) quote the bound and the last on-disk content. (C) .coding-hermes/evidence/QA-CRIER-60.md:39-42 records base 7458b4d1 `ok 5.017s \u2014 FAILURE NOT REPRODUCED` (boardbridge) and `ok 0.836s \u2014 FAILURE NOT REPRODUCED` (harness), merged edab98f8 `ok 5.067s` / `ok 7.853s`; :50-52 records the network-cut leg as an explicit named gap (\"this host cannot create a network namespace ... Recorded as a named gap, not a pass\"). Tests run fresh: `go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/` -> `ok github.com/crier-dev/crier/internal/boardbridge 5.073s` (exit 0); `go test -count=1 -run 'TestAdapterContract/(pi|codex)/DeliverTimeoutKillsProcessGroup' ./internal/harness/` -> `ok ... 0.821s` (exit 0); `go test -short -count=1 ./internal/boardbridge/ ./internal/harness/` -> `ok 6.097s` / `ok 8.789s`; `go vet ./internal/boardbridge/ ./internal/harness/` exit 0. [resolution 0.10; internal/boardbridge/bridge_test.go:147, internal/harness/contract_test.go:277, contract_test.go:990, bridge_test.go:192, .coding-hermes/evidence/QA-CRIER-60.md]",
+                "resolution_probability": 0.1,
+                "cited_path": "internal/boardbridge/bridge_test.go:147, internal/harness/contract_test.go:277, contract_test.go:990, bridge_test.go:192, .coding-hermes/evidence/QA-CRIER-60.md"
+              },
+              {
+                "criterion": "The new aliveness helpers are actually reached by the two named entry points: TestTimeoutKillsProcessGroup calls waitProcessGroupDead (bridge_test.go:175) and TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup calls readPIDs + waitDead (contract_test.go:457,462), so the zombie-aware decision is on the live path, not dead code.",
+                "status": "PASS",
+                "detail": "bridge_test.go:175 `waitProcessGroupDead(t, pid, 5*time.Second)` is the last statement of TestTimeoutKillsProcessGroup; contract_test.go:457 `pids := readPIDs(t, filepath.Join(f.dir, \"pids\"))` and :462 `waitDead(t, pid, 5*time.Second)` sit inside the `t.Run(\"DeliverTimeoutKillsProcessGroup\", ...)` subtest at :441. `grep -rn 'waitProcessGroupDead|liveProcessGroupMembers|readProcStat' internal/` shows the only call sites are these, and the harness subtest run above (`ok ... 0.821s`) exercises them.",
+                "derived": true
+              },
+              {
+                "criterion": "A genuinely live process still fails loudly: waitDead only returns on ErrNotExist or state=='Z' (contract_test.go:981), otherwise t.Fatalf at :987; waitProcessGroupDead only returns when len(members)==0 with err==nil (bridge_test.go:186), otherwise t.Fatalf at :192. A live (state R/S) member is counted by liveProcessGroupMembers (bridge_test.go:213) so the assertion cannot pass on a surviving process.",
+                "status": "PASS",
+                "detail": "contract_test.go:981 `if errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z') { return }` \u2014 every other outcome (live state, EPERM, malformed stat) falls through to `t.Fatalf` at :987. bridge_test.go:186 `if err == nil && len(members) == 0 { return }` \u2014 a non-Z member keeps the loop running and ends in `t.Fatalf` at :192; :213 `if group == pgid && state != 'Z'` is what puts a live member in the list. The change therefore only reclassifies zombies/absent pids as dead, not live processes.",
+                "derived": true
+              },
+              {
+                "criterion": "The evidence file's claimed base/merged results are consistent with what the tree actually contains (the pre-fix code at base 7458b4d1 really did use syscall.Kill/ESRCH, and the merged tree really has the zombie-aware helpers), so the recorded runs are not fabricated against a different tree.",
+                "status": "PASS",
+                "detail": "`git cat-file -t 7458b4d1` -> commit and `git cat-file -t edab98f8` -> commit (both present). `git show 7458b4d1:internal/boardbridge/bridge_test.go` shows `err = syscall.Kill(-pid, 0)` / `if errors.Is(err, syscall.ESRCH)` and `git show 7458b4d1:internal/harness/contract_test.go` shows `processAlive` at :1062 with `err := syscall.Kill(pid, 0)` at :1063 \u2014 exactly the mechanism the evidence file quotes at lines 13-14. HEAD (merged) contains the zombie-aware helpers (commit 05f5e1bc, `git show 05f5e1bc --stat`: bridge_test.go +71/-\u2026, contract_test.go +34/-\u2026).",
+                "derived": true
+              }
+            ],
+            "summary": "Both flaky entry points now decide aliveness from /proc state (Z or ErrNotExist) with bounded, loud budgets, readPIDs is bounded and quotes the bound plus last on-disk content, and the evidence file records the base/merged runs honestly with the network-cut leg named as a gap rather than a pass; the named tests pass fresh (ok 5.073s boardbridge, ok 0.821s harness). [uncovered failure paths: failure mode 1 (The network-cut leg of the original claim was never exercised, so the fix's behaviour under a network cut is unproven): detected_by is empty \u2014 uncovered failure path]",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY",
+      "tool_calls": [
+        {
+          "tool": "get_task_item",
+          "command": "get_task_item {\"id\": \"QA-CRIER-60\"}",
+          "exit_code": 0,
+          "output_sha": "32a2dcdb5d687a384761f2e07cca150f5f3e663c4b931a63e607206b95065fff"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/agent 2>/dev/null; pwd; ls",
+          "exit_code": 0,
+          "output_sha": "b4b616068acc7d9028eacbd9aa75f4dac59b1ac858e5e86d3c05a17e77804ff8"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && sed -n '130,240p' internal/boardbridge/bridge_test.go",
+          "exit_code": 0,
+          "output_sha": "cd17b027908daeefcfa11dc1cdcef9fe2c0bfc62068f26928f0b55218253da9e"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && sed -n '250,320p' internal/harness/contract_test.go; echo ---; sed -n '880,1010p' internal/harness/contract_test.go",
+          "exit_code": 0,
+          "output_sha": "37fe4f810df212c294ca5ef5cd3ba97c1035b294623a3ba9e86a499b13eed698"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && grep -n \"pidsWaitBound\\|readPIDs\\|waitDead\\|procState\\|DeliverTimeoutKillsProcessGroup\" internal/harness/contract_test.go",
+          "exit_code": 0,
+          "output_sha": "5f7b3c1d582785730f4153e3adc48ebf791e15023a7cbec04d57d393b4de1d15"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && sed -n '860,935p' internal/harness/contract_test.go",
+          "exit_code": 0,
+          "output_sha": "2c95933d25801e396b1b47b2d2980fa9b22d904d3fdbc4ebc046656642039908"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && sed -n '935,975p' internal/harness/contract_test.go; echo '--- 430-475'; sed -n '430,475p' internal/harness/contract_test.go",
+          "exit_code": 0,
+          "output_sha": "b72ae8a1bb5de7cd7d7430b5a91e2a84c22cf7837cb6d8ccbe4160dd204dbcd3"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && ls .coding-hermes/evidence/ 2>&1 | head -50; echo ---; cat .coding-hermes/evidence/QA-CRIER-60.md 2>&1",
+          "exit_code": 0,
+          "output_sha": "b9d6a6a86bd2862884759379aaa369ad7d8ebcad4580e97608697565a1dee579"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && cat -n .coding-hermes/evidence/QA-CRIER-60.md",
+          "exit_code": 0,
+          "output_sha": "3fed1a8dd6fd397dad8d50a2ef49b71b5148ed32fbfa55a8370b4ee7a929d09c"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && cat .gitreins/config.yaml 2>/dev/null; echo '--- git log'; git log --oneline -5; echo '--- status'; git status --short | head -20",
+          "exit_code": 0,
+          "output_sha": "2bee01e79f47da2cf05ca35e621621efc1b49c9f5cf4a76fd30a4587caa57d1c"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && git log --oneline -3 -- .coding-hermes/evidence/QA-CRIER-60.md internal/boardbridge/bridge_test.go internal/harness/contract_test.go; echo '--- diff of test files vs HEAD'; git diff HEAD --stat",
+          "exit_code": 0,
+          "output_sha": "333d00c682d89cb784aa303508ad1d0f94ec489387293089f08ee1726f5195e6"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ 2>&1 | tail -20",
+          "exit_code": 0,
+          "output_sha": "b3d71b1b7cced1b6275b86e68dd991398c3a50a14d453d92d189f225d8c53dc3"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && go test -count=1 -run 'TestAdapterContract/(pi|codex)/DeliverTimeoutKillsProcessGroup' ./internal/harness/ 2>&1 | tail -20",
+          "exit_code": 0,
+          "output_sha": "16b5221f0de0c975d94fc8e27ae0440b746ad820ff7720c8ba553049060c021c"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && git show 05f5e1bc --stat; echo '---'; git show 05f5e1bc -- internal/boardbridge/bridge_test.go | head -120",
+          "exit_code": 0,
+          "output_sha": "0dc2e83a0cab8cc33498ab48351acacad0eb1d5a741e6fa7535d19aa019d898a"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && git show 05f5e1bc -- internal/harness/contract_test.go",
+          "exit_code": 0,
+          "output_sha": "8f834ad59f44b30488b38669ffb0b1100a6cefc4db09c40ef2e20855ad9e738b"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && grep -n \"waitProcessGroupDead\\|liveProcessGroupMembers\\|readProcStat\" -r internal/ | head -20; echo '--- line numbers'; grep -n \"func waitProcessGroupDead\\|func liveProcessGroupMembers\\|state != 'Z'\\|stat_error\" internal/boardbridge/bridge_test.go",
+          "exit_code": 0,
+          "output_sha": "0de378e4e06b0813624406dea0d448f7ed7228ab26deb685c356b94f031b6114"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && grep -rn \"processAlive\\|syscall.Kill\\|syscall.ESRCH\" internal/boardbridge/ internal/harness/ | head -20; echo '--- exit'; echo done",
+          "exit_code": 0,
+          "output_sha": "1ae831e5eb15d82b469fbabe4c7cd49d172c55e45d98622196636ecc36bfe34c"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && go vet ./internal/boardbridge/ ./internal/harness/ 2>&1 | tail -10; echo \"vet_exit=$?\"",
+          "exit_code": 0,
+          "output_sha": "54702f7021860cf52983156dfe7949c5f39a8697fa0c859224fade334518d43b"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && sed -n '1,40p' internal/harness/exec_unix.go",
+          "exit_code": 0,
+          "output_sha": "cc84211d2991d92daaad93137020e59e410e5b904ef0d2e3cc8332f8fb211140"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && go test -short -count=1 ./internal/boardbridge/ ./internal/harness/ 2>&1 | tail -10",
+          "exit_code": 0,
+          "output_sha": "76391bf79d6c7619fe0db6998283604c2db11cff4f5a44bec285f6760d1caa33"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: (A) internal/harness/contract_test.go:976-988 waitDead accepts os.ErrNotExist or state=='Z' with bounded budget, failure text names state/stat_error/budget; procState at :990. boardbridge bridge_test.go:181 waitProcessGroupDead, :195 liveProcessGroupMembers, :213 `state != 'Z'`, :192 reports members + stat_error. No syscall.ESRCH aliveness check remains in either test file (grep only finds syscall.ESRCH in production killProcessGroup internal/harness/exec_unix.go:25, which is the kill path not the assertion).\\n(B) contract_test.go:911 pidsWaitBound = 5*time.Second; :919 readPIDs polls to deadline, :941/:943 failures quote the bound and lastRaw/lastErr.\\n(C) .coding-hermes/evidence/QA-CRIER-60.md:39-42 records base 7458b4d1 ok 5.017s boardbridge / ok 0.836s harness NOT REPRODUCED, merged edab98f8 ok 5.067s / ok 7.853s; :50-52 network-cut leg recorded as named gap (no unshare privilege), not a pass.\\nTests run: `go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/` -> ok 5.073s; `go test -count=1 -run 'TestAdapterContract/(pi|codex)/DeliverTimeoutKillsProcessGroup' ./internal/harness/` -> ok 0.821s; `go test -short -count=1 ./internal/boardbridge/ ./internal/harness/` -> ok 6.097s / ok 8.789s; go vet exit 0.\", \"key\": \"verified_0\"}",
+          "exit_code": 0,
+          "output_sha": "8b39c555cf54e3a4d1eaa322658141ae3ce334670d85695fe92e605371c42ce0"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"The new aliveness helpers are actually reached by the two named entry points: TestTimeoutKillsProcessGroup calls waitProcessGroupDead (bridge_test.go:175) and TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup calls readPIDs + waitDead (contract_test.go:457,462), so the zombie-aware decision is on the live path, not dead code.\", \"key\": \"derived_0\"}",
+          "exit_code": 0,
+          "output_sha": "988b7f073543519e456011ada1c90efcce9e6c4441b9fade88f2e965c8482552"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: bridge_test.go:175 `waitProcessGroupDead(t, pid, 5*time.Second)` is called from TestTimeoutKillsProcessGroup; contract_test.go:457 `pids := readPIDs(...)` and :462 `waitDead(t, pid, 5*time.Second)` inside the DeliverTimeoutKillsProcessGroup subtest. Both helpers are reachable from the named entry points; no dead code (grep shows the only call sites are these).\", \"key\": \"verified_derived_0\"}",
+          "exit_code": 0,
+          "output_sha": "b23166136cac8b9c4fb5b8eb038291f6c61331c169d034f5511d20f483d5c55d"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"A genuinely live process still fails loudly: waitDead only returns on ErrNotExist or state=='Z' (contract_test.go:981), otherwise t.Fatalf at :987; waitProcessGroupDead only returns when len(members)==0 with err==nil (bridge_test.go:186), otherwise t.Fatalf at :192. A live (state R/S) member is counted by liveProcessGroupMembers (bridge_test.go:213) so the assertion cannot pass on a surviving process.\", \"key\": \"derived_1\"}",
+          "exit_code": 0,
+          "output_sha": "73f5dbee9d9d6b307f34118ed581e3c2de169da14161c335c54bd3fce76d948c"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: contract_test.go:981 `if errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z') { return }` \\u2014 any other outcome falls through to t.Fatalf at :987. bridge_test.go:186 `if err == nil && len(members) == 0 { return }` \\u2014 a live (non-Z) member keeps the loop going and ends in t.Fatalf at :192. So a surviving process still reds the test; the change only reclassifies zombies/absent pids as dead.\", \"key\": \"verified_derived_1\"}",
+          "exit_code": 0,
+          "output_sha": "86277628b1ce134c72705d3818cf0429cf3fa51c55aab3faf2e9296bb6d5ea4c"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"derived_2: The evidence file's claimed base/merged results are consistent with what the tree actually contains (the pre-fix code at base 7458b4d1 really did use syscall.Kill/ESRCH, and the merged tree really has the zombie-aware helpers), so the recorded runs are not fabricated against a different tree.\", \"key\": \"derived_2\"}",
+          "exit_code": 0,
+          "output_sha": "fe16550c1a6959b257c4de432ee3ab383c2dce58964e37bd5fbc9ca0e96cbf41"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && git cat-file -t 7458b4d1 2>&1; git cat-file -t edab98f8 2>&1; echo '--- base bridge_test aliveness'; git show 7458b4d1:internal/boardbridge/bridge_test.go 2>/dev/null | sed -n '170,190p'; echo '--- base contract aliveness'; git show 7458b4d1:internal/harness/contract_test.go 2>/dev/null | grep -n \"syscall.Kill\\|processAlive\" | head",
+          "exit_code": 0,
+          "output_sha": "cf685373be536cb8756521f2194613011d782e0f838f9fcff95ed4d555a80f2e"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: both commits exist in this repo (`git cat-file -t 7458b4d1` -> commit, `edab98f8` -> commit). At base 7458b4d1 the code matches the evidence file's quoted lines: bridge_test.go used `syscall.Kill(-pid, 0)` + `errors.Is(err, syscall.ESRCH)` and contract_test.go:1063 `err := syscall.Kill(pid, 0)` in processAlive \\u2014 exactly the mechanism the evidence file describes. The merged tree (HEAD) contains the zombie-aware helpers, so the recorded runs are against the trees they claim.\", \"key\": \"verified_derived_2\"}",
+          "exit_code": 0,
+          "output_sha": "74938dbd644f1db5ae65ae8fdb49bbb0ac07ccafe6d22a6e3f9cc1b02d98c893"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md | head -5; echo '--- proof cmd'; go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ 2>&1 | tail -3",
+          "exit_code": 0,
+          "output_sha": "7d4507b4f53cc3af14553fd25b04f118f4f2de57583e156f7c61feeb4d4c38ac"
+        }
+      ]
+    }
+  },
+  "review": {
+    "reviewer_email": "totalwindupflightsystems@gmail.com",
+    "reviewer_name": "totalwindupflightsystems",
+    "commit_author_email": "totalwindupflightsystems@gmail.com",
+    "commit_author_name": "totalwindupflightsystems",
+    "self_review": true,
+    "findings": [
+      {
+        "severity": "low",
+        "file": ".gitreins/tasks.yaml",
+        "line": 4076,
+        "detection": "criteria block reformatted from YAML literal block scalar (|-) to single-quoted folded scalar, changing the stored string",
+        "detail": "The `- |-` block scalar is replaced by a single-quoted scalar, so the criteria text is now stored as one folded line with embedded newlines and doubled single quotes (`judge''s`, `''wakeCh chan struct{}''`) rather than the original literal block \u2014 a pure re-serialization of unchanged content."
+      },
+      {
+        "severity": "info",
+        "file": ".gitreins/tasks.yaml",
+        "line": 4106,
+        "detection": "completed_at timestamps bumped without any corresponding code change in the diff",
+        "detail": "QA-CRIER-58 and QA-CRIER-60 completed_at values move from 2026-11-13 to 2026-11-18 while the diff touches only the criteria text of these two entries, so the completion timestamps are rewritten with no substantive change to the tasks."
+      }
+    ],
+    "summary": "The diff only re-serializes two task criteria strings from literal block scalars to folded single-quoted scalars and bumps their completed_at timestamps, with no content change and no code touched."
+  },
+  "summary": "Stage tier1: PASS\n    \u2713 guard: gitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.pro\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.\n(A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).\n(B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.\n(C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.\nPROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md\nFAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep decides aliveness, the failure text omits the observed state or budget, or the evidence file's named gaps are reported as passes.: (A) internal/harness/contract_test.go:976-988 waitDead polls procState (defined :990) and returns only on `errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z')`; the failure text at :987 is `pid %d is still live after the timeout kill \u2014 state=%q stat_error=%v budget=%s`, i.e. state + stat error + budget. boardbridge: bridge_test.go:181 waitProcessGroupDead, :195 liveProcessGroupMembers, :213 `if group == pgid && state != 'Z'`, :192 `t.Fatalf(\"process group %d still has live members after timeout kill: members=%v stat_error=%v\", ...)`. No ESRCH-based aliveness remains in either test file \u2014 `grep -rn 'processAlive|syscall.Kill|syscall.ESRCH' internal/boardbridge/ internal/harness/` returns only production kill paths (internal/harness/exec_unix.go:25, internal/boardbridge/bridge.go:200), not assertions. (B) contract_test.go:911 `pidsWaitBound = 5 * time.Second`; :919 readPIDs loops to `deadline := time.Now().Add(pidsWaitBound)` and only returns when `len(pids) >= pidsWanted`; failures at :941 (`read pids: %v (waited %s for %s to hold %d pids)`) and :943 (`... within %s: %q`, lastRaw) quote the bound and the last on-disk content. (C) .coding-hermes/evidence/QA-CRIER-60.md:39-42 records base 7458b4d1 `ok 5.017s \u2014 FAILURE NOT REPRODUCED` (boardbridge) and `ok 0.836s \u2014 FAILURE NOT REPRODUCED` (harness), merged edab98f8 `ok 5.067s` / `ok 7.853s`; :50-52 records the network-cut leg as an explicit named gap (\"this host cannot create a network namespace ... Recorded as a named gap, not a pass\"). Tests run fresh: `go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/` -> `ok github.com/crier-dev/crier/internal/boardbridge 5.073s` (exit 0); `go test -count=1 -run 'TestAdapterContract/(pi|codex)/DeliverTimeoutKillsProcessGroup' ./internal/harness/` -> `ok ... 0.821s` (exit 0); `go test -short -count=1 ./internal/boardbridge/ ./internal/harness/` -> `ok 6.097s` / `ok 8.789s`; `go vet ./internal/boardbridge/ ./internal/harness/` exit 0. [resolution 0.10; internal/boardbridge/bridge_test.go:147, internal/harness/contract_test.go:277, contract_test.go:990, bridge_test.go:192, .coding-hermes/evidence/QA-CRIER-60.md]\n  \u2713 The new aliveness helpers are actually reached by the two named entry points: TestTimeoutKillsProcessGroup calls waitProcessGroupDead (bridge_test.go:175) and TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup calls readPIDs + waitDead (contract_test.go:457,462), so the zombie-aware decision is on the live path, not dead code.: bridge_test.go:175 `waitProcessGroupDead(t, pid, 5*time.Second)` is the last statement of TestTimeoutKillsProcessGroup; contract_test.go:457 `pids := readPIDs(t, filepath.Join(f.dir, \"pids\"))` and :462 `waitDead(t, pid, 5*time.Second)` sit inside the `t.Run(\"DeliverTimeoutKillsProcessGroup\", ...)` subtest at :441. `grep -rn 'waitProcessGroupDead|liveProcessGroupMembers|readProcStat' internal/` shows the only call sites are these, and the harness subtest run above (`ok ... 0.821s`) exercises them.\n  \u2713 A genuinely live process still fails loudly: waitDead only returns on ErrNotExist or state=='Z' (contract_test.go:981), otherwise t.Fatalf at :987; waitProcessGroupDead only returns when len(members)==0 with err==nil (bridge_test.go:186), otherwise t.Fatalf at :192. A live (state R/S) member is counted by liveProcessGroupMembers (bridge_test.go:213) so the assertion cannot pass on a surviving process.: contract_test.go:981 `if errors.Is(err, os.ErrNotExist) || (err == nil && state == 'Z') { return }` \u2014 every other outcome (live state, EPERM, malformed stat) falls through to `t.Fatalf` at :987. bridge_test.go:186 `if err == nil && len(members) == 0 { return }` \u2014 a non-Z member keeps the loop running and ends in `t.Fatalf` at :192; :213 `if group == pgid && state != 'Z'` is what puts a live member in the list. The change therefore only reclassifies zombies/absent pids as dead, not live processes.\n  \u2713 The evidence file's claimed base/merged results are consistent with what the tree actually contains (the pre-fix code at base 7458b4d1 really did use syscall.Kill/ESRCH, and the merged tree really has the zombie-aware helpers), so the recorded runs are not fabricated against a different tree.: `git cat-file -t 7458b4d1` -> commit and `git cat-file -t edab98f8` -> commit (both present). `git show 7458b4d1:internal/boardbridge/bridge_test.go` shows `err = syscall.Kill(-pid, 0)` / `if errors.Is(err, syscall.ESRCH)` and `git show 7458b4d1:internal/harness/contract_test.go` shows `processAlive` at :1062 with `err := syscall.Kill(pid, 0)` at :1063 \u2014 exactly the mechanism the evidence file quotes at lines 13-14. HEAD (merged) contains the zombie-aware helpers (commit 05f5e1bc, `git show 05f5e1bc --stat`: bridge_test.go +71/-\u2026, contract_test.go +34/-\u2026).\nBoth flaky entry points now decide aliveness from /proc state (Z or ErrNotExist) with bounded, loud budgets, readPIDs is bounded and quotes the bound plus last on-disk content, and the evidence file records the base/merged runs honestly with the network-cut leg named as a gap rather than a pass; the named tests pass fresh (ok 5.073s boardbridge, ok 0.821s harness). [uncovered failure paths: failure mode 1 (The network-cut leg of the original claim was never exercised, so the fix's behaviour under a network cut is unproven): detected_by is empty \u2014 uncovered failure path]\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-18T00:17:09.103664",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-18T00:17:09.169165+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 15933,
+        "truncated": false,
+        "source": "git show 53ab9586cd64"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 7578,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "QA-CRIER-60"
+  }
+}

@@ -62,6 +62,19 @@ guards:
   # 1020 = test_timeout 900 + 120s of slack for go_build + go_lint, which run
   # BEFORE the tests arm and are charged to the same overall budget.
   hook_timeout: 1020
+# GR-172 criterion authoring gate (QA-CRIER-064, 2026-11-17): `refuse` makes
+# `gitreins task create` REJECT a criterion that carries neither `FAILIF:` nor a
+# command/locator-shaped `PROOF:` (engine/criteria.py::criterion_gaps; the tool's
+# own default policy is `warn`, which only prints). The four rows that starved
+# tier-2 (QA-CRIER-57 runs 0f0e80e1 + 92778507, QA-CRIER-58 run 06fb79f8,
+# QA-CRIER-60 run a503d646) were all created thin: the criterion named no proof,
+# so the judge had to invent the evidence set and paged it one line per tool call
+# (140 distinct `sed -n Np` commands in 06fb79f8; the same command 166x in
+# a503d646) until the iteration cap ended the run with 0 of 1 criteria graded.
+# Authoring rules + the measured diagnosis: .gitreins/CRITERIA.md. A wave that
+# genuinely needs a thin row must pass --allow-thin and say why in its brief.
+criteria:
+  enforce: refuse
 pipeline:
   stages:
   - id: tier1
@@ -182,6 +195,23 @@ evaluator:
   max_output_tokens: 0.4M
   tool_call_weight: 0.1
   fast_track: auto
+  # ── NO FURTHER RAISE FOR UNEXAMINED RUNS (QA-CRIER-064, tick 2026-11-17) ──
+  # The rungs above have been raised four times (iterations 100→250→400→600,
+  # input 9M→12M→16M→24M→48M) and the UNEXAMINED signature came back at every
+  # one of them. The four starved runs measured for this row all ended with
+  # "0 of 1 criteria graded":
+  #   0f0e80e1 QA-CRIER-57  600.7 iters / 38.5M in / 0 of 1 graded
+  #   92778507 QA-CRIER-57  600.2 iters / 38.1M in / 0 of 1 graded
+  #   06fb79f8 QA-CRIER-58  600.4 iters /  5.3M in / 0 of 1 graded
+  #   a503d646 QA-CRIER-60  600.9 iters / 22.0M in / 0 of 1 graded
+  # None of them ran a single gate command: their recorded tool calls page an
+  # unbounded evidence set one line per call (06fb79f8: 140 distinct
+  # `grep … | sed -n Np`; a503d646: one command re-issued 166x). Raising a cap
+  # buys more of the same scrolling — the starved resource is the CRITERION's
+  # missing proof obligation, not the budget. Fix the criterion
+  # (.gitreins/CRITERIA.md, enforced by `criteria.enforce: refuse` above); only
+  # raise a rung when a run that has a COMPLETE, BOUNDED evidence set starves,
+  # and cite its usage.jsonl numbers as the rungs above do.
 
 defaults:
   model: deepseek-v4-flash

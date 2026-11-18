@@ -1,0 +1,232 @@
+commit 53ab9586cd645b7424ff7d73fe07529fd12acdf3
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Tue Nov 17 19:10:26 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Tue Nov 17 19:10:26 2026 -0500
+
+    test(gitreins): bound the tier-2 criteria so the judge can grade them (QA-CRIER-064)
+    
+    The four tier-2 runs that starved UNEXAMINED for crier all exhausted the
+    600-iteration rung with "0 of 1 criteria graded", and none of them ever ran a
+    gate command. Their recorded tool calls page an unbounded evidence set one line
+    per call:
+    
+      06fb79f8 QA-CRIER-58  600.4 iters /  5.3M in  140 distinct `grep -o ... | sed -n 701p`, 702p, ...
+      a503d646 QA-CRIER-60  600.9 iters / 22.0M in  the same command re-issued 166 times verbatim
+      0f0e80e1 QA-CRIER-57  600.7 iters / 38.5M in  `git show <sha>:<file> | sed -n '532,542p'` then 533,543 ...
+      92778507 QA-CRIER-57  600.2 iters / 38.1M in  `git show <sha> -- <file> | sed -n '476p'`, 477p, ...
+    
+    The rungs above them have been raised four times (iterations 100->250->400->600,
+    input 9M->12M->16M->24M->48M) and the identical "0 of 1 graded" signature came
+    back after each, so a fifth raise buys more scrolling, not a verdict. The starved
+    resource is the CRITERION's missing proof obligation: each of the four criteria
+    was created thin (no PROOF:/FAILIF:) and in wave-cell vocabulary that resolves
+    nowhere in the tree, so the judge had to invent its evidence set and could never
+    name its end.
+    
+    - .gitreins/CRITERIA.md (new): the authoring rules -- carry PROOF:/FAILIF:,
+      resolve every noun against the tree, never write an enumeration as a search
+      obligation, keep the gate inside the judge's 30s command cap or cite a
+      committed evidence file, split what fails independently -- plus the measured
+      diagnosis table and the re-judge procedure.
+    - .gitreins/config.yaml: criteria.enforce: refuse (GR-172) so a thin criterion
+      can no longer be created; a comment block in the evaluator section records
+      that the iteration/token rungs are NOT to be raised for an UNEXAMINED run and
+      why (measured basis, run ids).
+    - .gitreins/tasks.yaml: the QA-CRIER-58 and QA-CRIER-60 criteria are rewritten
+      as bounded compound criteria with file:line anchors -- the same claims, with
+      "chaos-resource legs" resolved to the real package command, "all three
+      failures" resolved to the two named test entry points, a PROOF command that
+      runs in ~4s (inside the tool cap), and a committed evidence file for the leg
+      this host cannot inject.
+    
+    explicitly NOT done: no cap raise (the one-raise rule does not apply to a run
+    that never reached its criterion -- see the config comment), and no tool-side
+    change (gitreins 0.21.0's 30s run_command cap is DF-CRIER-506; its UNEXAMINED
+    outcome still has no distinct pass_class, so the "UNGRADED as a pass_class" arm
+    of the acceptance criteria remains tool-side).
+    
+    Re-judge proof lands in the following commit (two sequential tier-2 runs on this
+    branch, examined=true read from .gitreins/history/<date>/<run>/verdict.json).
+    
+    Addresses QA-CRIER-064.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ .gitreins/CRITERIA.md | 82 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ .gitreins/config.yaml | 30 +++++++++++++++++++
+ .gitreins/tasks.yaml  | 18 ++++++++---
+ 3 files changed, 126 insertions(+), 4 deletions(-)
+
+diff --git a/.gitreins/CRITERIA.md b/.gitreins/CRITERIA.md
+new file mode 100644
+index 00000000..19fa0e66
+--- /dev/null
++++ b/.gitreins/CRITERIA.md
+@@ -0,0 +1,82 @@
++# Criterion authoring for the crier tier-2 judge
++
++**Status:** enforced. `criteria.enforce: refuse` in `.gitreins/config.yaml` refuses a
++`gitreins task create` whose criterion is thin (`--allow-thin` downgrades it to a
++warning for one call).
++
++## Why this file exists (measured, not asserted)
++
++Board row QA-CRIER-064: "gitreins tier-2 judge for crier cannot reach its criterion:
++3 of 5 runs ended UNEXAMINED at the iteration/size cap". Every starred-out run below
++spent its **entire** iteration budget and graded **0 criteria**, and in every case the
++recorded tool calls show the judge scrolling an evidence set one line per call instead
++of grading — not a run that needed a little more room:
++
++| run | task | cap line from verdict.json | graded | tool calls | what the judge actually did |
++|---|---|---|---|---|---|
++| `2026-11-13/06fb79f8` | QA-CRIER-58 | `Cap exceeded: Iteration cap (600) reached (600.4 used). … 0 of 1 criteria graded` | 0/1 | 200 recorded + **735 omitted** | 140 distinct `grep -o … \| sed -n 701p`, `702p`, … one match per call |
++| `2026-11-13/a503d646` | QA-CRIER-60 | `Iteration cap (600) reached (600.9 used) … 0 of 1 criteria graded` | 0/1 | 200 + **360 omitted** | the *same* command re-issued **166 times** verbatim |
++| `2026-11-13/0f0e80e1` | QA-CRIER-57 | `Iteration cap (600) reached (600.7 used) … 0 of 1 criteria graded` | 0/1 | 200 + **348 omitted** | `git show 42f193ca:…/handler_test.go \| sed -n '532,542p'` then `533,543` … one line per call |
++| `2026-11-16/92778507` | QA-CRIER-57 (re-run) | `Iteration cap (600) reached (600.2 used) … 0 of 1 criteria graded` | 0/1 | 200 + **353 omitted** | `git show 7b2f0d27 -- … \| sed -n '476p'`, `477p`, … one line per call |
++
++Zero `go test` invocations appear in any of those runs' tool records. The judge never
++reached the gate; it was paging a search result set that no rung can exhaust.
++
++The cap history in `.gitreins/config.yaml` is four rungs of the same experiment
++(100 → 250 → 400 → 600, plus 9M → 12M → 16M → 24M → 48M tokens). Each raise was
++justified by "exact-equality starvation" on a run that had a **complete evidence set**.
++That reasoning does not hold for the four runs above: they starve with **no** evidence
++set because the criterion never says what evidence would settle it. A larger rung buys
++more scrolling, which is why the same signature came back at every rung.
++
++## The rules
++
++A criterion is the judge's entire work order. It has to be **bounded**: the judge must
++be able to name the evidence set and stop.
++
++1. **Carry `PROOF:` and `FAILIF:`.** `PROOF:` names a locator (`path`, `path:line`,
++   `tests/x.py::test_y`) or a command that runs inside the judge's command tool. `FAILIF:`
++   is the condition that makes the criterion fail. Enforced by `criteria.enforce: refuse`.
++
++2. **Resolve every noun against the tree.** "clean and chaos-resource legs" is
++   bunker-QA cell vocabulary: the term appears nowhere in the repo except dogfood
++   narrative, and the judge answered it the only way it could — by grepping for the
++   string and paging 140 hits from a commit patch. Say `go test -count=1 ./internal/federation/`
++   and name the cell's command if a cell is what proved it.
++
++3. **Never write an enumeration as a search obligation.** "all three failures" makes the
++   judge find the set. Enumerate them: entry point, file, line. A named list is graded;
++   an unnamed set is paged.
++
++4. **Keep the gate inside the tool's command budget, or cite a file.** The judge's
++   `run_command` is hard-capped at 30s (tool-side; tracked as DF-CRIER-506). A gate that
++   fits (`go test -count=1 ./internal/federation/` is ~4s) belongs in `PROOF:`. A gate that
++   cannot fit belongs in a committed evidence artifact that `PROOF:` points the judge at
++   by path — never as a command the judge is required to run and cannot.
++
++5. **Split what fails independently.** One criterion per independently-failable claim
++   (own task when the wave creates rows): a graded FAIL on claim A must not hide whether
++   claim B was ever examined. A compound criterion is fine when its claims share one
++   evidence set — then say so and bound it.
++
++6. **A criterion that names a gap must name it as a gap.** "reproduced at fixed SHA under
++   stress" is only gradable if the SHA and the stress command are in the criterion, or if
++   a committed evidence file records the attempt and the outcome. `.coding-hermes/evidence/<row>.md`
++   is the established home; cite it.
++
++## Re-judging an existing row
++
++`gitreins task` has no edit verb, so a criterion is changed in `.gitreins/tasks.yaml`
++(tracked) directly — block scalar under `criteria:` — then:
++
++```sh
++gitreins task start <id>      # re-opens the row for grading
++gitreins task complete <id>   # grades the CURRENT tree, writes
++                              # .gitreins/history/<date>/<run>/verdict.json
++```
++
++Run judge runs **sequentially**: two concurrent tier-2 runs in one checkout collide on
++tier-1 coverage artifacts and spuriously FAIL. Read `examined` from the per-criterion
++`items[]` of the history verdict (`status` `PASS` / `FAIL` / `UNVERIFIED` / `NOT_VERIFIABLE`);
++`UNVERIFIED` + `detail: "Not examined — evaluation ended before this criterion was reached"`
++is the failure this file exists to prevent.
+diff --git a/.gitreins/config.yaml b/.gitreins/config.yaml
+index e377afe9..d0c8e77e 100644
+--- a/.gitreins/config.yaml
++++ b/.gitreins/config.yaml
+@@ -62,6 +62,19 @@ guards:
+   # 1020 = test_timeout 900 + 120s of slack for go_build + go_lint, which run
+   # BEFORE the tests arm and are charged to the same overall budget.
+   hook_timeout: 1020
++# GR-172 criterion authoring gate (QA-CRIER-064, 2026-11-17): `refuse` makes
++# `gitreins task create` REJECT a criterion that carries neither `FAILIF:` nor a
++# command/locator-shaped `PROOF:` (engine/criteria.py::criterion_gaps; the tool's
++# own default policy is `warn`, which only prints). The four rows that starved
++# tier-2 (QA-CRIER-57 runs 0f0e80e1 + 92778507, QA-CRIER-58 run 06fb79f8,
++# QA-CRIER-60 run a503d646) were all created thin: the criterion named no proof,
++# so the judge had to invent the evidence set and paged it one line per tool call
++# (140 distinct `sed -n Np` commands in 06fb79f8; the same command 166x in
++# a503d646) until the iteration cap ended the run with 0 of 1 criteria graded.
++# Authoring rules + the measured diagnosis: .gitreins/CRITERIA.md. A wave that
++# genuinely needs a thin row must pass --allow-thin and say why in its brief.
++criteria:
++  enforce: refuse
+ pipeline:
+   stages:
+   - id: tier1
+@@ -182,6 +195,23 @@ evaluator:
+   max_output_tokens: 0.4M
+   tool_call_weight: 0.1
+   fast_track: auto
++  # ── NO FURTHER RAISE FOR UNEXAMINED RUNS (QA-CRIER-064, tick 2026-11-17) ──
++  # The rungs above have been raised four times (iterations 100→250→400→600,
++  # input 9M→12M→16M→24M→48M) and the UNEXAMINED signature came back at every
++  # one of them. The four starved runs measured for this row all ended with
++  # "0 of 1 criteria graded":
++  #   0f0e80e1 QA-CRIER-57  600.7 iters / 38.5M in / 0 of 1 graded
++  #   92778507 QA-CRIER-57  600.2 iters / 38.1M in / 0 of 1 graded
++  #   06fb79f8 QA-CRIER-58  600.4 iters /  5.3M in / 0 of 1 graded
++  #   a503d646 QA-CRIER-60  600.9 iters / 22.0M in / 0 of 1 graded
++  # None of them ran a single gate command: their recorded tool calls page an
++  # unbounded evidence set one line per call (06fb79f8: 140 distinct
++  # `grep … | sed -n Np`; a503d646: one command re-issued 166x). Raising a cap
++  # buys more of the same scrolling — the starved resource is the CRITERION's
++  # missing proof obligation, not the budget. Fix the criterion
++  # (.gitreins/CRITERIA.md, enforced by `criteria.enforce: refuse` above); only
++  # raise a rung when a run that has a COMPLETE, BOUNDED evidence set starves,
++  # and cite its usage.jsonl numbers as the rungs above do.
+ 
+ defaults:
+   model: deepseek-v4-flash
+diff --git a/.gitreins/tasks.yaml b/.gitreins/tasks.yaml
+index d6f7a04a..e091546d 100644
+--- a/.gitreins/tasks.yaml
++++ b/.gitreins/tasks.yaml
+@@ -4073,8 +4073,13 @@ tasks:
+ - id: QA-CRIER-58
+   title: internal/federation hold-manager retry gate is a fixed 20ms sleep
+   criteria:
+-  - go test -count=1 ./internal/federation/ green on clean and chaos-resource legs;
+-    pre-retry wait is event-driven with bounded budget; non-vacuity proven
++  - |-
++    internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.
++    (A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.
++    (B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.
++    (C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).
++    PROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go
++    FAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent, RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing or renamed.
+   status: complete
+   created_at: '2026-11-13T05:33:46.793351+00:00'
+   completed_at: '2026-11-13T07:07:12.790390+00:00'
+@@ -4094,8 +4099,13 @@ tasks:
+ - id: QA-CRIER-60
+   title: timeout-kill assertions not stress-resilient under cap and network cut
+   criteria:
+-  - all three failures reproduced at fixed SHA under stress; assertions robust to
+-    slow reaper/unreaped zombie; clean and stressed runs agree
++  - |-
++    timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.
++    (A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).
++    (B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.
++    (C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.
++    PROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md
++    FAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep decides aliveness, the failure text omits the observed state or budget, or the evidence file's named gaps are reported as passes.
+   status: complete
+   created_at: '2026-11-13T05:33:47.789704+00:00'
+   completed_at: '2026-11-13T07:34:09.707926+00:00'
