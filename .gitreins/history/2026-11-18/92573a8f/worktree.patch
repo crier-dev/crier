@@ -1,0 +1,89 @@
+diff --git a/.gitreins/tasks.yaml b/.gitreins/tasks.yaml
+index e091546d..025bb869 100644
+--- a/.gitreins/tasks.yaml
++++ b/.gitreins/tasks.yaml
+@@ -4073,16 +4073,34 @@ tasks:
+ - id: QA-CRIER-58
+   title: internal/federation hold-manager retry gate is a fixed 20ms sleep
+   criteria:
+-  - |-
+-    internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.
+-    (A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.
+-    (B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.
+-    (C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).
+-    PROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go
+-    FAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent, RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing or renamed.
++  - 'internal/federation hold-manager retry gate is event-driven with a bounded budget;
++    three claims, all resolvable in this tree.
++
++    (A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs
++    in ~4s, inside the judge''s 30s command cap.
++
++    (B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager
++    carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318);
++    `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()`
++    selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait
++    is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose
++    zero values fall back to defaults.
++
++    (C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421)
++    shows the retry observation cannot pass on the synchronous forward alone, and
++    TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the
++    bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of
++    a bare time.Sleep(20ms).
++
++    PROOF: go test -count=1 ./internal/federation/ && grep -n ''wakeCh chan struct{}''
++    internal/federation/hold.go
++
++    FAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent,
++    RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing
++    or renamed.'
+   status: complete
+   created_at: '2026-11-13T05:33:46.793351+00:00'
+-  completed_at: '2026-11-13T07:07:12.790390+00:00'
++  completed_at: '2026-11-18T00:13:01.498187+00:00'
+ - id: QA-CRIER-57
+   title: 'Mesh probe determinism: instrumented failure text + server reader attach
+     + >=200-iteration hammer'
+@@ -4099,13 +4117,34 @@ tasks:
+ - id: QA-CRIER-60
+   title: timeout-kill assertions not stress-resilient under cap and network cut
+   criteria:
+-  - |-
+-    timeout-kill assertions are stress-resilient against a slow reaper: the two flaky entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147) and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277). Three claims.
+-    (A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state Z or os.ErrNotExist with a bounded budget and names the observed state, stat error and budget when it fails (internal/harness/contract_test.go:976-988 using procState at contract_test.go:990), and the boardbridge equivalent counts a process-group member as live only when state != 'Z' (internal/boardbridge/bridge_test.go:181 waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting members plus stat_error (bridge_test.go:192).
+-    (B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911) and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk content instead of reading a partial file.
+-    (C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s harness), merged edab98f8 green on both legs, and lists the network-cut leg as an explicit named gap because this host cannot create a netns.
+-    PROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/ && sed -n '1,60p' .coding-hermes/evidence/QA-CRIER-60.md
+-    FAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep decides aliveness, the failure text omits the observed state or budget, or the evidence file's named gaps are reported as passes.
++  - 'timeout-kill assertions are stress-resilient against a slow reaper: the two flaky
++    entry points are boardbridge TestTimeoutKillsProcessGroup (internal/boardbridge/bridge_test.go:147)
++    and harness TestAdapterContract/{pi,codex}/DeliverTimeoutKillsProcessGroup (internal/harness/contract_test.go:277).
++    Three claims.
++
++    (A) the aliveness decision no longer accepts only ESRCH: waitDead accepts state
++    Z or os.ErrNotExist with a bounded budget and names the observed state, stat error
++    and budget when it fails (internal/harness/contract_test.go:976-988 using procState
++    at contract_test.go:990), and the boardbridge equivalent counts a process-group
++    member as live only when state != ''Z'' (internal/boardbridge/bridge_test.go:181
++    waitProcessGroupDead, 195 liveProcessGroupMembers, 213 the Z test), reporting
++    members plus stat_error (bridge_test.go:192).
++
++    (B) the pid evidence wait is bounded and loud: pidsWaitBound = 5*time.Second (contract_test.go:911)
++    and readPIDs (contract_test.go:919) fails quoting the bound and the last on-disk
++    content instead of reading a partial file.
++
++    (C) the clean and stressed legs agree and the gaps are named, not passed: .coding-hermes/evidence/QA-CRIER-60.md
++    records base 7458b4d1 NOT red under MemoryMax=3G (ok 5.017s boardbridge / ok 0.836s
++    harness), merged edab98f8 green on both legs, and lists the network-cut leg as
++    an explicit named gap because this host cannot create a netns.
++
++    PROOF: go test -count=1 -run TestTimeoutKillsProcessGroup ./internal/boardbridge/
++    && sed -n ''1,60p'' .coding-hermes/evidence/QA-CRIER-60.md
++
++    FAILIF: an aliveness check still treats only ESRCH as death, an unbounded sleep
++    decides aliveness, the failure text omits the observed state or budget, or the
++    evidence file''s named gaps are reported as passes.'
+   status: complete
+   created_at: '2026-11-13T05:33:47.789704+00:00'
+   completed_at: '2026-11-13T07:34:09.707926+00:00'

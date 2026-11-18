@@ -1,0 +1,282 @@
+{
+  "task_id": "QA-CRIER-58",
+  "task_title": "internal/federation hold-manager retry gate is a fixed 20ms sleep",
+  "task_criteria": [
+    "internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.\n(A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.\n(B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.\n(C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).\nPROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go\nFAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent, RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing or renamed."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/worktrees/crier-QA-CRIER-064",
+  "branch": "wt/QA-CRIER-064",
+  "commit": "53ab9586cd645b7424ff7d73fe07529fd12acdf3",
+  "pass_class": "judged",
+  "tier2_skipped": false,
+  "working_tree_content_fingerprint": "bb605eacbfd63ef6b02de18e3ebe6f9cc078f954a8ed9373524a4d72daf3093b",
+  "working_tree_dirty_path_count": 1,
+  "items": [
+    {
+      "criterion": "internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.\n(A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.\n(B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.\n(C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).\nPROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go\nFAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent, RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing or renamed.",
+      "status": "PASS",
+      "detail": "(A) `go test -count=1 ./internal/federation/` -> `ok  github.com/crier-dev/crier/internal/federation  1.404s`, exit_code 0. (B) hold.go:317-318 `stopCh chan struct{}` / `wakeCh chan struct{}`; initialized hold.go:329-330 with `wakeCh: make(chan struct{}, 1)`; wake() hold.go:442-448 is `select { case m.wakeCh <- struct{}{}: default: }` (non-blocking, channel never closed); loop() hold.go:449-470 selects on `<-m.stopCh` / `<-m.wakeCh` / `<-timer.C` before every `m.Sweep(time.Now())`; `grep -n 'time.Sleep' internal/federation/hold.go` returns nothing, so no fixed pre-retry sleep gates the attempt; RetryEvery/MaxRetryInterval declared hold.go:286-287 with zero-value fallbacks in withDefaults hold.go:292-301, used by the timer (hold.go:451,467) and by delay()'s cap (hold.go:490-492). (C) hold_test.go:421 TestHoldManagerRetryWaitIsNonVacuous sets RetryEvery=100ms and asserts callCount stays 1 inside a 10ms budget; hold_test.go:360 TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry via waitFor (hold_test.go:84) at hold_test.go:380. Both named tests exist and pass: `go test -count=1 -run 'TestHoldManagerRetryWaitIsNonVacuous|TestHoldManagerRetriesUntilRecoveryDeliversOnce' -v ./internal/federation/` -> `--- PASS: TestHoldManagerRetriesUntilRecoveryDeliversOnce (0.06s)`, `--- PASS: TestHoldManagerRetryWaitIsNonVacuous (0.01s)`, `ok ... 0.080s`. [resolution 0.54; internal/federation/hold.go:317-318, hold.go:442-448, internal/federation/hold_test.go:421, hold_test.go:84]"
+    },
+    {
+      "criterion": "The event-driven retry loop is reachable from the server entrypoint: cmd/server/main.go constructs the HoldManager, calls Start() (launching loop()) and Stop() on shutdown.",
+      "status": "PASS",
+      "detail": "cmd/server/main.go:838-844: `fedHold = federation.NewHoldManager(fedClient, holdQueue, federation.HoldConfig{MaxHold: cfg.Federation.MaxHold})`, then `fedHold.Start()` and `defer fedHold.Stop()`. Start() (hold.go:381-391) launches `go m.loop()`; Stop() (hold.go:398-407) closes stopCh and waits on the WaitGroup. RetryEvery/MaxRetryInterval are left zero here and filled by withDefaults (hold.go:292-301), so the production path uses the event-driven loop with default bounds.",
+      "derived": true
+    },
+    {
+      "criterion": "wake() cannot block or panic: buffered cap-1 channel + select/default, never closed, so it is safe before Start and after Stop.",
+      "status": "PASS",
+      "detail": "hold.go:442-448 `func (m *HoldManager) wake() { select { case m.wakeCh <- struct{}{}: default: } }` over the cap-1 buffered channel created at hold.go:330; the channel is never closed (only stopCh is closed, hold.go:405), so a wake after Stop cannot panic and a full buffer cannot block. Called from Enqueue at hold.go:436.",
+      "derived": true
+    },
+    {
+      "criterion": "The retry wait is bounded: loop() resets a timer to cfg.RetryEvery each pass (hold.go:451,467) and per-item backoff delay() is capped at MaxRetryInterval (hold.go:490-492), so no unbounded wait exists.",
+      "status": "PASS",
+      "detail": "hold.go:451 `timer := time.NewTimer(m.cfg.RetryEvery)`; after each Sweep the timer is drained and `timer.Reset(m.cfg.RetryEvery)` (hold.go:461-467); per-item backoff `delay()` (hold.go:482-495) doubles RetryEvery but clamps `if d > m.cfg.MaxRetryInterval || d <= 0 { d = m.cfg.MaxRetryInterval }` (hold.go:491-492). Zero config values are replaced by DefaultRetryEvery=2s / DefaultMaxRetryInterval=60s (hold.go:41-44, 292-301), so every wait is bounded.",
+      "derived": true
+    }
+  ],
+  "merge_recommendation": "no_concerns_found",
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: gitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.pro",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "gitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.provider: unknown key \u2014 this key is ignored\ngitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.api_key_env: unknown key \u2014 this key is ignored\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/logs/guard-20261118T001302.369659Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/worktrees/crier-QA-CRIER-064/.gitreins/logs/guard-20261118T001302.369659Z.log"
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.\n(A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.\n(B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.\n(C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).\nPROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go\nFAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent, RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing or renamed.: (A) `go test -count=1 ./internal/federation/` -> `ok  github.com/crier-dev/crier/internal/federation  1.404s`, exit_code 0. (B) hold.go:317-318 `stopCh chan struct{}` / `wakeCh chan struct{}`; initialized hold.go:329-330 with `wakeCh: make(chan struct{}, 1)`; wake() hold.go:442-448 is `select { case m.wakeCh <- struct{}{}: default: }` (non-blocking, channel never closed); loop() hold.go:449-470 selects on `<-m.stopCh` / `<-m.wakeCh` / `<-timer.C` before every `m.Sweep(time.Now())`; `grep -n 'time.Sleep' internal/federation/hold.go` returns nothing, so no fixed pre-retry sleep gates the attempt; RetryEvery/MaxRetryInterval declared hold.go:286-287 with zero-value fallbacks in withDefaults hold.go:292-301, used by the timer (hold.go:451,467) and by delay()'s cap (hold.go:490-492). (C) hold_test.go:421 TestHoldManagerRetryWaitIsNonVacuous sets RetryEvery=100ms and asserts callCount stays 1 inside a 10ms budget; hold_test.go:360 TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry via waitFor (hold_test.go:84) at hold_test.go:380. Both named tests exist and pass: `go test -count=1 -run 'TestHoldManagerRetryWaitIsNonVacuous|TestHoldManagerRetriesUntilRecoveryDeliversOnce' -v ./internal/federation/` -> `--- PASS: TestHoldManagerRetriesUntilRecoveryDeliversOnce (0.06s)`, `--- PASS: TestHoldManagerRetryWaitIsNonVacuous (0.01s)`, `ok ... 0.080s`. [resolution 0.54; internal/federation/hold.go:317-318, hold.go:442-448, internal/federation/hold_test.go:421, hold_test.go:84]\n  \u2713 The event-driven retry loop is reachable from the server entrypoint: cmd/server/main.go constructs the HoldManager, calls Start() (launching loop()) and Stop() on shutdown.: cmd/server/main.go:838-844: `fedHold = federation.NewHoldManager(fedClient, holdQueue, federation.HoldConfig{MaxHold: cfg.Federation.MaxHold})`, then `fedHold.Start()` and `defer fedHold.Stop()`. Start() (hold.go:381-391) launches `go m.loop()`; Stop() (hold.go:398-407) closes stopCh and waits on the WaitGroup. RetryEvery/MaxRetryInterval are left zero here and filled by withDefaults (hold.go:292-301), so the production path uses the event-driven loop with default bounds.\n  \u2713 wake() cannot block or panic: buffered cap-1 channel + select/default, never closed, so it is safe before Start and after Stop.: hold.go:442-448 `func (m *HoldManager) wake() { select { case m.wakeCh <- struct{}{}: default: } }` over the cap-1 buffered channel created at hold.go:330; the channel is never closed (only stopCh is closed, hold.go:405), so a wake after Stop cannot panic and a full buffer cannot block. Called from Enqueue at hold.go:436.\n  \u2713 The retry wait is bounded: loop() resets a timer to cfg.RetryEvery each pass (hold.go:451,467) and per-item backoff delay() is capped at MaxRetryInterval (hold.go:490-492), so no unbounded wait exists.: hold.go:451 `timer := time.NewTimer(m.cfg.RetryEvery)`; after each Sweep the timer is drained and `timer.Reset(m.cfg.RetryEvery)` (hold.go:461-467); per-item backoff `delay()` (hold.go:482-495) doubles RetryEvery but clamps `if d > m.cfg.MaxRetryInterval || d <= 0 { d = m.cfg.MaxRetryInterval }` (hold.go:491-492). Zero config values are replaced by DefaultRetryEvery=2s / DefaultMaxRetryInterval=60s (hold.go:41-44, 292-301), so every wait is bounded.\nThe hold-manager retry gate is genuinely event-driven (stopCh/wakeCh select with a RetryEvery timer and MaxRetryInterval-capped backoff, no time.Sleep in hold.go), reachable from cmd/server/main.go, and both named non-vacuity tests exist and pass with `go test -count=1 ./internal/federation/` exiting 0.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.\n(A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.\n(B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.\n(C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).\nPROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go\n\n\u2026 [2332 chars omitted \u2014 2 line(s)] \u2026\n  \u2713 wake() cannot block or panic: buffered cap-1 channel + select/default, never closed, so it is safe before Start and after Stop.: hold.go:442-448 `func (m *HoldManager) wake() { select { case m.wakeCh <- struct{}{}: default: } }` over the cap-1 buffered channel created at hold.go:330; the channel is never closed (only stopCh is closed, hold.go:405), so a wake after Stop cannot panic and a full buffer cannot block. Called from Enqueue at hold.go:436.\n  \u2713 The retry wait is bounded: loop() resets a timer to cfg.RetryEvery each pass (hold.go:451,467) and per-item backoff delay() is capped at MaxRetryInterval (hold.go:490-492), so no unbounded wait exists.: hold.go:451 `timer := time.NewTimer(m.cfg.RetryEvery)`; after each Sweep the timer is drained and `timer.Reset(m.cfg.RetryEvery)` (hold.go:461-467); per-item backoff `delay()` (hold.go:482-495) doubles RetryEvery but clamps `if d > m.cfg.MaxRetryInterval || d <= 0 { d = m.cfg.MaxRetryInterval }` (hold.go:491-492). Zero config values are replaced by DefaultRetryEvery=2s / DefaultMaxRetryInterval=60s (hold.go:41-44, 292-301), so every wait is bounded.\nThe hold-manager retry gate is genuinely event-driven (stopCh/wakeCh select with a RetryEvery timer and MaxRetryInterval-capped backoff, no time.Sleep in hold.go), reachable from cmd/server/main.go, and both named non-vacuity tests exist and pass with `go test -count=1 ./internal/federation/` exiting 0.",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.\n(A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.\n(B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.\n(C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).\nPROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go\nFAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent, RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing or renamed.",
+                "status": "PASS",
+                "detail": "(A) `go test -count=1 ./internal/federation/` -> `ok  github.com/crier-dev/crier/internal/federation  1.404s`, exit_code 0. (B) hold.go:317-318 `stopCh chan struct{}` / `wakeCh chan struct{}`; initialized hold.go:329-330 with `wakeCh: make(chan struct{}, 1)`; wake() hold.go:442-448 is `select { case m.wakeCh <- struct{}{}: default: }` (non-blocking, channel never closed); loop() hold.go:449-470 selects on `<-m.stopCh` / `<-m.wakeCh` / `<-timer.C` before every `m.Sweep(time.Now())`; `grep -n 'time.Sleep' internal/federation/hold.go` returns nothing, so no fixed pre-retry sleep gates the attempt; RetryEvery/MaxRetryInterval declared hold.go:286-287 with zero-value fallbacks in withDefaults hold.go:292-301, used by the timer (hold.go:451,467) and by delay()'s cap (hold.go:490-492). (C) hold_test.go:421 TestHoldManagerRetryWaitIsNonVacuous sets RetryEvery=100ms and asserts callCount stays 1 inside a 10ms budget; hold_test.go:360 TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry via waitFor (hold_test.go:84) at hold_test.go:380. Both named tests exist and pass: `go test -count=1 -run 'TestHoldManagerRetryWaitIsNonVacuous|TestHoldManagerRetriesUntilRecoveryDeliversOnce' -v ./internal/federation/` -> `--- PASS: TestHoldManagerRetriesUntilRecoveryDeliversOnce (0.06s)`, `--- PASS: TestHoldManagerRetryWaitIsNonVacuous (0.01s)`, `ok ... 0.080s`. [resolution 0.54; internal/federation/hold.go:317-318, hold.go:442-448, internal/federation/hold_test.go:421, hold_test.go:84]",
+                "resolution_probability": 0.54,
+                "cited_path": "internal/federation/hold.go:317-318, hold.go:442-448, internal/federation/hold_test.go:421, hold_test.go:84"
+              },
+              {
+                "criterion": "The event-driven retry loop is reachable from the server entrypoint: cmd/server/main.go constructs the HoldManager, calls Start() (launching loop()) and Stop() on shutdown.",
+                "status": "PASS",
+                "detail": "cmd/server/main.go:838-844: `fedHold = federation.NewHoldManager(fedClient, holdQueue, federation.HoldConfig{MaxHold: cfg.Federation.MaxHold})`, then `fedHold.Start()` and `defer fedHold.Stop()`. Start() (hold.go:381-391) launches `go m.loop()`; Stop() (hold.go:398-407) closes stopCh and waits on the WaitGroup. RetryEvery/MaxRetryInterval are left zero here and filled by withDefaults (hold.go:292-301), so the production path uses the event-driven loop with default bounds.",
+                "derived": true
+              },
+              {
+                "criterion": "wake() cannot block or panic: buffered cap-1 channel + select/default, never closed, so it is safe before Start and after Stop.",
+                "status": "PASS",
+                "detail": "hold.go:442-448 `func (m *HoldManager) wake() { select { case m.wakeCh <- struct{}{}: default: } }` over the cap-1 buffered channel created at hold.go:330; the channel is never closed (only stopCh is closed, hold.go:405), so a wake after Stop cannot panic and a full buffer cannot block. Called from Enqueue at hold.go:436.",
+                "derived": true
+              },
+              {
+                "criterion": "The retry wait is bounded: loop() resets a timer to cfg.RetryEvery each pass (hold.go:451,467) and per-item backoff delay() is capped at MaxRetryInterval (hold.go:490-492), so no unbounded wait exists.",
+                "status": "PASS",
+                "detail": "hold.go:451 `timer := time.NewTimer(m.cfg.RetryEvery)`; after each Sweep the timer is drained and `timer.Reset(m.cfg.RetryEvery)` (hold.go:461-467); per-item backoff `delay()` (hold.go:482-495) doubles RetryEvery but clamps `if d > m.cfg.MaxRetryInterval || d <= 0 { d = m.cfg.MaxRetryInterval }` (hold.go:491-492). Zero config values are replaced by DefaultRetryEvery=2s / DefaultMaxRetryInterval=60s (hold.go:41-44, 292-301), so every wait is bounded.",
+                "derived": true
+              }
+            ],
+            "summary": "The hold-manager retry gate is genuinely event-driven (stopCh/wakeCh select with a RetryEvery timer and MaxRetryInterval-capped backoff, no time.Sleep in hold.go), reachable from cmd/server/main.go, and both named non-vacuity tests exist and pass with `go test -count=1 ./internal/federation/` exiting 0.",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY",
+      "tool_calls": [
+        {
+          "tool": "get_task_item",
+          "command": "get_task_item {\"id\": \"QA-CRIER-58\"}",
+          "exit_code": 0,
+          "output_sha": "404fcfe7b7a428816530b5df500ea7f0364ece5d5642775a5b2e2806f8c84225"
+        },
+        {
+          "tool": "read_diff",
+          "command": "read_diff {}",
+          "exit_code": 0,
+          "output_sha": "54c2c173817aba35c9262d8a6cb8a981116b67092c7953db816af408f598be2f"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/federation/hold.go\"}",
+          "exit_code": 0,
+          "output_sha": "7fb12fdd5f41fe527c1c1e9571809ca5567b7575e34f2ef3258243ec3f626451"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 220, \"offset\": 400, \"path\": \"internal/federation/hold.go\"}",
+          "exit_code": 0,
+          "output_sha": "72e225f51d1538db3c001b546bd265dfc34f1d72d50fba5ec5fb368ed31ac2c2"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/agent 2>/dev/null; pwd; ls; grep -n 'wakeCh chan struct{}' internal/federation/hold.go; grep -n 'stopCh chan struct{}' internal/federation/hold.go; grep -n 'RetryEvery\\|MaxRetryInterval' internal/federation/hold.go | head -40",
+          "exit_code": 0,
+          "output_sha": "7004030fa6550b5960b2bb7c6f965d16916d7d4de5b958773785f834d229f296"
+        },
+        {
+          "tool": "run_command",
+          "command": "grep -n 'TestHoldManagerRetryWaitIsNonVacuous\\|TestHoldManagerRetriesUntilRecoveryDeliversOnce\\|func waitFor\\|time.Sleep' internal/federation/hold_test.go",
+          "exit_code": 0,
+          "output_sha": "707ea61f9563bf101e8db53dfd053de52b7d5b19510a10ed9b424111203f66c9"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 50, \"offset\": 60, \"path\": \"internal/federation/hold_test.go\"}",
+          "exit_code": 0,
+          "output_sha": "d484bbb29ae7c0c3bf5e90e01c1c86fef216c3d48ae28beb998aa43057e091ef"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 180, \"offset\": 350, \"path\": \"internal/federation/hold_test.go\"}",
+          "exit_code": 0,
+          "output_sha": "8ba0e75019af95a7d2a65315fd7045648ccdceaa0c847a076b42f2578a086cfb"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && go test -count=1 ./internal/federation/ 2>&1 | tail -20; echo \"EXIT=$?\"",
+          "exit_code": 0,
+          "output_sha": "045e1978376f92500efb92322a5dc1e179453fabb1a34af924d662467acc786f"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && grep -n 'stopCh\\|wakeCh' internal/federation/hold.go",
+          "exit_code": 0,
+          "output_sha": "79fc24429218df4d68ce00ca2ede182ae140275f6566763791d5d8d538bb146f"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && go test -count=1 -run 'TestHoldManagerRetryWaitIsNonVacuous|TestHoldManagerRetriesUntilRecoveryDeliversOnce' -v ./internal/federation/ 2>&1 | tail -20",
+          "exit_code": 0,
+          "output_sha": "71112a559d22bff3ba5d29de142bc32bd2cd7e363164302b6ba12edf011847f1"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && grep -rn 'time.Sleep' internal/federation/hold.go; echo \"---\"; grep -rn 'm.wake()\\|\\.wake()' internal/federation/*.go",
+          "exit_code": 0,
+          "output_sha": "760e3c1cf6e8078341e91dbc4d920c310077a47382d6da8d7fe7222b14a88f76"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: (A) `go test -count=1 ./internal/federation/` -> \\\"ok github.com/crier-dev/crier/internal/federation 1.404s\\\", exit 0. (B) hold.go:317-318 stopCh/wakeCh fields; :329-330 buffered wakeCh cap 1; wake() hold.go:442-448 non-blocking select/default; loop() hold.go:449-470 selects stopCh/wakeCh/timer.C before every Sweep; no time.Sleep in hold.go (grep empty); RetryEvery/MaxRetryInterval at hold.go:286-287 with withDefaults fallback :292-301, timer at :451/:467, delay() cap :490-492. (C) hold_test.go:421 TestHoldManagerRetryWaitIsNonVacuous (RetryEvery=100ms vs 10ms budget, asserts callCount==1) and hold_test.go:360 TestHoldManagerRetriesUntilRecoveryDeliversOnce using waitFor (hold_test.go:84) at :380; both PASS in -run -v run.\", \"key\": \"verified_0\"}",
+          "exit_code": 0,
+          "output_sha": "38083767ac0eebd51cd5930029847530607ab114e291cd0a18a68a0ad1b40fbc"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/worktrees/crier-QA-CRIER-064 && grep -rn 'NewHoldManager\\|\\.Start()' --include=*.go cmd/ internal/ | grep -i 'hold' | head -20",
+          "exit_code": 0,
+          "output_sha": "5feb6f2e8fd1aeab80133310e497db20644ec9fe8a067d9841b9f7f469f47042"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 40, \"offset\": 820, \"path\": \"cmd/server/main.go\"}",
+          "exit_code": 0,
+          "output_sha": "b0f892803fad53f7a68d41637f6422d6b2891f74cd3ed94205de7f13b3201795"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: cmd/server/main.go:838-844 constructs NewHoldManager with HoldConfig{MaxHold: cfg.Federation.MaxHold} (RetryEvery/MaxRetryInterval zero -> withDefaults at hold.go:292-301), calls fedHold.Start() (launches loop()) and defer fedHold.Stop() (closes stopCh, hold.go:405). So the event-driven loop is reachable from the server entrypoint.\", \"key\": \"verified_derived_0\"}",
+          "exit_code": 0,
+          "output_sha": "f30b8fea0c5c5ffc47cfe0306cff2f6ccab6d74b5309153be58add85dfe04345"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: hold.go:442-448 wake() is `select { case m.wakeCh <- struct{}{}: default: }` on a cap-1 buffered channel (hold.go:330) \\u2014 never blocks, never closed, so it is safe before Start and after Stop. Enqueue calls it at hold.go:436.\", \"key\": \"verified_derived_1\"}",
+          "exit_code": 0,
+          "output_sha": "fee3a701e8445d4fd17e1b772424ce74aed6c58e9fa4cb78f853b357847a1d41"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"derived_0: The event-driven retry loop is reachable from the server entrypoint: cmd/server/main.go constructs the HoldManager, calls Start() (launching loop()) and Stop() on shutdown.\\nderived_1: wake() cannot block or panic: buffered cap-1 channel + select/default, never closed, so it is safe before Start and after Stop.\\nderived_2: The retry wait is bounded: loop() resets a timer to cfg.RetryEvery each pass (hold.go:451,467) and per-item backoff delay() is capped at MaxRetryInterval (hold.go:490-492), so no unbounded wait exists.\", \"key\": \"derived\"}",
+          "exit_code": 0,
+          "output_sha": "47f7fcd717ad52b45a816589108ca70bbd3e87a5f41825e4f6b6db9fd14d56a9"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: loop() creates timer := time.NewTimer(m.cfg.RetryEvery) (hold.go:451), resets it to RetryEvery after every Sweep (hold.go:467), and per-item backoff delay() doubles RetryEvery but caps at MaxRetryInterval (hold.go:490-492). withDefaults fills zero RetryEvery/MaxRetryInterval (hold.go:292-301). No unbounded wait; no time.Sleep in hold.go.\", \"key\": \"verified_derived_2\"}",
+          "exit_code": 0,
+          "output_sha": "1b134b933709f8ddadb83e1bb9fb412cb79c7896e2f1aa0c2a013d7de4a5d582"
+        }
+      ]
+    }
+  },
+  "review": {
+    "reviewer_email": "totalwindupflightsystems@gmail.com",
+    "reviewer_name": "totalwindupflightsystems",
+    "commit_author_email": "totalwindupflightsystems@gmail.com",
+    "commit_author_name": "totalwindupflightsystems",
+    "self_review": true,
+    "findings": [
+      {
+        "severity": "low",
+        "file": ".gitreins/tasks.yaml",
+        "line": 4076,
+        "detection": "YAML block scalar style changed from literal (|-) to single-quoted folded scalar, altering embedded newlines and escaping",
+        "detail": "The criteria text was rewritten from a `|-` literal block into a single-quoted scalar where every newline becomes a space and every apostrophe is doubled (`judge''s`, `''wakeCh chan struct{}''`), so the stored criteria string no longer preserves the original line structure."
+      },
+      {
+        "severity": "observation",
+        "file": ".gitreins/tasks.yaml",
+        "line": 4106,
+        "detection": "completed_at timestamp for an already-complete task is rewritten without any corresponding code change",
+        "detail": "QA-CRIER-58's `completed_at` moves from 2026-11-13T07:07:12 to 2026-11-18T00:13:01 while the diff touches no code in internal/federation, so the completion record is being re-stamped by a formatting-only edit."
+      }
+    ],
+    "summary": "The diff is a pure reformatting of two task criteria strings from literal to single-quoted YAML scalars, which changes the stored text (newlines folded, quotes doubled) and re-stamps one completed_at without any code change."
+  },
+  "summary": "Stage tier1: PASS\n    \u2713 guard: gitreins: WARNING: /home/kara/worktrees/crier-QA-CRIER-064/.gitreins/config.yaml: WARN: defaults.pro\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 internal/federation hold-manager retry gate is event-driven with a bounded budget; three claims, all resolvable in this tree.\n(A) `go test -count=1 ./internal/federation/` exits 0. This package suite runs in ~4s, inside the judge's 30s command cap.\n(B) the retry worker waits on events, not a fixed pre-retry sleep: HoldManager carries `stopCh chan struct{}` and `wakeCh chan struct{}` (internal/federation/hold.go:317-318); `wake()` nudges the buffered channel without blocking (hold.go:442-448); `loop()` selects on stopCh/wakeCh/timer before every Sweep (hold.go:449-470); the wait is bounded by HoldConfig.RetryEvery and MaxRetryInterval (hold.go:286-287), whose zero values fall back to defaults.\n(C) non-vacuity is proven in the tests: TestHoldManagerRetryWaitIsNonVacuous (internal/federation/hold_test.go:421) shows the retry observation cannot pass on the synchronous forward alone, and TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry through the bounded waitFor helper (hold_test.go:84, used at hold_test.go:380) instead of a bare time.Sleep(20ms).\nPROOF: go test -count=1 ./internal/federation/ && grep -n 'wakeCh chan struct{}' internal/federation/hold.go\nFAILIF: a fixed time.Sleep gates the retry attempt, wake() blocks or is absent, RetryEvery/MaxRetryInterval do not bound the wait, or either named test is missing or renamed.: (A) `go test -count=1 ./internal/federation/` -> `ok  github.com/crier-dev/crier/internal/federation  1.404s`, exit_code 0. (B) hold.go:317-318 `stopCh chan struct{}` / `wakeCh chan struct{}`; initialized hold.go:329-330 with `wakeCh: make(chan struct{}, 1)`; wake() hold.go:442-448 is `select { case m.wakeCh <- struct{}{}: default: }` (non-blocking, channel never closed); loop() hold.go:449-470 selects on `<-m.stopCh` / `<-m.wakeCh` / `<-timer.C` before every `m.Sweep(time.Now())`; `grep -n 'time.Sleep' internal/federation/hold.go` returns nothing, so no fixed pre-retry sleep gates the attempt; RetryEvery/MaxRetryInterval declared hold.go:286-287 with zero-value fallbacks in withDefaults hold.go:292-301, used by the timer (hold.go:451,467) and by delay()'s cap (hold.go:490-492). (C) hold_test.go:421 TestHoldManagerRetryWaitIsNonVacuous sets RetryEvery=100ms and asserts callCount stays 1 inside a 10ms budget; hold_test.go:360 TestHoldManagerRetriesUntilRecoveryDeliversOnce observes the retry via waitFor (hold_test.go:84) at hold_test.go:380. Both named tests exist and pass: `go test -count=1 -run 'TestHoldManagerRetryWaitIsNonVacuous|TestHoldManagerRetriesUntilRecoveryDeliversOnce' -v ./internal/federation/` -> `--- PASS: TestHoldManagerRetriesUntilRecoveryDeliversOnce (0.06s)`, `--- PASS: TestHoldManagerRetryWaitIsNonVacuous (0.01s)`, `ok ... 0.080s`. [resolution 0.54; internal/federation/hold.go:317-318, hold.go:442-448, internal/federation/hold_test.go:421, hold_test.go:84]\n  \u2713 The event-driven retry loop is reachable from the server entrypoint: cmd/server/main.go constructs the HoldManager, calls Start() (launching loop()) and Stop() on shutdown.: cmd/server/main.go:838-844: `fedHold = federation.NewHoldManager(fedClient, holdQueue, federation.HoldConfig{MaxHold: cfg.Federation.MaxHold})`, then `fedHold.Start()` and `defer fedHold.Stop()`. Start() (hold.go:381-391) launches `go m.loop()`; Stop() (hold.go:398-407) closes stopCh and waits on the WaitGroup. RetryEvery/MaxRetryInterval are left zero here and filled by withDefaults (hold.go:292-301), so the production path uses the event-driven loop with default bounds.\n  \u2713 wake() cannot block or panic: buffered cap-1 channel + select/default, never closed, so it is safe before Start and after Stop.: hold.go:442-448 `func (m *HoldManager) wake() { select { case m.wakeCh <- struct{}{}: default: } }` over the cap-1 buffered channel created at hold.go:330; the channel is never closed (only stopCh is closed, hold.go:405), so a wake after Stop cannot panic and a full buffer cannot block. Called from Enqueue at hold.go:436.\n  \u2713 The retry wait is bounded: loop() resets a timer to cfg.RetryEvery each pass (hold.go:451,467) and per-item backoff delay() is capped at MaxRetryInterval (hold.go:490-492), so no unbounded wait exists.: hold.go:451 `timer := time.NewTimer(m.cfg.RetryEvery)`; after each Sweep the timer is drained and `timer.Reset(m.cfg.RetryEvery)` (hold.go:461-467); per-item backoff `delay()` (hold.go:482-495) doubles RetryEvery but clamps `if d > m.cfg.MaxRetryInterval || d <= 0 { d = m.cfg.MaxRetryInterval }` (hold.go:491-492). Zero config values are replaced by DefaultRetryEvery=2s / DefaultMaxRetryInterval=60s (hold.go:41-44, 292-301), so every wait is bounded.\nThe hold-manager retry gate is genuinely event-driven (stopCh/wakeCh select with a RetryEvery timer and MaxRetryInterval-capped backoff, no time.Sleep in hold.go), reachable from cmd/server/main.go, and both named non-vacuity tests exist and pass with `go test -count=1 ./internal/federation/` exiting 0.\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-18T00:13:43.826042",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-18T00:13:43.905400+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 15933,
+        "truncated": false,
+        "source": "git show 53ab9586cd64"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 7411,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "QA-CRIER-58"
+  }
+}
