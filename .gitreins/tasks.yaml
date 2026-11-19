@@ -4603,3 +4603,14 @@ tasks:
   status: complete
   created_at: '2026-11-18T02:19:12.282794+00:00'
   completed_at: '2026-11-18T02:19:18.493855+00:00'
+- id: RELEASE-026
+  title: bunker-las-02 runner disk reclaimed; bunker-e2e gate green
+  criteria:
+  - 'Self-hosted runner bunker-las-02 is online and idle, hosted run 44341014676 is
+    success with the Attach evidence step green, and the runner filesystem has more
+    than 20G free. FAILIF: runner offline or busy, run 44341014676 not success, or
+    available space <= 20G. PROOF: gh api repos/crier-dev/crier/actions/runs/44341014676/jobs;
+    gh api repos/crier-dev/crier/actions/runners; ssh bunker2-root df -h /'
+  status: complete
+  created_at: '2026-11-19T01:58:36.779324+00:00'
+  completed_at: '2026-11-19T01:58:40.859075+00:00'
