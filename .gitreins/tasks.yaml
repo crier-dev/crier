@@ -4614,3 +4614,35 @@ tasks:
   status: complete
   created_at: '2026-11-19T01:58:36.779324+00:00'
   completed_at: '2026-11-19T01:58:40.859075+00:00'
+- id: PERF-004
+  title: Pooled SQLite read connections for file-backed DBs so conc100 retrieve p99
+    clears the 100ms budget
+  criteria:
+  - 'File-backed NewSQLiteStore opens a bounded pool greater than 1 with foreign_keys/busy_timeout/synchronous
+    armed on every connection, while the :memory: path stays at one connection. A
+    test proves the GET /sessions and GET /sessions/{id}/messages bodies are byte-identical
+    between the single-connection and widened arms. The shipped BenchmarkSessionReadP99
+    reports retrieve and list conc100 p99 at or under 100ms with the loadavg quoted,
+    and BenchmarkSessionCreateP99 is reported for both arms.
+
+    FAILIF: file-backed stores still pin SetMaxOpenConns(1), or the two arms return
+    different bodies, or the quoted benchmark run reports retrieve or list conc100
+    p99 above 100ms
+
+    PROOF: go test -bench BenchmarkSessionReadP99 -benchtime=200x -count=1 ./internal/session/
+    and go build ./... and go vet ./... and go test ./internal/session/... -count=1'
+  status: in_progress
+  created_at: '2026-11-19T06:31:05.738089+00:00'
+- id: DF-CRIER-509
+  title: Repair crier acceptance criteria and the gate's cross-repo/CLI-flag false
+    positives so every open row passes the board audit
+  criteria:
+  - 'PROOF: python3 /home/kara/.hermes/scripts/acceptance_gate.py audit /home/kara/crier
+    prints 0 failing of 18 open rows (filed at 11 of 18). FAILIF: any open row still
+    fails the audit; a cross-repo or external-CLI probe is silently dropped with no
+    WARN line; any row loses a requirement it had before the repair. PASS: before/after
+    fractions quoted in reasoning, all 10 previously failing rows re-audited on the
+    committed board, and every skipped probe printed as WARN <row>: ... not probed
+    (cross-repo row).'
+  status: in_progress
+  created_at: '2026-11-19T06:35:35.415962+00:00'
