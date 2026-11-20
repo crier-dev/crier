@@ -1,0 +1,30 @@
+{
+  "wave_id": "crier-foreman-2026-11-20-10-24-58",
+  "tick_id": "crier-foreman-2026-11-20-10-24-58",
+  "project": "crier",
+  "created_at": "2026-11-20T10:33:00Z",
+  "selection": "handoff-resume block DF-CRIER-511 (producing tick 2026-11-20-08-33-11 filed it; handoff 2026-11-20T10-00Z names it next). All other ready rows owner-gated or contract: INT-CI-042 (judge-key funding, money), RSS-CRIER-002 (live-bus restart consent), RELEASE-022 (releng restart), UI-CRIER-001 (posture decided 11-16, evidence-binding chore), HARDEN-LOOP-001 (CONTRACT), INT-010 (blocked).",
+  "wave_size": 1,
+  "wave_size_reason": "serial singleton: DF-CRIER-511 is the only dispatchable ready row (wave floor 1 satisfied); no second mutually independent ready row exists",
+  "slots_computed": "max(1, min(6, 16 - ceil(9.95))) = 6; capped by WAVE_BUDGET=5; limited by independent ready rows = 1",
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "rows": [
+    {
+      "row": "DF-CRIER-511",
+      "status_at_selection": "pending",
+      "implementation_repo": "/home/kara/coding-hermes-skills",
+      "worktree": "/home/kara/worktrees/coding-hermes-skills-DF-CRIER-511",
+      "branch": "wt/DF-CRIER-511",
+      "base_sha": "5b0c3b2",
+      "brief": "/tmp/brief-crier-DF-CRIER-511-1030.md",
+      "gitreins_task": "DF-CRIER-511 created+started in the code-owning skills repo (out-of-repo closeout recipe: verdict mirrored to crier board repo with PROVENANCE.json)",
+      "note": "cross-repo row: implementation lives in coding-hermes-skills per DF-CRIER-510 precedent (commits 52d8d8d, merge 5b0c3b2); crier row closed via mirrored verdict + manual/append-path closeout"
+    }
+  ],
+  "barrier_disposal": {
+    "residue": ".gitreins/tasks.yaml PERF-004 complete-flip (uncommitted, producing tick 2026-11-20-08-33-11)",
+    "evidence": "verdict .gitreins/history/2026-11-20/4db89d35 (tier1 PASS, tier2 INCOMPLETE 402 judge key), board closure aaa3f19f, handoff 2026-11-20T10-00Z",
+    "disposition": "committed as-is with disclosure, commit 2040aa3b, pushed origin+gitlab, pre-disposal copy sha256 347e7229 in tick scratch"
+  }
+}
