@@ -1,0 +1,34 @@
+{
+  "wave_id": "crier-foreman-2026-11-20-11-41-41",
+  "tick_id": "crier-foreman-2026-11-20-11-41-41",
+  "block": "DF-CRIER-513 (rows DF-CRIER-512 + DF-CRIER-513) + foreman-direct INT-CI-042",
+  "slots": 2,
+  "slots_math": "max(1, min(6, nproc 16 - ceil(loadavg 13.12) = 14)) = 2; WAVE_BUDGET 6",
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "base_sha": "dd9c57a (coding-hermes-skills origin/main at dispatch)",
+  "workers": [
+    {
+      "row": "DF-CRIER-512",
+      "worktree": "/home/kara/worktrees/coding-hermes-skills-DF-CRIER-512",
+      "branch": "wt/DF-CRIER-512",
+      "repo": "/home/kara/coding-hermes-skills",
+      "brief": "/tmp/brief-DF-CRIER-512-cf202611201141.txt"
+    },
+    {
+      "row": "DF-CRIER-513",
+      "worktree": "/home/kara/worktrees/coding-hermes-skills-DF-CRIER-513",
+      "branch": "wt/DF-CRIER-513",
+      "repo": "/home/kara/coding-hermes-skills",
+      "brief": "/tmp/brief-DF-CRIER-513-cf202611201141.txt"
+    }
+  ],
+  "independence": "512 touches coding-hermes-foreman/scripts/{append_board_task_dispatched.py,test_append_close_commit.py}; 513 touches coding-hermes-jsonl-board-append/scripts/close_tick_jsonl_board.py + templates/manual_append_no_duckdb.py. Disjoint paths, no depends_on edges (both rows ready per boardctl ready).",
+  "foreman_direct": {
+    "row": "INT-CI-042",
+    "reason": "credential/judge ops (key probes + gitreins judge lifecycle + wrapper script) are verification work the parent must run; AC names live judge proof",
+    "plan": "probe deepseek premise -> run DF-CRIER-505 task complete on fireworks kimi-k3 failover (live AC proof) -> arm scripts/gitreins-judge-lane.sh + .gitreins/config.yaml comment + docs/judge-failover.md in crier -> gitreins lifecycle INT-CI-042 -> close row"
+  },
+  "merge_order": ["DF-CRIER-512", "DF-CRIER-513"],
+  "handoff_resumed": "/handoff/crier/foreman/2026-11-20T11-05Z (NEXT: dispatch DF-CRIER-512; judge health: fireworks failover verified 10:33Z)"
+}
