@@ -4672,3 +4672,20 @@ tasks:
   status: complete
   created_at: '2026-11-20T11:51:18.266361+00:00'
   completed_at: '2026-11-20T14:45:14.263258+00:00'
+- id: GITREINS-LIFECYCLE-001
+  title: "gitreins tasks.yaml carries 22 stale in_progress entries \u2014 classify\
+    \ each as Path-A complete (code landed, evidence cited) or delete (abandoned /\
+    \ open-elsewhere), end state 0 unexplained"
+  criteria:
+  - 'Classify all 22 stale in_progress gitreins entries as (a) Path-A complete citing
+    existing landing commit/verdict dir, (b) delete with one-line reason, or (c) ambiguous
+    with owner+question; before/after counts quoted in the row note; no verdict fabrication.
+
+    FAILIF: any tasks.yaml entry remains in_progress without a cited classification
+    in the row note, or a Path-A completion cites no existing landing commit/verdict
+    dir
+
+    PROOF: grep -c ''status: in_progress'' .gitreins/tasks.yaml && grep -c GITREINS-LIFECYCLE-001
+    .coding-hermes/board/tasks.jsonl'
+  status: in_progress
+  created_at: '2026-11-20T20:40:27.436507+00:00'
