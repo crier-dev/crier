@@ -1,0 +1,36 @@
+{
+  "tick": "crier-foreman-2026-11-20-20-30-12",
+  "project": "crier",
+  "mode": "serial-fallback",
+  "wave_size": 1,
+  "wave_budget": 3,
+  "sizing_reason": "slots = max(1, min(6, 16 - ceil(21.23))) = 1: host loadavg 21.23/16c at tick start (5m 20.19, 15m 62.80); WAVE_BUDGET 3 not binding; serial path per box-sizing rule (a loaded box means 1 worker, not idle)",
+  "resume": "handoff /handoff/crier/foreman/2026-11-20T15-30Z was STALE for its NEXT list: sibling tick crier-foreman-2026-11-20-16-08-00 already closed DF-CRIER-514 and filed INT-CI-043 (verified from git log 646e1b95/e9be9c86 + board rows). No 16:08 handoff was written (crashed-session handoff gap); this tick resumed from live board truth instead.",
+  "block": "GITREINS-LIFECYCLE-001 (P3 hygiene; only dispatchable coding/bookkeeping row — INT-CI-043 owner-gated external wallet, INT-010 [loop] coordinator contract with owner-gated gate-5 restart)",
+  "rows": [
+    {
+      "id": "GITREINS-LIFECYCLE-001",
+      "title": "gitreins tasks.yaml carries 22 stale in_progress entries — classify each as Path-A complete or delete, end state 0 unexplained",
+      "code_repo": "/home/kara/crier",
+      "fix_surface": ".gitreins/tasks.yaml lifecycle entries + board row note (in-repo)",
+      "worktree": "/home/kara/worktrees/crier-GITREINS-LIFECYCLE-001",
+      "branch": "wt/GITREINS-LIFECYCLE-001",
+      "base": "origin/main",
+      "base_sha": "646e1b951bf2208b422749625292ea3d766b41e2",
+      "worker_model": "openai/gpt-6.1-terra",
+      "worker_provider": "xkiro",
+      "brief_file": "/tmp/crier-tick2030-brief-GITREINS-LIFECYCLE-001.md",
+      "gitreins_task": "GITREINS-LIFECYCLE-001 created+started in crier (canonical) before dispatch; task complete (tier2) from canonical AFTER merge",
+      "seed_evidence": {
+        "board_census_2026-11-20T20:35Z": "19/22 board-complete (Path-A candidates), 3 blocked (RSS-CRIER-001, DF-CRIER-506, RELEASE-027 -> delete w/ reason), 1 absent from board (CRIER-HARNESS-016-R1 -> delete w/ reason)",
+        "known_verdicts": [".gitreins/history/2026-10-16/56d0a05a (DF-CRIER-320, COMPLETE)", ".gitreins/history/2026-11-20/534c24be (DF-CRIER-505, passed=true)"],
+        "in_progress_count_at_tick_start": 22
+      }
+    }
+  ],
+  "routed_out": [
+    {"id": "INT-CI-043", "route": "owner-gated defer", "reason": "402 Insufficient Balance in CI compose = provider wallet drained; fix surface external (owner refills wallet / repoints CI agent lanes at funded provider) — money/credentials, lane authority"},
+    {"id": "INT-010", "route": "process/loop defer", "reason": "[loop:P1] coordinator contract, never worker work; gates 1-4 measured PASS 15-00Z, gate 5 = owner-gated live-bus restart"}
+  ],
+  "merge_plan": "serial: verify worker diff nonzero vs base_sha -> tier-1 guard via worktree pre-commit hook -> fetch origin, ff-only merge wt/GITREINS-LIFECYCLE-001 into main (0 deletions check) -> go build/vet/test -count=1 on merged tree -> push origin+gitlab -> gitreins task complete GITREINS-LIFECYCLE-001 (tier-2 judge, serialized, background w/ long timeout) -> read verdict run dir -> boardctl close with --evidence-run-id + sha256 fingerprint of verdict.json -> push board -> CI-health query -> DuckBrain narration + handoff"
+}
