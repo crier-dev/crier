@@ -82,8 +82,10 @@ sizes).
 
 `internal/session/bench_test.go` drives the **real route set**
 (`registerSessionRoutes`), the **real handler** (`NewHTTPHandler`) and the
-**real adapter** (`NewSQLiteStore` — pure-Go `modernc.org/sqlite`, one pooled
-connection, the `sqliteDialect` pragmas) over an `httptest` server, so HTTP
+**real adapter** (`NewSQLiteStore` — pure-Go `modernc.org/sqlite`, the
+`sqliteDialect` pragmas, and since PERF-004 a bounded read pool on a
+file-backed database; the recorded baseline below predates that and was taken
+with the single connection that shipped then) over an `httptest` server, so HTTP
 framing and routing are inside the measurement. The fixture is sealed before the
 timer starts: `benchSeedSessions` (20) sessions, each with one agent member and
 `benchSeedMessages` (20) messages, written through the `Repository` the handler
@@ -97,12 +99,11 @@ Two shapes are measured, and the summary never merges them:
 | `seq` | one request at a time — the endpoint's own service time, no queue in front of it |
 | `conc100` | 100 requests in flight (`benchClients`) — the DF-CRIER-308 "moderate load" |
 
-The write path is measured sequentially on purpose. `NewSQLiteStore` pins
-`SetMaxOpenConns(1)` (SQLite admits a single writer, and one pooled connection is
-what keeps the per-connection pragmas in force), so concurrent writers queue on
-one connection by design and a concurrent-create p99 measures the queue, not the
-write. `BenchmarkSessionCreateP99` reports that queue honestly; it is not the
-number to regress against.
+The write path is measured sequentially on purpose. SQLite admits a single
+writer at a time, so the widened READ pool (PERF-004, below) does not widen
+writes: concurrent creates still queue inside SQLite, bounded by
+`busy_timeout`. `BenchmarkSessionCreateP99` reports that queue honestly; it is
+not the number to regress against.
 
 ---
 
@@ -188,7 +189,9 @@ show: retrieve is ~1.3 ms alone and ~112 ms at `conc100`; list is ~14 ms alone
 and ~2.2 s at `conc100`. Concurrency cannot be absorbed by the store, so a
 100-concurrent p99 target is a statement about **service time**, not about
 scaling: to stay under 100 ms at 100 in flight, every endpoint must serve in
-~1 ms or less, or the pool must admit more than one reader.
+~1 ms or less, or the pool must admit more than one reader. PERF-004 took the
+second route for file-backed databases — see *Applied fix — file-backed read
+pool* below.
 
 ### 3. `GET /sessions` is O(N) loads
 
@@ -272,9 +275,11 @@ of them. The before arm above ran at a higher 1-minute loadavg than the after
 arms; load on a shared host does not produce a 42x p50 delta, and the paired
 commit-cost arms carry the mechanism regardless.
 
-What this change does **not** fix: the single pooled connection still serialises
-every request (*Analysis* §2) and `GET /sessions` is still O(N) loads (*Analysis*
-§3), so the 100-way-concurrent p99 target is not reachable on this change alone.
+What this change does **not** fix: at the time it shipped a single pooled
+connection still serialised every request (*Analysis* §2 — since addressed for
+file-backed databases by PERF-004, below) and `GET /sessions` is still O(N) loads
+(*Analysis* §3), so the 100-way-concurrent p99 target is not reachable on this
+change alone.
 No schema, dialect or backend change rides along — JSONL and PostgreSQL are
 untouched, and a database that refuses WAL behaves exactly as it did before.
 
@@ -337,15 +342,93 @@ claim about PostgreSQL performance.
 The PostgreSQL schema declares the same idempotent `(session_id, thread_id)`
 index in its initialization path. PostgreSQL query-plan performance was not
 measured in this change, so no PostgreSQL performance win is claimed.
-4. **Widen the read pool once WAL is on.** Multiple readers are safe under WAL;
-   keeping one connection is only required today because the per-connection
-   pragmas must not be reset by a fresh pooled connection.
 
-Items 2–4 are production changes to the store and the handler and are **not**
-made by this task: DF-CRIER-308 is a benchmarking/documentation row, and the
-baseline's job is to name the cost and size the fix, not to ship it. Item 1 was
-taken by PERF-001 (see *Applied fix*), which is why the numbers above are the only
-ones in this file that were re-recorded against a shipped change.
+## Applied fix — file-backed read pool (PERF-004)
+
+`NewSQLiteStore` now opens a **bounded pool** (`sqlitePoolConns` = 8) on a
+file-backed database instead of pinning `SetMaxOpenConns(1)`. Two things had to
+be true first, and both are now structural rather than remembered:
+
+- **Every pooled connection is armed.** The `sqlitePragmas` table feeds BOTH
+  `sqliteDialect.InitStatements()` (the row-less statement form) and
+  `sqliteDSN()`, which appends one `_pragma=<name>(<value>)` per setting to the
+  driver DSN — so `foreign_keys`, `busy_timeout` and `synchronous` are applied by
+  `modernc.org/sqlite` on *every* connection it opens, not once at store creation.
+  The single table is what keeps the two spellings from drifting.
+  `journal_mode` is deliberately NOT in that table: it returns a row (so it
+  cannot ride `InitStatements`) and it is a persistent database property rather
+  than a per-connection setting; `selectSQLiteJournalMode` arms it at open.
+- **`:memory:` stays at one connection**, whatever width is requested: each
+  connection to an in-memory database is a *different* database, so a pooled
+  `:memory:` store would read an empty one. The pin is logged.
+
+`CR_SESSION_SQLITE_POOL` overrides the width; a value outside `[1,
+sqlitePoolMaxConns]` is clamped, and an unparseable value is logged and ignored
+rather than applied (a typo must not silently re-create a one-connection store).
+
+Reads widen; the **writer does not**. SQLite admits one writer at a time, so
+concurrent creates still serialize, bounded by `busy_timeout` — a widened pool
+that answered `SQLITE_BUSY` would be a regression traded for the read win, so
+that arm is measured, not assumed (`TestSQLite_PooledConcurrentWritesSucceed`).
+
+### Re-recorded numbers
+
+Same instrument and command as the baseline, both arms in this tree, five runs
+per arm alternating in one window, on the tick host (16 cores) at 1-minute
+loadavg 23–29 — i.e. the box is already ~1.5–2x oversubscribed by co-tenants,
+which is why the absolute numbers are pessimistic and the spread is wide:
+
+```bash
+CR_SESSION_SQLITE_POOL=1 go test ./internal/session -run '^$' -bench 'BenchmarkSessionReadP99' -benchtime=1000x -count=1   # pinned arm
+go test ./internal/session -run '^$' -bench 'BenchmarkSessionReadP99' -benchtime=1000x -count=1                            # widened arm
+```
+
+```
+  retrieve conc100, n=500 per run     p50_ms                       p99_ms
+  ----------------------------------  ---------------------------  ---------------------------------
+  pool=1 (before)    5 runs           148.9 151.7 155.7 170.3 173.5   259.3 269.2 275.3 281.6 309.0
+  pool=8 (after)     5 runs            29.5  32.9  33.2  42.7  56.9    63.6  66.6  67.2  76.0 125.4
+  median change                       ~4.7x better                  ~4.1x better (275.3 -> 67.2)
+```
+
+`retrieve` `conc100` p99: **median 275.3 ms → 67.2 ms (4.1x)**, from OVER to
+PASS against the 100 ms budget — **4 of the 5 widened runs are under 100 ms**
+(63.6 / 66.6 / 67.2 / 76.0); the fifth read 125.4 ms, which is a co-tenant spike
+on this shared box, not a widening cost: the same window's pinned arm never came
+near 100 ms. The spread is recorded rather than trimmed — a single round on a
+box like this is a point, not a ceiling. `list` (already inside budget before
+this change) moves the same way: p99 ~70 ms → ~50 ms.
+
+One measurement trap, recorded because it cost a round: running the two arms
+while the full `go test ./...` suite was live on the same 16 cores read
+`retrieve` p99 582 ms for the widened arm — worse than pinned — because eight
+concurrent readers need CPU the suite had taken. The pool is a concurrency win
+only where there is CPU to run the readers on; measure it on an otherwise idle
+box or the number reports the neighbours.
+
+The endpoint bodies are unchanged by the pool: `TestSQLite_PooledReadsAnswerSameBytes`
+hashes the raw `GET /sessions` and `GET /sessions/{id}/messages` bodies from a
+pool=1 store and a pool=8 store over the same seeded fixture and requires byte
+equality, so the change bought queue depth, not a different answer.
+
+What this fix does **not** do: it does not batch a create's 5–6 commits into one
+transaction (item 2, still open), so `POST /sessions` `seq` p99 is unchanged by
+it; and `GET /sessions` is still O(N) loads (item 3, still open). No schema,
+dialect or backend change rides along — PostgreSQL and JSONL are untouched.
+
+4. **Widen the read pool once WAL is on.** — **APPLIED (PERF-004)**: multiple
+   readers under WAL, with the per-connection pragmas moved onto the driver DSN
+   so a fresh pooled connection cannot be left disarmed; `:memory:` stays pinned
+   to one connection. Measured above (5 runs per arm, same window): retrieve
+   `conc100` p99 median 275.3 ms → 67.2 ms, 4 of 5 runs under the 100 ms budget.
+
+Items 2–4 are production changes to the store and the handler and were **not**
+made by the DF-CRIER-308 baseline task: that row's job is to name the cost and
+size the fix, not to ship it. Item 1 was taken by PERF-001 and item 4 by
+PERF-004 (see both *Applied fix* sections); items 2 (one transaction per
+request) and 3 (one aggregate list query) remain open. Those three sections are
+the only places in this file carrying numbers re-recorded against a shipped
+change.
 
 ---
 

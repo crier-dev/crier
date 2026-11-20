@@ -38,13 +38,12 @@ package session
 // cannot run to completion on a busy host would be a broken tool, not a
 // baseline, so the default run always records and never aborts.
 //
-// The write path is measured SEQUENTIALLY on purpose: NewSQLiteStore pins
-// `SetMaxOpenConns(1)` (SQLite admits a single writer, and one pooled
-// connection keeps the per-connection pragmas in force), so concurrent writers
-// queue on one connection by design and a concurrent-create p99 measures the
-// queue rather than the write. Concurrent load (the p99 gate) therefore
-// exercises the READ endpoints, which is what "under moderate load" means for
-// a latency budget.
+// The write path is measured SEQUENTIALLY on purpose: SQLite admits a single
+// writer, so the read pool PERF-004 widened on file-backed stores does not widen
+// writes — concurrent creates still queue inside SQLite, bounded by
+// busy_timeout, and a concurrent-create p99 measures that queue rather than the
+// write. Concurrent load (the p99 gate) therefore exercises the READ endpoints,
+// which is what "under moderate load" means for a latency budget.
 
 import (
 	"bytes"
@@ -649,9 +648,10 @@ func BenchmarkSessionReadP99(b *testing.B) {
 }
 
 // BenchmarkSessionCreateP99 measures the WRITE endpoint under the same
-// concurrency. It is expected to be the slowest cell: NewSQLiteStore pins one
-// connection, so concurrent creates serialize by design. Run it bounded
-// (`-benchtime=500x`) — every iteration leaves a session behind.
+// concurrency. It is expected to be the slowest cell: SQLite admits a single
+// writer, so concurrent creates serialize inside the database (the widened read
+// pool does not widen it). Run it bounded (`-benchtime=500x`) — every iteration
+// leaves a session behind.
 func BenchmarkSessionCreateP99(b *testing.B) {
 	env := benchEnvOnce(b, "create-p99")
 	samples := benchRunConcurrent(b, env, []benchReq{env.createReq()}, benchClients)
