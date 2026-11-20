@@ -4277,7 +4277,7 @@ tasks:
     README inventory tests pass. FAILIF: either spec omits the path, route parity
     is count-only, served OpenAPI omits it, README/docs counts are stale, or the named
     test selector matches no test.'
-  status: complete
+  status: in_progress
   created_at: '2026-11-16T08:41:53.923455+00:00'
   completed_at: '2026-11-16T09:18:42.740064+00:00'
 - id: DF-CRIER-506
@@ -4648,3 +4648,26 @@ tasks:
   status: complete
   created_at: '2026-11-19T06:35:35.415962+00:00'
   completed_at: '2026-11-19T06:36:00.480705+00:00'
+- id: INT-CI-042
+  title: 'durable tier-2 judge failover armed: wrapper + config + docs, proven with
+    live verdicts'
+  criteria:
+  - 'PROOF: bash -n scripts/gitreins-judge-lane.sh exits 0, the file contains no key
+    literal (keys resolve from env at runtime) and contains a key-length guard before
+    any export. FAILIF: the wrapper embeds a literal API key, lacks the length guard,
+    or bash -n fails.'
+  - 'PROOF: grep -n ''JUDGE LANE'' .gitreins/config.yaml prints the primary deepseek
+    lane with its measured DEAD evidence (402 runs and the 2026-11-20 401 invalid-key
+    probe) beside the fallback fireworks kimi-k3 lane. FAILIF: grep -n ''JUDGE LANE''
+    prints no fallback provider, or names one without the measured evidence.'
+  - 'PROOF: docs/judge-failover.md names the three-var env unit, the required wrapper
+    invocation path, and the verdict location under .gitreins/history/<date>/<run-id>/verdict.json.
+    FAILIF: the doc omits the verdict path, the env unit, or instructs exporting GITREINS_LLM
+    vars into shared env files.'
+  - 'PROOF: a DF-CRIER-505 verdict under .gitreins/history/2026-11-20/ exists whose
+    summary contains no 402 evaluator-error line and whose overall reads PASS or FAIL
+    (not INCOMPLETE), produced via the failover unit. FAILIF: the newest DF-CRIER-505
+    verdict carries the 402/INCOMPLETE signature, or no new 2026-11-20 verdict for
+    DF-CRIER-505 exists.'
+  status: in_progress
+  created_at: '2026-11-20T11:51:18.266361+00:00'

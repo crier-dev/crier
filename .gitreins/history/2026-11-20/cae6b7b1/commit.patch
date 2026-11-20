@@ -1,0 +1,14 @@
+commit 4f93abbb091b1c44e9b73063f67f15f119d1acc9
+Merge: dd9c57a b5e2b04
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Nov 20 06:52:54 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Nov 20 06:52:54 2026 -0500
+
+    merge wt/DF-CRIER-512: dispatched-append next event id over numeric ids only (fixes DF-CRIER-512)
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+
+ .../scripts/append_board_task_dispatched.py        |  37 ++++++-
+ .../scripts/test_append_close_commit.py            | 109 +++++++++++++++++++++
+ 2 files changed, 144 insertions(+), 2 deletions(-)
