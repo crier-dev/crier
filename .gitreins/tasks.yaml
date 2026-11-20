@@ -4669,5 +4669,6 @@ tasks:
     (not INCOMPLETE), produced via the failover unit. FAILIF: the newest DF-CRIER-505
     verdict carries the 402/INCOMPLETE signature, or no new 2026-11-20 verdict for
     DF-CRIER-505 exists.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-20T11:51:18.266361+00:00'
+  completed_at: '2026-11-20T14:45:14.263258+00:00'

@@ -1,0 +1,41 @@
+{
+  "tick_id": "crier-foreman-2026-11-20-14-19-33",
+  "wave_id": "crier-foreman-2026-11-20-14-19-33",
+  "project": "crier",
+  "base_sha": "ca8588c19098244e78d129091a04e3e13e1d8c8a (origin/main at selection, receipt-validated)",
+  "block": "INT-CI-042 (durable tier-2 judge failover armed) — resumed from /handoff/crier/foreman/2026-11-20T12-55Z",
+  "handoff_resumed": "/handoff/crier/foreman/2026-11-20T12-55Z (NEXT: poll DF-CRIER-505 async judge; run judge-lane task complete INT-CI-042; close row)",
+  "slots": 1,
+  "slots_math": "max(1, min(6, nproc 16 - ceil(loadavg 26.18) = -10)) = 1; WAVE_BUDGET 3",
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "workers": [],
+  "wave_size": 0,
+  "wave_size_reason": "no dispatchable coding row exists: INT-CI-042 is foreman-direct closure (judge lifecycle + verdicts, AC names live judge proof); INT-010 is a [loop:P1] coordinator contract row (routes, never dispatched); all other 12 rows carry named blockers (5 owner-gated, 2 cross-repo, 1 release-pin posture park, 1 CI-evidence pending, 3 harness-owned criteria chains)",
+  "foreman_direct": {
+    "row": "INT-CI-042",
+    "reason": "credential/judge ops (key probes, gitreins judge lifecycle, wrapper repair) are verification work the parent must run; AC names live judge proof",
+    "plan": "repair scripts/gitreins-judge-lane.sh (source-abort + falsified 30-char guard, both found live) -> relaunch DF-CRIER-505 re-grade on the fixed lane -> poll verdict -> gitreins task complete INT-CI-042 -> close both rows",
+    "done": "commit 4445547d pushed origin/main (safe env parse; guard 30->20 chars with live 200-probe evidence; GITREINS_LLM_API_KEY fallback); DF-CRIER-505 judge job-208fc371916b41819c0203fd8e23de2a dispatched async on fallback lane"
+  },
+  "independence": "single-block serial closure; no worker wave composed (zero independent dispatchable rows — see wave_size_reason)",
+  "sha_roles": {
+    "source_sha": "ca8588c19098244e78d129091a04e3e13e1d8c8a",
+    "evidence_commit": "4445547dfe6bf067472e3dd986f40371d6c5f199 (fix(INT-CI-042): judge-lane wrapper could never execute its own lane)",
+    "bookkeeping_commit": "self-referential: read from origin/main tip after publish (see tick event remote_parity)"
+  },
+  "routing_census": {
+    "INT-010": "loop/contract row — coordinator loop contract, not worker work",
+    "RELEASE-022": "owner-gated (service restart)",
+    "RSS-CRIER-002": "owner-gated (consent)",
+    "RSS-CRIER-001": "owner-gated (live bus config)",
+    "BOARDCTL-HOOK-001": "owner-gated (live bus config)",
+    "INT-005": "owner ruling 2026-11-08: not wanted, do not implement",
+    "README-015": "owner count decision pending",
+    "README-017": "release-pin gate conflict parked (owner/releng posture)",
+    "RELEASE-027": "awaiting CI run-id evidence (implementation landed)",
+    "DF-CRIER-497-R2": "harness-owned criteria (act->ci.log tee), cross-repo",
+    "DF-CRIER-506": "fix lives unmerged in gitreins repo, cross-repo",
+    "HARDEN-LOOP-001": "deps on RSS-CRIER-001 (blocked)"
+  }
+}
