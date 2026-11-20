@@ -1,0 +1,21 @@
+commit 77922539b75566f63fda109552663133017e9fef
+Merge: 4f93abb c48a332
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Nov 20 07:06:58 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Nov 20 07:06:58 2026 -0500
+
+    merge wt/DF-CRIER-513: numeric-safe event-id arithmetic across board append tooling + parity diagnostics (fixes DF-CRIER-513)
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+
+ .../scripts/board_jsonl_id_diff.py                 |  56 +++-
+ .../scripts/board_parity_gap_classifier.py         |  60 +++-
+ .../scripts/board_parity_id_diff.py                |  54 ++-
+ .../scripts/close_tick_jsonl_board.py              |  45 ++-
+ .../scripts/docwriter_inject_rows.py               |  34 +-
+ .../scripts/test_board_event_id_shapes.py          | 366 +++++++++++++++++++++
+ .../templates/append_event_no_header.py            |  36 +-
+ .../templates/append_event_with_header.py          |  32 +-
+ .../templates/manual_append_no_duckdb.py           |  35 +-
+ 9 files changed, 673 insertions(+), 45 deletions(-)
