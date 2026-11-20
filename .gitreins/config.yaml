@@ -232,9 +232,9 @@ evaluator:
 # decoration — the tier-2 evaluator resolves its lane purely from the three
 # GITREINS_LLM_* env vars and never reads `defaults:`.
 defaults:
+  # gitreins 0.21 reads only `model:` here — provider/api_key_env are unknown
+  # keys (WARN each judge run). The wrapper, not this block, selects the lane.
   model: accounts/fireworks/models/kimi-k3
-  provider: fireworks
-  api_key_env: FIREWORKS_KEY_GITREINS
 
 history:
   enabled: true
