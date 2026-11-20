@@ -2946,9 +2946,9 @@ tasks:
     no_sender payload marker) with non-empty-sender behavior unchanged; specs/WEBHOOK-DELIVERY.md
     section 4 documents the target-inbox fallback; worker ch:trace resolves row=DF-CRIER-320
     spec=test=commit=evidence
-  status: in_progress
+  status: complete
   created_at: '2026-10-16T18:34:29.835876+00:00'
-  completed_at: '2026-10-16T18:51:01.495501+00:00'
+  completed_at: '2026-11-20T20:48:43.350098+00:00'
 - id: DF-CRIER-412
   title: Scope install-hooks to the repository
   criteria:
@@ -2976,8 +2976,9 @@ tasks:
   - Update README.md, INSTALL.md, and docs/architecture.md to match go.mod Go 1.26.9
     and current stable go1.27.2; remove stale 1.26.6 claims; run docs-check; include
     ch:trace row/spec/test/evidence/commit links.
-  status: in_progress
+  status: complete
   created_at: '2026-10-19T23:30:52.843070+00:00'
+  completed_at: '2026-11-20T20:49:06.356173+00:00'
 - id: README-008
   title: Fix README make test documentation
   criteria:
@@ -2985,16 +2986,18 @@ tasks:
     make it pass in a clean checkout or update README to document the prerequisite/alternate
     passing command. INT-CI-013 owns the testsupport half; this row is the README-facing
     remainder only.
-  status: in_progress
+  status: complete
   created_at: '2026-10-20T00:43:32.409004+00:00'
+  completed_at: '2026-11-20T20:49:08.903166+00:00'
 - id: README-006
   title: Fix stale coverage numbers in Project Status
   criteria:
   - README.md:2441 claims 94.1% coverage for Relay but measured 90.1%; README.md:2443
     claims 77.5% for Registry but measured 78.3%; update both to match go test -short
     -count=1 -cover output
-  status: in_progress
+  status: complete
   created_at: '2026-10-20T00:44:22.823589+00:00'
+  completed_at: '2026-11-20T20:49:11.891316+00:00'
 - id: DF-CRIER-479
   title: Make empty session audience explicit
   criteria:
@@ -3018,8 +3021,9 @@ tasks:
   criteria:
   - make test exits 0 within 60s budget; go test -count=5 ./... -timeout 300s exits
     0; 60s budget in Makefile is NOT raised
-  status: in_progress
+  status: complete
   created_at: '2026-10-25T01:11:36.327834+00:00'
+  completed_at: '2026-11-20T20:49:15.087885+00:00'
 - id: DF-CRIER-335
   title: Crier control-panel completion loop
   criteria:
@@ -3164,8 +3168,9 @@ tasks:
     CI run. Acceptance: (1) The validator failure is reproduced or explicitly classified
     with exact logs; (2) The fix is committed and pushed; (3) A fresh exact-head CI
     run reaches success with Whole-board validation passing.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-03T04:16:32.213233+00:00'
+  completed_at: '2026-11-20T20:49:17.899951+00:00'
 - id: INT-CI-022
   title: 'CI Coverage job flakes at exact head e9a1ae41: trust restart and guard webhook
     tests fail under coverage only'
@@ -3213,8 +3218,9 @@ tasks:
     a live server''s /metrics carries the _bucket/_count/_sum families; labels carry
     no agent id, message id, path or URL; route label comes from the mux template
     with a bounded set. Spec: docs/observability-spec.md 3.3.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-04T07:28:07.761855+00:00'
+  completed_at: '2026-11-20T20:49:20.207469+00:00'
 - id: MON-CRIER-005
   title: Namespace the 18 metrics series to crier_* with dual-emit and add a route
     label to the HTTP request counter
@@ -3238,9 +3244,9 @@ tasks:
     and the e2e/acceptance teardown); its header documents the 2026-11-04 leak (361
     orphans, 7.84 GB RSS, ports 19001..19273) and names the spawning component by
     path; go build ./... and go vet ./... pass and the guard selftest exits 0
-  status: in_progress
+  status: complete
   created_at: '2026-11-04T13:19:48.521968+00:00'
-  completed_at: '2026-11-04T13:51:09.640764+00:00'
+  completed_at: '2026-11-20T20:49:23.098584+00:00'
 - id: MON-CRIER-007
   title: 'Close the crier_* dual-emit window: delete the 18 legacy metric names'
   criteria:
@@ -3375,8 +3381,9 @@ tasks:
     socket BEFORE building, then either succeeds or fails with a named, attributable
     cause; docker-deploy resolves env-var interpolated port mappings and probes the
     resolved host port so it grades OK/INFO with a probed HTTP status instead of UNVERIFIED
-  status: in_progress
+  status: complete
   created_at: '2026-11-06T02:21:39.761660+00:00'
+  completed_at: '2026-11-20T20:49:25.919776+00:00'
 - id: CR-GAP-077
   title: Canonicalize package path before tree-relative snapshot resolution
   criteria:
@@ -3442,8 +3449,9 @@ tasks:
     is named with pairing evidence; removing the seeding still fails (negative control);
     three consecutive go test -short -count=1 -cover ./cmd/server runs exit 0; go
     vet ./... and make lint pass; no non-test file changes.
-  status: in_progress
+  status: complete
   created_at: '2026-11-07T01:33:18.570507+00:00'
+  completed_at: '2026-11-20T20:49:28.958189+00:00'
 - id: CRIER-HARNESS-15
   title: AdapterConfig.PermissionMode gets a documented CR_HARNESS_ env override that
     survives the claude-code hyphen
@@ -3472,9 +3480,9 @@ tasks:
     and on postgres, JSONL behavior unchanged, a test asserts the row on each backend,
     and a failed route write is reported in the response; go build ./... and the named
     package tests exit 0
-  status: in_progress
+  status: complete
   created_at: '2026-11-06T14:44:08.480834+00:00'
-  completed_at: '2026-11-06T15:09:13.654136+00:00'
+  completed_at: '2026-11-20T20:49:32.466239+00:00'
 - id: CRIER-HARNESS-10
   title: opencode v2 harness id policy and measured version reporting
   criteria:
@@ -3484,8 +3492,9 @@ tasks:
     existing opencode adapter reports its measured version so a future v2 is detectable
     by version, not by id. 4. Docs in specs carry the decision and measurement. Direct
     gates: go test -short ./internal/harness/...; go build ./...; go vet ./...'
-  status: in_progress
+  status: complete
   created_at: '2026-11-06T17:02:32.350962+00:00'
+  completed_at: '2026-11-20T20:49:35.435895+00:00'
 - id: README-012
   title: README mesh section cites four stale file:line locations
   criteria:
@@ -3560,32 +3569,6 @@ tasks:
   status: complete
   created_at: '2026-11-07T19:42:01.243087+00:00'
   completed_at: '2026-11-07T20:05:37.733138+00:00'
-- id: CRIER-HARNESS-016-R1
-  title: Verify the landed bounded-wait primitive against CRIER-HARNESS-016's acceptance
-    (AGENTS.md deliberately out of scope)
-  criteria:
-  - "(a) Read-only tree check: scripts/wait-for-command.sh anchors liveness ONLY on\
-    \ recorded data \u2014 --pid/--pid-file via /proc/<pid> + kill -0, and --log+--marker\
-    \ via grep of the job's own log \u2014 with a bounded --timeout (default 600,\
-    \ above 3600 refused) and name/pattern-shaped matching refused (exit 2); it contains\
-    \ no pgrep/pkill invocation in command position. (b) The selftest passes and red-proves\
-    \ the self-match: run 'make wait-for-command-selftest' (hermetic, ~8s) \u2014\
-    \ it must print SELFTEST=PASS and its T4 arm must show a naive sh -c 'pgrep -f\
-    \ <token>' STILL matching after the tokened job exited, while the marker waiter\
-    \ reports done. (c) Makefile defines the target and .github/workflows/ci.yml runs\
-    \ it. (d) docs/judge-wait.md states the 30s run_command ceiling (gitreins engine/evaluator.py\
-    \ command_timeout, absent from 0.17.1 and 0.18.1), the two dated self-match occurrences,\
-    \ both primitive modes, and the upstream position (GITR-JUDGE-001 complete at\
-    \ 589eb7ee, out of scope for gitreins source). SCOPE NOTE recorded on the board\
-    \ row: a sentence in AGENTS.md is deliberately NOT part of acceptance \u2014 the\
-    \ owner's standing rule forbids unrequested AGENTS.md edits and the unattended\
-    \ harness refuses agent-instruction writes, so the rule lives in the tracked page\
-    \ plus the make target and CI step; do not fail the run on the absence of an AGENTS.md\
-    \ sentence. Do NOT run the full test suite (it exceeds the 30s run_command budget\
-    \ \u2014 that is the defect this row fixes); the make target is the sanctioned\
-    \ probe."
-  status: in_progress
-  created_at: '2026-11-07T20:17:55.492642+00:00'
 - id: INT-CI-030-R1
   title: 'Verify INT-CI-030 acceptance on tip db6bb9f9: bunker-e2e config-matrix job
     green, runner config present, workflow guard steps unchanged'
@@ -3718,8 +3701,9 @@ tasks:
     key; FAILIF: a tampered card yields 200 or 500; FAILIF: go build ./... or go vet
     ./... exits non-zero; FAILIF: go test ./internal/registry/ -count=1 does not exit
     0.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T05:32:27.088601+00:00'
+  completed_at: '2026-11-20T20:49:37.579587+00:00'
 - id: INT-004
   title: 'Bakeoff C07 (KEEP OURS guard): federation interop evidence battery'
   criteria:
@@ -3735,8 +3719,9 @@ tasks:
     a bad handshake proof; FAILIF: bash -n scripts/e2e-battery.sh exits non-zero;
     FAILIF: the running full battery exit code (its FAIL count) was not measured and
     reported by the foreman.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T05:32:30.781352+00:00'
+  completed_at: '2026-11-20T20:49:39.521347+00:00'
 - id: INT-012
   title: 'Spec CRIER-WEBHOOK-RSS-INPUT Part A: webhook ingest input'
   criteria:
@@ -3945,15 +3930,6 @@ tasks:
   status: complete
   created_at: '2026-11-09T16:57:45.139094+00:00'
   completed_at: '2026-11-14T12:06:13.758037+00:00'
-- id: RSS-CRIER-001
-  title: RSS poller configuration and deduplication
-  criteria:
-  - 'Implement durable RSS/Atom feed configuration and conditional GET/guid deduplication,
-    status evidence, docs, and tests per the board. FAILIF: disabled/default or duplicate
-    delivery behavior is wrong, or required tests/docs are absent. PROOF: named test
-    output and config/docs paths.'
-  status: in_progress
-  created_at: '2026-11-09T16:57:46.453829+00:00'
 - id: INT-CI-035
   title: CI failures on RSS and release bookkeeping heads
   criteria:
@@ -4040,8 +4016,9 @@ tasks:
     agree at the current release; PROOF: OpenAPI/docs checks and served-spec tests
     pass; FAILIF: a pre-fix mismatch or stale historical-tag assumption can pass current
     validation'
-  status: in_progress
+  status: complete
   created_at: '2026-11-13T17:36:43.824419+00:00'
+  completed_at: '2026-11-20T20:49:41.630712+00:00'
 - id: REV-CRIER-2
   title: MCP remote capability tiers and invocation
   criteria:
@@ -4222,16 +4199,18 @@ tasks:
   criteria:
   - 'FAILIF: govulncheck reports reachable vulnerabilities. PROOF: govulncheck ./...
     exits 0; go build ./..., go vet ./..., and go test ./... -count=1 pass.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-14T14:04:11.687926+00:00'
+  completed_at: '2026-11-20T20:49:43.553405+00:00'
 - id: RELEASE-025
   title: federation production boot timing
   criteria:
   - 'FAILIF: TestFederation391ProductionBoots depends on a bare wall-clock sleep.
     PROOF: go test ./cmd/server -run TestFederation391ProductionBoots -count=20 passes
     and the source uses a synchronization condition.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-14T14:05:34.923641+00:00'
+  completed_at: '2026-11-20T20:49:45.450794+00:00'
 - id: UI-CRIER-001-V4
   title: Verify UI-CRIER-001 API-only browser posture
   criteria:
@@ -4277,20 +4256,9 @@ tasks:
     README inventory tests pass. FAILIF: either spec omits the path, route parity
     is count-only, served OpenAPI omits it, README/docs counts are stale, or the named
     test selector matches no test.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-16T08:41:53.923455+00:00'
-  completed_at: '2026-11-16T09:18:42.740064+00:00'
-- id: DF-CRIER-506
-  title: crier cmd/server suite must fit inside gitreins' 30s judge command ceiling
-  criteria:
-  - 'PROOF: on the merged tree, ''go test -short -count=1 ./cmd/server'' completes
-    in under 20s wall clock at host load >= 10 with the whole suite passing, and a
-    falsified docs/claims.yaml count still reds the suite (no coverage bought with
-    skips or weakened assertions). FAILIF: any test is deleted, skipped, or has an
-    assertion loosened to buy the time; or the package still exceeds 20s at load 10;
-    or the speedup is not reproduced on a clean -count=1 run.'
-  status: in_progress
-  created_at: '2026-11-16T10:54:17.900720+00:00'
+  completed_at: '2026-11-20T20:49:47.333636+00:00'
 - id: DF-CRIER-507
   title: Sync OpenAPI docs-claims count pins
   criteria:
@@ -4376,17 +4344,6 @@ tasks:
   status: complete
   created_at: '2026-11-17T03:33:47.682993+00:00'
   completed_at: '2026-11-17T03:33:49.876969+00:00'
-- id: RELEASE-027
-  title: 'coverage lane reds are unattributable: the coverage target truncates go
-    test output to 30 lines'
-  criteria:
-  - 'The coverage path no longer truncates test output to a fixed trailing window:
-    on a failing run it prints failing package import paths, failing test names, and
-    total coverage percentage alongside the threshold; verified by a deliberately
-    failing test in a scratch worktree whose package and test name appear in stdout;
-    a green run prints a parseable summary line'
-  status: in_progress
-  created_at: '2026-11-17T00:15:46.838691+00:00'
 - id: RELEASE-029
   title: v0.7.0 changelog section states no rotting commit total
   criteria:
