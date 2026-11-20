@@ -1,0 +1,24 @@
+commit 5b0c3b24f34f616d75faf8bcc950fb7587c938e8
+Merge: 52b4977 52d8d8d
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Nov 20 04:18:18 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Nov 20 04:18:18 2026 -0500
+
+    merge wt/DF-CRIER-510: board close path stages the files it writes
+    
+    events.jsonl can no longer be left uncommitted by a close. Stage-after-write on
+    all board writer scripts + --commit pathspec-commit flag + 10-test fixture battery.
+    Verified: fixture 10/10 PASS on merged tree (commit names both board files, clean status).
+    Commit 52d8d8d by worker openai/gpt-6.1-terra @ xkiro (tick crier-foreman-2026-11-20-08-33-11).
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+
+ .../scripts/append_board_event.py                  |  63 ++++-
+ .../scripts/append_board_task_completed.py         |  84 ++++++-
+ .../scripts/append_board_task_dispatched.py        |  58 ++++-
+ coding-hermes-foreman/scripts/append_e2e_event.py  |  61 ++++-
+ .../scripts/create_board_tasks.py                  |  57 ++++-
+ .../scripts/test_append_close_commit.py            | 274 +++++++++++++++++++++
+ .../scripts/update_board_task_notes.py             |  58 ++++-
+ 7 files changed, 635 insertions(+), 20 deletions(-)
