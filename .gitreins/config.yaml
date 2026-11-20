@@ -213,10 +213,28 @@ evaluator:
   # raise a rung when a run that has a COMPLETE, BOUNDED evidence set starves,
   # and cite its usage.jsonl numbers as the rungs above do.
 
+# ── JUDGE LANE (INT-CI-042, 2026-11-20) ─────────────────────────────────────
+# Primary:  deepseek-v4-flash @ api.deepseek.com — DEAD. Every tier-2 call 402'd
+#           "Payment Required" (runs e0f88d05, e304a6a7, a8911b7d; verdicts
+#           6f1ef4cf, 4db89d35, 77c3cbeb), and on 2026-11-20 the ambient
+#           GITREINS_LLM_API_KEY 401s "Authentication Fails ... invalid" at
+#           /user/balance and /chat/completions — rotated/revoked, not merely
+#           unfunded. Probe transcript: docs/judge-failover.md.
+# Fallback: accounts/fireworks/models/kimi-k3 @
+#           https://api.fireworks.ai/inference/v1 (FIREWORKS_KEY_GITREINS) —
+#           curl-verified 200 on 2026-11-20 and proven with real tier-2
+#           verdicts the same day.
+# REQUIRED INVOCATION PATH: scripts/gitreins-judge-lane.sh — it resolves the
+# key internally (never argv), length-guards it, and exports base URL + model
+# + key as ONE consistent unit. Do NOT fix the ambient env in its place:
+# ~/.hermes/.env's GITREINS_LLM_* unit is MISWIRED (fireworks base URL with the
+# dead deepseek key), so a bare `gitreins` call 401s, and this defaults block is
+# decoration — the tier-2 evaluator resolves its lane purely from the three
+# GITREINS_LLM_* env vars and never reads `defaults:`.
 defaults:
-  model: deepseek-v4-flash
-  provider: deepseek-foreman
-  api_key_env: GITREINS_LLM_API_KEY
+  model: accounts/fireworks/models/kimi-k3
+  provider: fireworks
+  api_key_env: FIREWORKS_KEY_GITREINS
 
 history:
   enabled: true
