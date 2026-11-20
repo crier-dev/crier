@@ -1,6 +1,10 @@
 package session
 
-import "strconv"
+import (
+	"net/url"
+	"strconv"
+	"strings"
+)
 
 // The two engine dialects of the shared SQL session store (CR-CHAT-006). Each
 // supplies ONLY what genuinely differs — placeholder syntax, DDL, connection
@@ -15,19 +19,58 @@ func (sqliteDialect) Name() string { return BackendSQLite }
 // Rebind is the identity: the store's canonical placeholder IS SQLite's.
 func (sqliteDialect) Rebind(query string) string { return query }
 
-// InitStatements arms the single-connection pragmas. A SQLite deployment runs
-// one writer (NewSQLiteStore pools a single connection), so the per-connection
-// settings hold for every statement. `journal_mode` is deliberately NOT here:
-// the pragma returns a row, which InitStatements (row-less statements only)
-// cannot carry, so it is armed by NewSQLiteStore as a QueryRow at open — see
-// selectSQLiteJournalMode — with a logged fallback to the rollback journal
-// where WAL cannot be armed.
-func (sqliteDialect) InitStatements() []string {
-	return []string{
-		`PRAGMA busy_timeout = 5000`,
-		`PRAGMA foreign_keys = ON`,
-		`PRAGMA synchronous = NORMAL`,
+// sqlitePragmas is the ONE table of SQLite connection settings this store
+// depends on. It has two consumers and that is deliberate: InitStatements is the
+// row-less statement form (see below), and sqliteDSN carries the same pairs on
+// the driver DSN so that EVERY connection the pool opens is armed, not just the
+// one database/sql happens to hand out first. Deriving both from one table is
+// what keeps them from drifting apart — a value can only be changed in one place.
+//
+// `journal_mode` is deliberately absent: the pragma returns a row, so it cannot
+// ride InitStatements, and it is a PERSISTENT database property rather than a
+// per-connection setting, so it does not belong on the DSN either. It is armed
+// by NewSQLiteStore as a QueryRow at open — see selectSQLiteJournalMode — with a
+// logged fallback to the rollback journal where WAL cannot be armed.
+var sqlitePragmas = []struct{ name, value string }{
+	{"busy_timeout", "5000"},
+	{"foreign_keys", "ON"},
+	{"synchronous", "NORMAL"},
+}
+
+// sqliteDSN appends one `_pragma` query parameter per entry of sqlitePragmas, so
+// the modernc.org/sqlite driver executes them on every NEW connection as it is
+// opened. That is the whole reason the pool may be widened: a fresh connection
+// inherits foreign_keys (per-connection, default OFF) and synchronous
+// (per-connection) only because the DSN says so.
+//
+// A path that is not a `file:` URI takes the same treatment: the driver splits
+// the DSN at the first `?` and applies the query to the connection, so a plain
+// filesystem path works unchanged and an existing `file:` DSN with its own
+// parameters is extended rather than rewritten.
+func sqliteDSN(path string) string {
+	params := make([]string, 0, len(sqlitePragmas))
+	for _, p := range sqlitePragmas {
+		params = append(params, "_pragma="+url.QueryEscape(p.name+"("+p.value+")"))
 	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + strings.Join(params, "&")
+}
+
+// InitStatements arms the SQLite connection settings for a handle THIS package
+// opened outside the pool, and it is the canonical spelling of sqlitePragmas.
+// A pooled file-backed store (NewSQLiteStore) also carries them on the DSN, so
+// every pooled connection is armed at connect time; re-arming them here, on one
+// connection, sets the same values and is therefore idempotent rather than
+// conflicting.
+func (sqliteDialect) InitStatements() []string {
+	stmts := make([]string, 0, len(sqlitePragmas))
+	for _, p := range sqlitePragmas {
+		stmts = append(stmts, `PRAGMA `+p.name+` = `+p.value)
+	}
+	return stmts
 }
 
 func (sqliteDialect) SchemaStatements() []string {

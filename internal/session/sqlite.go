@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	// modernc.org/sqlite is a PURE-GO SQLite implementation (no CGO, no
@@ -19,6 +20,23 @@ import (
 // sqliteDriverName is the driver name modernc.org/sqlite registers with
 // database/sql.
 const sqliteDriverName = "sqlite"
+
+// The bounds on the SQLite read pool for a FILE-backed database.
+//
+// Width 8 is the bound rather than "as many as database/sql will open" because
+// the cost this fixes is a QUEUE, not throughput: at 100 concurrent requests a
+// one-connection store makes the 100th caller wait ~100 service times, and past
+// a small multiple of the CPU count extra connections buy nothing but page-cache
+// memory and WAL reader lag. Eight admitted readers took the measured conc100
+// p99 from 302ms to ~40ms (docs/performance.md, PERF-004), which is the target
+// with headroom; a deployment that wants a different width sets
+// CR_SESSION_SQLITE_POOL (a value below 1 or an unparseable one is logged and
+// ignored in favour of the default, never silently applied as-is).
+const (
+	sqlitePoolConns    = 8
+	sqlitePoolMaxConns = 64
+	sqlitePoolEnv      = "CR_SESSION_SQLITE_POOL"
+)
 
 // The two journal modes this store runs in. WAL is the applied one; rollback is
 // the shipped default the store keeps when WAL cannot be armed (see
@@ -52,25 +70,61 @@ type sqliteOpenOptions struct {
 // commit, and ONE POST /sessions performs 5-6 of them (docs/performance.md
 // "Analysis" §1). The mode is chosen by selectSQLiteJournalMode, which keeps the
 // rollback journal — with a logged reason, never silently — when WAL is refused.
+//
+// A file-backed store also runs a WIDENED read pool (sqlitePoolConns, overridable
+// with CR_SESSION_SQLITE_POOL). That is only sound because every setting the
+// store depends on rides the driver DSN (sqliteDSN), so a connection the pool
+// opens later is armed exactly like the first one; with the pragmas applied once
+// at open, a second connection would silently lose foreign-key enforcement and
+// the busy timeout. ":memory:" stays at ONE connection: each connection to an
+// in-memory database is a DIFFERENT database, so a pool there would hand out
+// empty databases.
 func NewSQLiteStore(path string) (*SQLStore, error) {
 	return newSQLiteStore(path, sqliteOpenOptions{})
 }
 
 // newSQLiteStore is NewSQLiteStore with the test seams spelled out.
 func newSQLiteStore(path string, opts sqliteOpenOptions) (*SQLStore, error) {
+	return newSQLiteStorePooled(path, sqliteRequestedPool(opts), opts)
+}
+
+// sqliteRequestedPool reads the configured pool width: the CR_SESSION_SQLITE_POOL
+// override when it parses, the package default otherwise. An unusable override is
+// logged and ignored rather than applied — a typo must not quietly become a
+// one-connection store (the defect this change fixes) or an unbounded one.
+func sqliteRequestedPool(opts sqliteOpenOptions) int {
+	raw := strings.TrimSpace(os.Getenv(sqlitePoolEnv))
+	if raw == "" {
+		return sqlitePoolConns
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		sqliteLogger(opts).Warn("session sqlite store: ignoring unusable pool width",
+			"env", sqlitePoolEnv, "value", raw, "default", sqlitePoolConns)
+		return sqlitePoolConns
+	}
+	return n
+}
+
+// newSQLiteStorePooled is NewSQLiteStore with an explicit pool width, which is
+// the seam the equivalence test and the pool1/pool8 benchmark arms use.
+func newSQLiteStorePooled(path string, pool int, opts sqliteOpenOptions) (*SQLStore, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("session sqlite store: %w: sqlite path is empty", ErrInvalidRecord)
 	}
-	db, err := sql.Open(sqliteDriverName, path)
+	db, err := sql.Open(sqliteDriverName, sqliteDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("session sqlite store: open: %w", err)
 	}
-	// ONE connection: SQLite admits a single writer, and a single pooled
-	// connection keeps the per-connection pragmas (foreign_keys,
-	// busy_timeout, synchronous) in force for every statement instead of
-	// being reset by a fresh connection.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// The connection pragmas are on the DSN, so every connection in this pool
+	// is armed the moment it is opened — see sqliteDSN. That is what allows a
+	// width above 1: SQLite admits one WRITER at a time, but under WAL it
+	// admits many concurrent READERS, and reads are what the p99 budget
+	// measured (docs/performance.md "Analysis" §2). Writers still serialize
+	// inside SQLite, bounded by busy_timeout instead of by this pool.
+	conns := sqlitePoolWidth(path, pool, opts)
+	db.SetMaxOpenConns(conns)
+	db.SetMaxIdleConns(conns)
 
 	// Before the schema: the DDL below runs in one transaction, and under WAL
 	// that transaction is a few appends to the -wal file instead of a journal
@@ -88,6 +142,38 @@ func newSQLiteStore(path string, opts sqliteOpenOptions) (*SQLStore, error) {
 	return store, nil
 }
 
+// sqlitePoolWidth is the width actually handed to database/sql. An in-memory
+// database is pinned to one connection no matter what was requested (a pooled
+// ":memory:" is a different database per connection), and a requested width
+// outside [1, sqlitePoolMaxConns] is clamped with a logged reason.
+func sqlitePoolWidth(path string, requested int, opts sqliteOpenOptions) int {
+	if sqliteInMemory(path) {
+		if requested > 1 {
+			sqliteLogger(opts).Info("session sqlite store: in-memory database pinned to one connection",
+				"path", path, "requested_pool", requested)
+		}
+		return 1
+	}
+	if requested < 1 {
+		return 1
+	}
+	if requested > sqlitePoolMaxConns {
+		sqliteLogger(opts).Warn("session sqlite store: pool width clamped",
+			"requested_pool", requested, "max_pool", sqlitePoolMaxConns)
+		return sqlitePoolMaxConns
+	}
+	return requested
+}
+
+// sqliteLogger resolves the logger an open uses: the test seam when set, slog's
+// default otherwise.
+func sqliteLogger(opts sqliteOpenOptions) *slog.Logger {
+	if opts.logger != nil {
+		return opts.logger
+	}
+	return slog.Default()
+}
+
 // selectSQLiteJournalMode arms WAL on a file-backed database and reports the
 // journal mode the database is actually in. It returns an error only when the
 // journal-mode decision could not be made at all; every REFUSAL of WAL is a
@@ -95,12 +181,9 @@ func newSQLiteStore(path string, opts sqliteOpenOptions) (*SQLStore, error) {
 //
 // journal_mode cannot ride sqliteDialect.InitStatements: the pragma returns a
 // row, and InitStatements is a list of row-less statements. It is therefore a
-// QueryRow at open, on the same single connection every later statement uses.
+// QueryRow at open, before the pool can be used by anything else.
 func selectSQLiteJournalMode(ctx context.Context, db *sql.DB, path string, opts sqliteOpenOptions) (string, error) {
-	logger := opts.logger
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger := sqliteLogger(opts)
 
 	// :memory: has no file, so there is nowhere to put -wal/-shm; SQLite keeps
 	// its in-memory "memory" journal. Asking is harmless but the reason would
