@@ -1,0 +1,51 @@
+{
+  "tick_id": "crier-foreman-2026-11-20-15-00-27",
+  "wave_id": "crier-foreman-2026-11-20-15-00-27",
+  "project": "crier",
+  "base_sha": "3269a01dddeeb97ebc81c6f84b874bdaf39706f5 (origin/main at selection, 0 unpushed, CI terminal-green x5)",
+  "block": "INT block (INT-010 contract verification + RELEASE-022 artifact advance) — resumed from /handoff/crier/foreman/2026-11-20T14-55Z",
+  "handoff_resumed": "/handoff/crier/foreman/2026-11-20T14-55Z (NEXT: verify CI on 3269a01d terminal; run discovery sweep — both executed this tick)",
+  "slots": 1,
+  "slots_math": "max(1, min(6, nproc 16 - ceil(loadavg 18.61) = -3)) = 1; WAVE_BUDGET 1",
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "workers": [],
+  "wave_size": 0,
+  "wave_size_reason": "no dispatchable coding row exists (clause: support-agent routing + clause 21 owner-gate-does-not-bleed, both name concrete non-arithmetic barriers): INT-010 is a [loop:P1] coordinator contract row (routed, never dispatched) whose gates 1-4 the foreman measured PASS this tick and whose gate 5 is the owner-gated live-bus restart; RELEASE-022 restart is ops-owner action (row AC forbids lane restarts); all other rows carry named blockers (owner-gated, cross-repo, contract, or evidence-pending) — census in routing_census. Discovery sweep ran per handoff order: build/vet/gofmt/mod-verify/govulncheck/TODO all clean, cmd/server -short PASS 62.324s, CI green; sole new gap found (22 stale gitreins lifecycle entries) filed as GITREINS-LIFECYCLE-001 (single filing, under the 5-row sweep cap), not dispatchable this tick at slots=1 without colliding with the verification advance already in flight.",
+  "foreman_direct": {
+    "row": "RELEASE-022 + INT-010 (verification/advancement, no code change)",
+    "reason": "clause 10 row-scoped inline verification: INT-010 gates are named test commands on the merged tree; RELEASE-022 advance is an artifact rebuild (make build from HEAD=origin/main), not a repo edit; both are coordinator-plane per the rows own ACs",
+    "plan": "verify CI terminal -> discovery sweep -> rebuild bin/crier clean -> measure INT-010 gates 1-4 -> file GITREINS-LIFECYCLE-001 -> board notes + events + push",
+    "done": "artifact bin/crier rebuilt: go version -m Version=v0.6.1-365-g3269a01d Commit=3269a01dddeeb97ebc81c6f84b874bdaf39706f5 NO -dirty, sha256=6df14cd97d1cfc6089f95ba60d0d5e4d89559a6c645840a3425c78ad950e278c; INT-010 gates 1-4 PASS (census parity 11/11 + federation matrix 6/6, archive-THEN-delete 4/4, default-off 2/2, build/vet/gofmt/mod/test green)"
+  },
+  "independence": "zero-worker receipt; no wave composed — every remaining row is routed or named-blocked (see wave_size_reason)",
+  "sha_roles": {
+    "source_sha": "3269a01dddeeb97ebc81c6f84b874bdaf39706f5",
+    "evidence_commit": "none (no code change this tick; artifact sha256 6df14cd9... is the deliverable evidence)",
+    "bookkeeping_commit": "self-referential: read from origin/main tip after publish"
+  },
+  "routing_census": {
+    "INT-010": "loop/contract row — coordinator verification, gates 1-4 measured PASS this tick, gate 5 owner-gated (live-bus restart)",
+    "RELEASE-022": "owner-gated (ops restart); artifact refreshed clean 3269a01d this tick so the restart can now close it",
+    "GITREINS-LIFECYCLE-001": "NEW P3 row filed this tick (sweep finding); dispatchable next tick",
+    "RSS-CRIER-002": "owner-gated (consent)",
+    "RSS-CRIER-001": "owner-gated (live bus config)",
+    "BOARDCTL-HOOK-001": "owner-gated (live bus config; sibling repo)",
+    "INT-005": "owner ruling 2026-11-08: not wanted, do not implement",
+    "README-015": "owner count decision pending",
+    "README-017": "release-pin gate conflict parked (owner/releng posture)",
+    "RELEASE-027": "awaiting CI run-id evidence (implementation landed)",
+    "DF-CRIER-497-R2": "harness-owned criteria (act->ci.log tee), cross-repo",
+    "DF-CRIER-506": "cross-repo (gitreins judge cap); partially superseded — see row history",
+    "HARDEN-LOOP-001": "deps on RSS-CRIER-001 (blocked)",
+    "INT-018-R1": "complete (verified in board state this tick)"
+  },
+  "discovery_sweep": {
+    "go_build": "rc0", "go_vet": "rc0", "gofmt": "clean", "go_mod_verify": "all modules verified",
+    "govulncheck": "no vulnerabilities found", "todo_census_non_test": 0,
+    "cmd_server_short": "ok 62.324s (load 18.6/16c)",
+    "gitreins_stale_in_progress": 22,
+    "ci_github": "5/5 success terminal through 3269a01d (runs 2026-11-20T14:37+14:50Z)",
+    "gitlab_ci": "no .gitlab-ci.yml (GitHub Actions is canonical CI; gitlab remote is a push mirror — standing state, not a new gap)"
+  }
+}
