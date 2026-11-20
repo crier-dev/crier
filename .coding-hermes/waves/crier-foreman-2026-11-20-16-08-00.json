@@ -1,0 +1,27 @@
+{
+  "tick": "crier-foreman-2026-11-20-16-08-00",
+  "project": "crier",
+  "mode": "serial-fallback",
+  "wave_size": 1,
+  "wave_budget": 7,
+  "sizing_reason": "slots = max(1, min(6, 16 - ceil(15.26))) = 1: host loadavg 15.26/16c at tick start (5m 17.94, 15m 24.38); WAVE_BUDGET 7 not binding; serial path per box-sizing rule (a loaded box means 1 worker, not idle)",
+  "block": "DF-CRIER-514 (fleet-script crash class DF-CRIER-511/512/513/514, P2; top DRIVE line of block_drive.py)",
+  "rows": [
+    {
+      "id": "DF-CRIER-514",
+      "title": "create_board_tasks.py max_event_id crashes with TypeError on mixed-shape event ids",
+      "code_repo": "/home/kara/coding-hermes-skills",
+      "fix_surface": "coding-hermes-foreman/scripts/create_board_tasks.py:96 max_event_id (out-of-repo fix surface for the crier board; closeout mirrors the skills-repo judge verdict into crier per crier skill references/out-of-repo-closeout.md section 4)",
+      "worktree": "/home/kara/worktrees/coding-hermes-skills-DF-CRIER-514",
+      "branch": "wt/DF-CRIER-514",
+      "base": "origin/main",
+      "base_sha": "7792253",
+      "worker_model": "openai/gpt-6.1-terra",
+      "worker_provider": "xkiro",
+      "brief_file": "/tmp/crier-tick1608-brief-DF-CRIER-514.md",
+      "gitreins_task": "DF-CRIER-514 created+started in the skills repo (code-owning repo) before dispatch",
+      "sanctioned_pattern": "numeric_event_ids/next_event_id from append_board_task_completed.py:60-79 (DF-CRIER-511 fix)"
+    }
+  ],
+  "merge_plan": "serial: verify worker diff+gates -> push branch -> merge wt/DF-CRIER-514 into skills main -> gates on merged tree -> push main -> gitreins task complete (tier2, skills repo) -> mirror verdict into crier .gitreins/history + PROVENANCE.json -> skill-lock enforcer redeploy -> live probe of deployed copy against crier events.jsonl -> close crier row DF-CRIER-514 with --evidence-run-id"
+}
