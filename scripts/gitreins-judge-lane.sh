@@ -36,18 +36,46 @@ if [ "${1:-}" = "--lane" ]; then
   LANE="$2"; shift 2
 fi
 
-# shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+# Source the env file WITHOUT executing it. A plain `. "$ENV_FILE"` dies under
+# set -e at the first line whose value carries shell-active characters (the
+# shared Hermes .env has e.g. `API_SERVER_MODEL_NAME=Hermes Agent`, rc=127) —
+# and the abort silently drops every key defined AFTER that line
+# (FIREWORKS_KEY_GITREINS lives at the tail). Parse assignments instead.
+while IFS= read -r envline || [ -n "$envline" ]; do
+  envline=${envline%$'\r'}
+  case "$envline" in ''|'#'*) continue ;; esac
+  envkey=${envline%%=*}
+  if [ "$envkey" = "$envline" ]; then
+    continue  # no '=' -> not an assignment; never execute it
+  fi
+  export "$envkey=${envline#*=}"
+done < "$ENV_FILE"
 
 if [ "$LANE" = "fallback" ]; then
-  : "${FIREWORKS_KEY_GITREINS:?FIREWORKS_KEY_GITREINS missing in $ENV_FILE}"
-  if [ "${#FIREWORKS_KEY_GITREINS}" -lt 30 ]; then
-    echo "FATAL: FIREWORKS_KEY_GITREINS looks truncated (${#FIREWORKS_KEY_GITREINS} chars); a short key wedges the judge as a silent hang, refusing" >&2
-    exit 3
+  # Length guard BEFORE any key export. Evidence (2026-11-20 live probe):
+  # a 25-char fw_ key authenticates 200 against fireworks — the old 30-char
+  # threshold falsified on a working key. The real hazard is the dot-truncated
+  # storage shape (e.g. sk-c2c...3c4c), which lands well under 20 chars and
+  # wedges the judge as a silent 401 hang. Guard at 20; if the primary var is
+  # truncated or missing but a full-length key survives in GITREINS_LLM_API_KEY,
+  # use it rather than refusing.
+  lane_key="${FIREWORKS_KEY_GITREINS:-}"
+  lane_src="FIREWORKS_KEY_GITREINS"
+  if [ "${#lane_key}" -lt 20 ]; then
+    fb_key="${GITREINS_LLM_API_KEY:-}"
+    if [ "${#fb_key}" -ge 20 ]; then
+      echo "WARN: FIREWORKS_KEY_GITREINS missing/truncated (${#lane_key} chars) in $ENV_FILE; using GITREINS_LLM_API_KEY" >&2
+      lane_key="$fb_key"
+      lane_src="GITREINS_LLM_API_KEY"
+    else
+      echo "FATAL: no usable fireworks key: FIREWORKS_KEY_GITREINS=${#lane_key} chars, GITREINS_LLM_API_KEY=${#fb_key} chars; a truncated key wedges the judge as a silent hang, refusing" >&2
+      exit 3
+    fi
   fi
   export GITREINS_LLM_BASE_URL="https://api.fireworks.ai/inference/v1"
   export GITREINS_LLM_MODEL="accounts/fireworks/models/kimi-k3"
-  export GITREINS_LLM_API_KEY="$FIREWORKS_KEY_GITREINS"
+  export GITREINS_LLM_API_KEY="$lane_key"
+  echo "judge-lane: fallback lane armed (key source: $lane_src, ${#lane_key} chars)" >&2
 elif [ "$LANE" = "primary" ]; then
   : "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY missing in $ENV_FILE}"
   if [ "${#DEEPSEEK_API_KEY}" -lt 30 ]; then
