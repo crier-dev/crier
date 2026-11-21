@@ -4667,3 +4667,16 @@ tasks:
   status: complete
   created_at: '2026-11-21T08:19:16.727320+00:00'
   completed_at: '2026-11-21T08:19:41.826443+00:00'
+- id: QA-CRIER-069
+  title: chaos-corruption snapshot anchors to HOME not repo; zero controls ran but
+    cell graded FAIL
+  criteria:
+  - 'chaos-corruption state snapshot is taken from the project root the cell probes
+    (the same cwd the copy uses), harness-owned paths (qa-evidence.jsonl, $LOGD) excluded
+    from surface selection, and a zero-control run grades SKIP/N-A with a reason instead
+    of FAIL. FAILIF: state-snapshot-text.txt still lists paths outside the repo clone,
+    or a surface selected from an unopenable path, or the both-SKIP branch still reports
+    FAIL. PROOF: bash /home/kara/.hermes/scripts/test_bunker_qa_chaos_snapshot_anchor.sh;
+    grep -n ''could not copy the surface'' ~/.hermes/scripts/bunker-qa.sh'
+  status: in_progress
+  created_at: '2026-11-21T13:19:18.719201+00:00'
