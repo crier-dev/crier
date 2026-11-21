@@ -4678,5 +4678,6 @@ tasks:
     or a surface selected from an unopenable path, or the both-SKIP branch still reports
     FAIL. PROOF: bash /home/kara/.hermes/scripts/test_bunker_qa_chaos_snapshot_anchor.sh;
     grep -n ''could not copy the surface'' ~/.hermes/scripts/bunker-qa.sh'
-  status: in_progress
+  status: complete
   created_at: '2026-11-21T13:19:18.719201+00:00'
+  completed_at: '2026-11-21T13:58:31.051486+00:00'
