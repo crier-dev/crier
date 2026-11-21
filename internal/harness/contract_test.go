@@ -193,6 +193,9 @@ func (f *fakeHarness) gatewayBodies() []string {
 // prevent.
 type contractCase struct {
 	name string
+	// libraryContract grades adapters with a library agent/project contract,
+	// not the binary adapters' resume-argv/process-group contract.
+	libraryContract func(*testing.T)
 	// build returns the adapter under test pointed at binary, the fake harness
 	// in f, and a per-delivery timeout.
 	build func(t *testing.T, binary string, f *fakeHarness, timeout time.Duration) harness.Adapter
@@ -219,6 +222,7 @@ type contractCase struct {
 
 func contractCases() []contractCase {
 	return []contractCase{
+		{name: "operator", libraryContract: operatorLibraryContract},
 		{
 			name: "hermes",
 			build: func(t *testing.T, binary string, f *fakeHarness, timeout time.Duration) harness.Adapter {
@@ -277,6 +281,10 @@ func contractCases() []contractCase {
 func TestAdapterContract(t *testing.T) {
 	for _, tc := range contractCases() {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.libraryContract != nil {
+				tc.libraryContract(t)
+				return
+			}
 			t.Run("ProbeReportsBinaryAndVersion", func(t *testing.T) {
 				f := newFakeHarness(t)
 				cap, err := tc.build(t, f.bin, f, 0).Probe(context.Background())
