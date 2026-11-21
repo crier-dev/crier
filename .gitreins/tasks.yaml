@@ -3967,7 +3967,7 @@ tasks:
     API semantics.'
   status: complete
   created_at: '2026-11-11T12:59:08.006094+00:00'
-  completed_at: '2026-11-11T12:59:13.819722+00:00'
+  completed_at: '2026-11-21T08:17:47.064433+00:00'
 - id: README-016
   title: Document v0.6.0 README runtime surfaces
   criteria:
@@ -4647,3 +4647,23 @@ tasks:
   status: complete
   created_at: '2026-11-20T20:40:27.436507+00:00'
   completed_at: '2026-11-20T20:57:28.532727+00:00'
+- id: RELEASE-022
+  title: Close RELEASE-022 with per-row evidence run
+  criteria:
+  - 'PROOF: curl -s http://127.0.0.1:8767/version prints commit 3269a01d and modified
+    false, and systemctl --user is-active crier-fleet.service prints active. FAILIF:
+    /version reports modified true, or the listener predates the binary mtime.'
+  status: complete
+  created_at: '2026-11-21T08:08:36.594852+00:00'
+  completed_at: '2026-11-21T08:14:59.247315+00:00'
+- id: EVID-RUN-001
+  title: Close EVID-RUN-001 with per-row evidence run
+  criteria:
+  - 'PROOF: jq -r .task_id .gitreins/history/2026-11-21/139676f6/verdict.json prints
+    RELEASE-022 and jq -r .task_id .gitreins/history/2026-11-21/eea2acfc/verdict.json
+    prints README-015, and boardctl show RELEASE-022 plus boardctl show README-015
+    both print status complete with those run ids bound. FAILIF: either row is closed
+    against a run whose verdict.json task_id is a different row''s id.'
+  status: complete
+  created_at: '2026-11-21T08:19:16.727320+00:00'
+  completed_at: '2026-11-21T08:19:41.826443+00:00'
