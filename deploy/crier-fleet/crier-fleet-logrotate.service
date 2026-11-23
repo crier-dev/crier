@@ -1,0 +1,7 @@
+[Unit]
+Description=Crier fleet bus log rotation (user-level, own state file)
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate --state /home/kara/crier-fleet/logs/logrotate.state /home/kara/crier-fleet/logs/logrotate.conf

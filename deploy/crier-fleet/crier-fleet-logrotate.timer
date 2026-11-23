@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily rotation of the crier fleet bus log (no root required)
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
