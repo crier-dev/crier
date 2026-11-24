@@ -1,0 +1,41 @@
+worker.register_if_missing -> False
+queue.register_if_missing  -> False
+LAT deliver 7.72 ms
+LAT deliver 6.04 ms
+LAT deliver 6.64 ms
+LAT deliver 5.08 ms
+LAT deliver 5.64 ms
+LAT deliver 5.54 ms
+LAT deliver 5.77 ms
+LAT deliver 5.25 ms
+LAT deliver 5.64 ms
+LAT deliver 5.52 ms
+LAT deliver 5.47 ms
+LAT deliver 5.38 ms
+LAT deliver 6.04 ms
+LAT deliver 5.33 ms
+LAT deliver 5.15 ms
+LAT deliver 5.52 ms
+LAT deliver 5.19 ms
+LAT deliver 5.25 ms
+LAT deliver 5.34 ms
+LAT deliver 6.34 ms
+LAT stats_as_owner 6.00 ms
+PRODUCED 20 stats=80
+LAT retrieve_batch 20.85 ms
+LAT ack 8.44 ms
+LAT ack 6.36 ms
+LAT ack 7.59 ms
+LAT ack 5.60 ms
+LAT ack 7.62 ms
+LAT ack 6.05 ms
+LAT ack 6.96 ms
+LAT ack 5.65 ms
+LAT ack 6.53 ms
+LAT ack 7.10 ms
+LAT ack 6.44 ms
+LAT ack 8.72 ms
+LAT ack 6.36 ms
+LAT ack 5.80 ms
+LAT ack 6.03 ms
+ACKED 15 LEAVING 5 UNACKED (this run)

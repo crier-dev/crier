@@ -1,0 +1,142 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.75kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.26.11-alpine
+#2 ...
+
+#3 [internal] load metadata for docker.io/library/alpine:3.21
+#3 DONE 1.2s
+
+#2 [internal] load metadata for docker.io/library/golang:1.26.11-alpine
+#2 DONE 1.7s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 DONE 0.0s
+
+#6 [stage-1 1/3] FROM docker.io/library/alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab
+#6 resolve docker.io/library/alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab 0.0s done
+#6 sha256:871d48e9bf6b789a439a4a19c1e152009924d818e60f7c51e498573223cd7cda 0B / 3.63MB 0.2s
+#6 sha256:871d48e9bf6b789a439a4a19c1e152009924d818e60f7c51e498573223cd7cda 1.05MB / 3.63MB 0.5s
+#6 ...
+
+#5 [internal] load build context
+#5 transferring context: 109.82MB 0.7s done
+#5 DONE 0.9s
+
+#6 [stage-1 1/3] FROM docker.io/library/alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab
+#6 sha256:871d48e9bf6b789a439a4a19c1e152009924d818e60f7c51e498573223cd7cda 2.10MB / 3.63MB 0.9s
+#6 sha256:871d48e9bf6b789a439a4a19c1e152009924d818e60f7c51e498573223cd7cda 3.15MB / 3.63MB 1.4s
+#6 sha256:871d48e9bf6b789a439a4a19c1e152009924d818e60f7c51e498573223cd7cda 3.63MB / 3.63MB 1.7s done
+#6 extracting sha256:871d48e9bf6b789a439a4a19c1e152009924d818e60f7c51e498573223cd7cda
+#6 extracting sha256:871d48e9bf6b789a439a4a19c1e152009924d818e60f7c51e498573223cd7cda 0.1s done
+#6 DONE 2.0s
+
+#7 [build 1/7] FROM docker.io/library/golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab
+#7 resolve docker.io/library/golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab 0.0s done
+#7 sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1 32B / 32B 0.1s done
+#7 sha256:909e815342c1afa6ce5872dd9288edd18c68f719e619aebfd28eb8a1d6444de6 127B / 127B 0.2s done
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 16.78MB / 67.42MB 1.8s
+#7 sha256:407d6181972c5c0c17b9ef164cc0e6c659c9a6a57b05347f559decdfc4b9c524 244.48kB / 244.48kB 0.5s done
+#7 sha256:881fc932939efef04ca120ad44bbd2c0917851eb247aa4995428afb1e80ede17 1.05MB / 3.85MB 1.5s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 20.97MB / 67.42MB 2.1s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 25.17MB / 67.42MB 2.4s
+#7 sha256:881fc932939efef04ca120ad44bbd2c0917851eb247aa4995428afb1e80ede17 2.10MB / 3.85MB 2.1s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 29.14MB / 67.42MB 2.7s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 34.60MB / 67.42MB 3.2s
+#7 sha256:881fc932939efef04ca120ad44bbd2c0917851eb247aa4995428afb1e80ede17 3.15MB / 3.85MB 2.9s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 38.80MB / 67.42MB 3.5s
+#7 sha256:881fc932939efef04ca120ad44bbd2c0917851eb247aa4995428afb1e80ede17 3.85MB / 3.85MB 3.3s done
+#7 extracting sha256:881fc932939efef04ca120ad44bbd2c0917851eb247aa4995428afb1e80ede17
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 44.04MB / 67.42MB 3.8s
+#7 extracting sha256:881fc932939efef04ca120ad44bbd2c0917851eb247aa4995428afb1e80ede17 0.2s done
+#7 extracting sha256:407d6181972c5c0c17b9ef164cc0e6c659c9a6a57b05347f559decdfc4b9c524
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 48.23MB / 67.42MB 4.1s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 53.48MB / 67.42MB 4.4s
+#7 extracting sha256:407d6181972c5c0c17b9ef164cc0e6c659c9a6a57b05347f559decdfc4b9c524 0.7s done
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 57.67MB / 67.42MB 4.7s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 63.96MB / 67.42MB 5.1s
+#7 sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 67.42MB / 67.42MB 5.4s done
+#7 extracting sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21
+#7 ...
+
+#8 [stage-1 2/3] RUN apk add --no-cache ca-certificates tzdata
+#8 0.191 fetch https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/APKINDEX.tar.gz
+#8 1.289 fetch https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64/APKINDEX.tar.gz
+#8 3.264 (1/2) Installing ca-certificates (20261020-r0)
+#8 3.402 (2/2) Installing tzdata (2026f-r0)
+#8 3.653 Executing busybox-1.37.0-r14.trigger
+#8 3.657 Executing ca-certificates-20261020-r0.trigger
+#8 3.690 OK: 8 MiB in 17 packages
+#8 DONE 3.9s
+
+#7 [build 1/7] FROM docker.io/library/golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab
+#7 extracting sha256:6dbc954da649613d4c282586205a0e44ab2d9d17be5dfde8d18d13f7461fad21 5.0s done
+#7 DONE 10.6s
+
+#7 [build 1/7] FROM docker.io/library/golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab
+#7 extracting sha256:909e815342c1afa6ce5872dd9288edd18c68f719e619aebfd28eb8a1d6444de6 0.0s done
+#7 extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1 0.0s done
+#7 DONE 10.7s
+
+#9 [build 2/7] RUN apk add --no-cache git ca-certificates
+#9 1.198 ( 1/12) Installing brotli-libs (1.2.1-r0)
+#9 1.266 ( 2/12) Installing c-ares (1.34.9-r0)
+#9 1.315 ( 3/12) Installing libunistring (1.4.2-r0)
+#9 1.420 ( 4/12) Installing libidn2 (2.3.8-r0)
+#9 1.456 ( 5/12) Installing nghttp2-libs (1.70.0-r0)
+#9 1.491 ( 6/12) Installing libpsl (0.21.5-r3)
+#9 1.522 ( 7/12) Installing zstd-libs (1.6.0-r1)
+#9 1.577 ( 8/12) Installing libcurl (8.23.0-r0)
+#9 1.641 ( 9/12) Installing libexpat (2.10.0-r0)
+#9 1.672 (10/12) Installing pcre2 (10.49-r0)
+#9 1.735 (11/12) Installing git (2.54.1-r0)
+#9 2.038 (12/12) Installing git-init-template (2.54.1-r0)
+#9 2.065 Executing busybox-1.37.0-r31.trigger
+#9 2.078 OK: 20.6 MiB in 29 packages
+#9 DONE 2.2s
+
+#10 [build 3/7] WORKDIR /src
+#10 DONE 0.1s
+
+#11 [build 4/7] COPY go.mod go.sum ./
+#11 DONE 0.1s
+
+#12 [build 5/7] RUN go mod download
+#12 DONE 30.3s
+
+#13 [build 6/7] COPY . .
+#13 DONE 0.7s
+
+#14 [build 7/7] RUN set -eux;     git config --global --add safe.directory /src;     V="$(git describe --tags --always --dirty 2>/dev/null || echo dev)";     C="$(git rev-parse HEAD 2>/dev/null || echo unknown)";     T="$(date -u +%Y-%m-%dT%H:%M:%SZ)";     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/crier-dev/crier/internal/buildinfo.Version=${V} -X github.com/crier-dev/crier/internal/buildinfo.Commit=${C} -X github.com/crier-dev/crier/internal/buildinfo.BuildTime=${T}" -o /bin/crier ./cmd/server
+#14 0.331 + git config --global --add safe.directory /src
+#14 0.333 + git describe --tags --always --dirty
+#14 0.580 + V=1cc9f86
+#14 0.580 + git rev-parse HEAD
+#14 0.582 + C=1cc9f867393c62e80ac02412e782acdc12b26ae3
+#14 0.582 + date -u '+%Y-%m-%dT%H:%M:%SZ'
+#14 0.583 + T=2026-11-24T20:10:18Z
+#14 0.583 + CGO_ENABLED=0 go build -trimpath '-ldflags=-s -w -X github.com/crier-dev/crier/internal/buildinfo.Version=1cc9f86 -X github.com/crier-dev/crier/internal/buildinfo.Commit=1cc9f867393c62e80ac02412e782acdc12b26ae3 -X github.com/crier-dev/crier/internal/buildinfo.BuildTime=2026-11-24T20:10:18Z' -o /bin/crier ./cmd/server
+#14 DONE 76.7s
+
+#15 [stage-1 3/3] COPY --from=build /bin/crier /usr/local/bin/crier
+#15 DONE 0.1s
+
+#16 exporting to image
+#16 exporting layers
+#16 exporting layers 1.5s done
+#16 exporting manifest sha256:bab0b7ca15cffd64c9257be8b7921f7f79e17e2cbe593017d5ac1357a05c4f24 0.0s done
+#16 exporting config sha256:0808a7d0057bdcb3d6215726efc684ca1f337dee6fe01e6c7dbbc6dddf79fdc1 0.0s done
+#16 exporting attestation manifest sha256:be93ba10c56bd3ec8692a6adb72f7f92874e3fb992fa2ea3f1c3bb465e30c4bd 0.1s done
+#16 exporting manifest list sha256:fc762e425e31f2818f0aa6277d0c5bae79d7bbb880b5dad65f5ea1621d97b18a
+#16 exporting manifest list sha256:fc762e425e31f2818f0aa6277d0c5bae79d7bbb880b5dad65f5ea1621d97b18a 0.0s done
+#16 naming to moby-dangling@sha256:fc762e425e31f2818f0aa6277d0c5bae79d7bbb880b5dad65f5ea1621d97b18a done
+#16 unpacking to moby-dangling@sha256:fc762e425e31f2818f0aa6277d0c5bae79d7bbb880b5dad65f5ea1621d97b18a
+#16 unpacking to moby-dangling@sha256:fc762e425e31f2818f0aa6277d0c5bae79d7bbb880b5dad65f5ea1621d97b18a 0.8s done
+#16 DONE 2.5s

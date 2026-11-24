@@ -1,0 +1,2 @@
+./docs/dogfood/crier-dogfood-2026-11-12-qa-evidence.jsonl
+./docs/dogfood/crier-dogfood-2026-11-15-15-54-49-qa-evidence-fire3.jsonl

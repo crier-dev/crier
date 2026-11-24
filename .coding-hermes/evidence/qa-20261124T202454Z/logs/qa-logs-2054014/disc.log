@@ -1,0 +1,51 @@
+NETWORK_CUT_APPLIED
+ok  	github.com/crier-dev/crier/cmd/crier-front	0.068s
+ok  	github.com/crier-dev/crier/cmd/crier-mcp	10.323s
+?   	github.com/crier-dev/crier/cmd/mcp-capabilities	[no test files]
+ok  	github.com/crier-dev/crier/cmd/server	59.036s
+ok  	github.com/crier-dev/crier/config	0.377s
+?   	github.com/crier-dev/crier/examples/sqlite-quickstart	[no test files]
+ok  	github.com/crier-dev/crier/examples/ws-mesh-demo	22.960s
+ok  	github.com/crier-dev/crier/internal/a2a	0.050s
+ok  	github.com/crier-dev/crier/internal/a2a/client	0.110s
+ok  	github.com/crier-dev/crier/internal/addressing	0.014s
+ok  	github.com/crier-dev/crier/internal/archive	20.122s
+ok  	github.com/crier-dev/crier/internal/boardbridge	5.841s
+ok  	github.com/crier-dev/crier/internal/buildinfo	0.040s
+ok  	github.com/crier-dev/crier/internal/chat	0.058s
+ok  	github.com/crier-dev/crier/internal/ci	0.851s
+ok  	github.com/crier-dev/crier/internal/daggerctl	2.605s
+ok  	github.com/crier-dev/crier/internal/detect	0.031s
+ok  	github.com/crier-dev/crier/internal/dispatchlive	0.025s
+ok  	github.com/crier-dev/crier/internal/federation	1.485s
+ok  	github.com/crier-dev/crier/internal/guard	17.901s
+ok  	github.com/crier-dev/crier/internal/harness	6.309s
+ok  	github.com/crier-dev/crier/internal/harness/build	0.005s
+ok  	github.com/crier-dev/crier/internal/harness/claudecode	0.024s
+ok  	github.com/crier-dev/crier/internal/harness/codex	0.007s
+ok  	github.com/crier-dev/crier/internal/harness/hermes	0.005s
+ok  	github.com/crier-dev/crier/internal/harness/opencode	0.018s
+?   	github.com/crier-dev/crier/internal/harness/pi	[no test files]
+ok  	github.com/crier-dev/crier/internal/hermesession	0.422s
+ok  	github.com/crier-dev/crier/internal/httperr	0.003s
+ok  	github.com/crier-dev/crier/internal/ingest	0.444s
+ok  	github.com/crier-dev/crier/internal/ingress	0.029s
+ok  	github.com/crier-dev/crier/internal/mcp	6.891s
+ok  	github.com/crier-dev/crier/internal/mesh	7.707s
+ok  	github.com/crier-dev/crier/internal/metrics	0.020s
+ok  	github.com/crier-dev/crier/internal/middleware	0.013s
+ok  	github.com/crier-dev/crier/internal/namespace	0.004s
+ok  	github.com/crier-dev/crier/internal/permissions	0.010s
+ok  	github.com/crier-dev/crier/internal/pidfile	0.106s
+ok  	github.com/crier-dev/crier/internal/protocol	0.006s
+ok  	github.com/crier-dev/crier/internal/ratelimit	0.604s
+ok  	github.com/crier-dev/crier/internal/reads	0.300s
+ok  	github.com/crier-dev/crier/internal/registry	26.366s
+ok  	github.com/crier-dev/crier/internal/relay	9.828s
+ok  	github.com/crier-dev/crier/internal/session	17.362s
+ok  	github.com/crier-dev/crier/internal/strictjson	0.042s
+ok  	github.com/crier-dev/crier/internal/tags	0.018s
+ok  	github.com/crier-dev/crier/internal/testsupport	15.594s
+ok  	github.com/crier-dev/crier/internal/tracing	0.231s
+ok  	github.com/crier-dev/crier/internal/trust	0.584s
+ok  	github.com/crier-dev/crier/internal/webhook	17.818s

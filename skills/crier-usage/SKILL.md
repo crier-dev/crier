@@ -325,6 +325,14 @@ A2A is an EXTRA: default-off, additive-only, two-half gate.
     `export GOPATH=~/gopath` after a tarball Go install to `~/go`, or go warns
     `both GOPATH and GOROOT are the same directory` on every call
     (DF-CRIER-284).
+19. Re-keyed id → permanent 409 `public_key_mismatch` (key immutability), and
+    the error's DELETE remedy needs the OLD key → 401. No admin recovery path
+    (DF-CRIER-515, 2026-11-24). New id is the only client-side recovery.
+20. `deliver()` to an unregistered target id → 404 `agent not found`; the
+    inbox model is per-registered-agent, register the target first (2026-11-24).
+21. A retrieve leases its whole batch (`lease_seconds` default 30 s); an
+    immediate second retrieve returns EMPTY and reads like lost data until the
+    lease expires or the batch is acked (2026-11-24).
 
 ## Verified-good examples (2026-08-09 live run)
 
@@ -368,6 +376,37 @@ build/behavior trail.
 # agent.key: PKCS#8 ed25519, mode 0600 — feed to crier-mcp via CRIER_AGENT_PRIVATE_KEY_FILE
 ```
 `keygen -force` overwrites (refuses by default — a keypair is not regenerable).
+
+## First-party clients (CR-FEAT-027, live-verified 2026-11-24 @ b48e1aad)
+
+`clients/python/crier_client.py` (stdlib) and `clients/typescript/crier.ts`
+(Node 22.6+) speak the whole wire protocol; the transcripts
+`round_trip.py` / `round-trip.ts` (12 steps, both signature negative controls)
+and `two_agents.py` are green end-to-end — 0.57–0.77 s per run this fire.
+
+```python
+from crier_client import Crier
+c = Crier(server, agent_id="alice", key_path="alice.key")
+c.register_if_missing()          # NOT bare register(): re-runs are normal, bare register() 409s
+c.deliver("bob", {...}, sender="alice")   # bob must ALREADY be registered → 404 otherwise
+for m in c.retrieve():           # leases everything returned, lease_seconds default 30s
+    c.ack(m)                     # after a retrieve, an immediate 2nd retrieve is EMPTY until the lease expires
+c.stats(your_own_id)             # agent-scoped routes are OWNER-ONLY: another id's inbox answers 403
+```
+
+- Deliver latency client-side (signed) ~5–7 ms steady-state; cold boot to
+  `/health` 200 1.24 s on the durable backend (measured 2026-11-24).
+- Durable-queue consumer pattern survives server restarts: deliver → ack what
+  you own → wait out `lease_seconds` for the unacked → stop/restart →
+  re-register idempotently → retrieve returns exactly the unacked (3/3 with
+  payloads intact, this fire's trust test).
+- **Lost-key tombstone (DF-CRIER-515, open):** a 409 `public_key_mismatch`
+  cannot be recovered client-side — `DELETE /agents/{id}` needs the OLD
+  registered key → 401 with any new key, and no admin path deletes registry
+  rows. Register under a NEW id instead (diagnostics:
+  `docs/dogfood/diagnostics-2026-11-24-lost-key-lockout.md`).
+
+
 
 ## Delivery ACL — principals, bindings, grants (CR-CHAT-003/007, live-verified 2026-10-09)
 
