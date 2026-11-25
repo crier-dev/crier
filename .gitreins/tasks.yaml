@@ -4735,3 +4735,27 @@ tasks:
   status: complete
   created_at: '2026-11-25T01:59:05.480938+00:00'
   completed_at: '2026-11-25T02:07:35.266942+00:00'
+- id: DF-CRIER-515
+  title: 'Lost-key registry tombstone: recovery path for an id whose original key
+    is lost'
+  criteria:
+  - 'FAILIF: register fresh-key for an existing id answers 409 whose named remedy
+    (DELETE) fails 401, recovery unexecutable || PROOF: go test ./internal/registry
+    -run TestLostKeyRecovery -count=1 exits 0'
+  - 'FAILIF: no regression test registering an id, refusing fresh-key re-registration
+    with 409, exercising the documented recovery || PROOF: go test ./internal/registry
+    -run TestLostKeyRecovery -count=1 exits 0'
+  status: complete
+  created_at: '2026-11-25T02:26:53.547732+00:00'
+  completed_at: '2026-11-25T03:35:44.015451+00:00'
+- id: INT-CI-045
+  title: 'check-demo-cleanup red on main: 3 dogfood evidence scripts spawn servers
+    without the CR-GAP-069 trap+ownership contract'
+  criteria:
+  - 'FAILIF: bash scripts/check-demo-cleanup.sh exits nonzero (3 evidence scripts
+    rejected) || PROOF: bash scripts/check-demo-cleanup.sh exits 0 on the merged tree
+    || FAILIF: CI workflow red on main from this gate (runs 45529315464, 45529963409,
+    45530777723, 45535707249) || PROOF: gh run list on the next pushed head shows
+    the CI workflow conclusion success'
+  status: in_progress
+  created_at: '2026-11-25T03:56:30.765938+00:00'
