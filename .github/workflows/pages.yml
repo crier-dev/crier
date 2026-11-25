@@ -8,6 +8,11 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # actions: read lets this job list its own run's artifacts (the INT-CI-044
+  # wait step polls the run artifact index). An explicit permissions block
+  # drops every unlisted scope, and the run-artifact listing endpoint requires
+  # "Actions" repository permissions (read).
+  actions: read
 
 concurrency:
   group: pages
@@ -46,6 +51,33 @@ jobs:
         with:
           path: site
           name: github-pages-${{ github.run_attempt }}
+      # INT-CI-044: the Pages artifact index lags the upload by a few seconds in
+      # hosted runs (proven on run timelines 45482601972, 45521217599,
+      # 45523207020): the Upload artifact step SUCCEEDS, Deploy to GitHub Pages
+      # starts ~0.1s later, queries the index, logs "Found 0 artifact(s)" and
+      # hard-fails with "No artifacts named github-pages-<N> were found" even
+      # though the artifact IS there. Poll the run artifact list for the SAME
+      # attempt-scoped name (5s interval, 60s hard cap) before handing over to
+      # deploy-pages, so a green upload is no longer racing the index.
+      - name: Wait for artifact to reach the index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: github-pages-${{ github.run_attempt }}
+        run: |
+          deadline=$((SECONDS + 60))
+          while :; do
+            names="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --jq '.artifacts[].name' 2>/dev/null || true)"
+            if printf '%s' "$names" | grep -Fxq -- "$ARTIFACT_NAME"; then
+              echo "Artifact ${ARTIFACT_NAME} is in the run artifact index (waited ${SECONDS}s)."
+              exit 0
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Artifact ${ARTIFACT_NAME} never appeared in the run artifact index within 60s (last visible names: ${names:-<none>}). The upload step already succeeded, so the index has not caught up — failing loudly here instead of letting deploy-pages report 'No artifacts named ${ARTIFACT_NAME} were found'."
+              exit 1
+            fi
+            echo "Artifact ${ARTIFACT_NAME} not in the index yet; retrying in 5s (hard cap 60s)..."
+            sleep 5
+          done
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
