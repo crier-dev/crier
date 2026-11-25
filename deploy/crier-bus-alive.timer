@@ -1,0 +1,39 @@
+[Unit]
+# crier — 2-minute trigger for the bus liveness probe
+# (deploy/crier-bus-alive.service).
+#
+# This is the half that was missing on 2026-11-23: the probe and its exit
+# codes existed, but without a timer the check lived in an operator's head, and
+# the fleet bus sat down for 5h35m with no alarm anywhere. A timer that fires
+# is evidence; a "we would notice" sentence is not.
+Description=crier bus liveness probe every 2 minutes (bus-down alarm)
+Documentation=https://github.com/crier-dev/crier/blob/main/docs/operations.md
+
+[Timer]
+# Pulled in BY NAME so enablement cannot half-work: `systemctl --user enable
+# crier-bus-alive.timer` plus this Unit= is enough, with no separate enable of
+# the service. (This key belongs to [Timer], not [Unit] — systemd warns and
+# IGNORES it in [Unit], and the implicit same-name lookup would mask the
+# mistake on this pair while breaking any future rename of the service.)
+Unit=crier-bus-alive.service
+# 60s after boot, then every 2 minutes. The cadence is the point: with a 120s
+# period the worst-case undetected outage is ~2 minutes of probe interval plus
+# the probe's own ~6s ceiling — not 5h35m. OnBootSec= keeps the first answer
+# coming a minute after boot instead of waiting two.
+OnBootSec=60
+OnUnitActiveSec=120
+# The default AccuracySec=1min lets the manager coalesce wakeups, which would
+# stretch the observed cadence to ~3 minutes and blur the "two elapses
+# separated by the interval" evidence in the journal. 5s keeps fires close to
+# the configured period on a busy desktop without demanding exact wakeups.
+AccuracySec=5s
+# No Persistent=: a probe missed while the box was off is not a backlog to
+# replay — the first post-boot fire (OnBootSec=60) answers the only question
+# that matters, "is the bus up NOW", and catch-up replays of stale probes
+# would manufacture red noise for an outage that already ended.
+
+[Install]
+# timers.target, not default.target: the TIMER is the unit that gets enabled,
+# and the service is reached through Unit= above. Anything else here would run
+# the probe once at boot and then never again.
+WantedBy=timers.target

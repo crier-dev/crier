@@ -1,0 +1,66 @@
+[Unit]
+# crier — bus-down alarm for the fleet bus (OPS-CRIER-002).
+#
+# scripts/bus-alive.sh has existed and been proven (exit 0 only on HTTP 200
+# from the fleet bus health endpoint) but NOTHING ran it: on 2026-11-23 the bus
+# was down for 5h35m with no alarm anywhere, because a probe nobody schedules
+# cannot fail. This unit is that missing surface. Pair it with
+# deploy/crier-bus-alive.timer; deploy/install-bus-alive.sh installs both as
+# USER units (docs/operations.md §7). For the backup drill's sibling pattern
+# see deploy/crier-backup.service.
+Description=crier fleet bus liveness probe (bus-down alarm)
+Documentation=https://github.com/crier-dev/crier/blob/main/docs/operations.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# ONESHOT, on purpose: this is a probe, not a daemon. There is no state to keep
+# between runs and nothing to restart; the timer is what makes it recur.
+Type=oneshot
+# The probe runs from the CANONICAL checkout, not from a git worktree (worktrees
+# are temporary and get reaped) and not from an installed copy — unlike the
+# backup drill there is no re-copy step to forget: the checkout IS the live
+# source for this host, and the file it points at is tracked in git.
+ExecStart=/home/kara/crier/scripts/bus-alive.sh
+
+# THE ALARM PATH. House pattern on this host (duckbrain-http-health.service,
+# io-thrash-guard.service): the probe script writes its failure to STDERR and
+# the user journal captures it — no logger, no separate notification system.
+# The probe's FAIL line quotes the failing URL and the http code
+# (e.g. `bus-alive: FAIL http_code=503 url=http://127.0.0.1:8767/health`, or
+# `FAIL curl rc=7 code=000 url=...` when nothing answers). SyslogIdentifier
+# tags every record `crier-bus-alive` (the same tag mechanism
+# deploy/crier-backup.service uses), so both alarm records and healthy
+# heartbeats read back with:
+#   journalctl --user -t crier-bus-alive -n 50 --no-pager
+SyslogIdentifier=crier-bus-alive
+
+# NO SuccessExitStatus= and no failure-swallowing wrapper: the probe exits 1 on
+# transport failure or any non-200, and that must leave the unit FAILED so
+# `systemctl --user --failed` lists it and the journal keeps the reason. A
+# green unit next to a dark bus is exactly the silent 5h35m this unit exists
+# to end. The BUS_ALIVE_URL / BUS_ALIVE_TIMEOUT environment overrides pass
+# through from the user manager unchanged, which is how the alarm path is
+# drill-tested against a closed port without touching the probe:
+#   systemctl --user set-environment BUS_ALIVE_URL=http://127.0.0.1:1/health
+#   systemctl --user start crier-bus-alive.service   # expect FAIL record + exit 1
+#   systemctl --user unset-environment BUS_ALIVE_URL
+
+# The probe never hangs longer than ~6s wall clock (curl hard timeout, default
+# 5s), so the manager's default 90s start ceiling is ample; no TimeoutStartSec
+# override to maintain.
+
+# Hardening that a USER manager actually enforces (same set as
+# deploy/crier.user.service): the probe forks curl from /usr/bin and touches
+# nothing but the network. ProtectHome= would hide the very checkout this unit
+# executes from, and the filesystem-protection properties beyond these are not
+# available to an unprivileged manager.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+# Shipped in case an operator wants to trigger it at boot, but the supported
+# enablement is the TIMER (deploy/crier-bus-alive.timer), which pulls this unit
+# in by name. Enabling this alone would probe once per boot, not every 2
+# minutes.
+WantedBy=default.target

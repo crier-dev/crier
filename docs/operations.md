@@ -338,3 +338,49 @@ failure than a full `/var/backups`, so it was deliberately not shipped here.
 **What is still not automated:** pruning, off-host replication, and any alerting
 beyond the failed unit and its journal line. That residual — and the retention
 automation that would close it — is tracked on the board as `CRIER-OPS-002`.
+
+## 7. Bus liveness — the timer that runs the probe
+
+The backup drill above watches the stores; this section watches the bus they
+serve. `scripts/bus-alive.sh` probes the fleet bus health endpoint and exits 0
+**only** on HTTP 200 (curl transport failure, timeout, and any other status all
+exit 1). It existed and was proven, but nothing ran it: on 2026-11-23 the fleet
+bus was down for **5h35m** with no alarm anywhere, because a probe nobody
+schedules cannot fail. Two USER units ship in [`deploy/`](deploy/) now:
+
+| unit | what it is |
+| --- | --- |
+| `deploy/crier-bus-alive.service` | `Type=oneshot`. Runs the probe from the **canonical checkout** (`/home/kara/crier/scripts/bus-alive.sh`) — not a worktree, which is temporary and gets reaped. On failure the probe's stderr names the failing URL and the http code, the unit goes FAILED, and `SyslogIdentifier=crier-bus-alive` tags every record so both alarm lines and heartbeats are greppable. |
+| `deploy/crier-bus-alive.timer` | Fires the service **60s after boot, then every 120s** (`OnBootSec=60`, `OnUnitActiveSec=120`, `AccuracySec=5s` so the cadence stays near 2 minutes on a busy box). `WantedBy=timers.target`. |
+
+Install with `deploy/install-bus-alive.sh` — it copies both units into
+`~/.config/systemd/user/`, runs `systemctl --user daemon-reload`, and enables +
+starts the timer. Idempotent: re-run it after editing the units.
+
+```sh
+./deploy/install-bus-alive.sh
+systemctl --user list-timers crier-bus-alive.timer --no-pager   # proves the next fire
+```
+
+### 7.1 What the alarm looks like
+
+Failure surfaces twice, in the same places §6.2 uses for the drill:
+
+```sh
+systemctl --user --failed | grep crier-bus-alive      # the failed unit
+journalctl --user -t crier-bus-alive -n 50 --no-pager # the record, quoting url + code
+```
+
+A failing probe leaves a journal record shaped like
+`bus-alive: FAIL http_code=503 url=http://127.0.0.1:8767/health` (or
+`FAIL curl rc=7 code=000 url=…` when nothing answers at all); a healthy one
+logs `bus-alive: OK http_code=200 url=…` on the same tag, so the heartbeat
+itself is evidence the timer fired. The alarm path is drill-testable against a
+closed port without touching the probe or stopping the timer:
+
+```sh
+systemctl --user set-environment BUS_ALIVE_URL=http://127.0.0.1:1/health
+systemctl --user start crier-bus-alive.service          # expect FAIL record, exit 1
+systemctl --user unset-environment BUS_ALIVE_URL
+systemctl --user reset-failed crier-bus-alive.service
+```
