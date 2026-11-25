@@ -4696,3 +4696,14 @@ tasks:
   status: complete
   created_at: '2026-11-23T16:39:40.574622+00:00'
   completed_at: '2026-11-23T16:50:51.586395+00:00'
+- id: DF-CRIER-517
+  title: 'Docs-claim gate probe bound too tight for fresh machines: DOCTOR_PROBE_TIMEOUT=5
+    reds TestDocsClaimsBehaviors on slower hosts'
+  criteria:
+  - 'FAILIF: cmd/server/docsclaims_hooks_test.go still pins DOCTOR_PROBE_TIMEOUT=5
+    (or any fixed bound that reds when a real gated git commit exceeds it on a slow
+    host) without matching package-budget headroom. PROOF: grep -n ''DOCTOR_PROBE_TIMEOUT''
+    cmd/server/docsclaims_hooks_test.go scripts/doctor-hooks.sh && go test ./cmd/server/
+    -run TestDocsClaimsBehaviors -count=1 -v 2>&1 | tail -5'
+  status: in_progress
+  created_at: '2026-11-25T00:51:46.926070+00:00'
