@@ -4809,3 +4809,28 @@ tasks:
   status: complete
   created_at: '2026-11-25T06:19:29.276470+00:00'
   completed_at: '2026-11-25T06:34:06.305517+00:00'
+- id: OPS-CRIER-002
+  title: 'Bus-down detection unwired: wire bus-alive probe into a systemd user timer
+    with operator-visible alarm'
+  criteria:
+  - "FAILIF: no scheduled invoker runs the bus-alive probe, or `systemctl --user list-timers`\
+    \ does not show a crier bus-alive timer ACTIVE with a next elapse || PROOF: systemctl\
+    \ --user list-timers --no-pager shows crier-bus-alive.timer (or equivalently named)\
+    \ with UNIT crier-bus-alive.service, status ACTIVE and a NEXT elapse timestamp\
+    \ quoted on the row; the timer interval is bounded (OnUnitActiveSec configured,\
+    \ default 120s) || FAILIF: a failing probe produces no operator-visible alarm\
+    \ record, or the alarm line omits the failing URL or the http code || PROOF: with\
+    \ BUS_ALIVE_URL pointed at a closed port (e.g. http://127.0.0.1:1/health) the\
+    \ alarm path emits a journal record (journalctl -t <tag> or the house alarm channel\
+    \ used by sibling guard timers) whose pasted line quotes the failing URL and the\
+    \ http code; exit code 1 recorded || FAILIF: the invoker fires only once (no repetition\
+    \ proof) || PROOF: two elapse records separated by the configured interval are\
+    \ quoted (journalctl timestamps or list-timers LAST/NEXT pairs), matching OnUnitActiveSec\
+    \ || FAILIF: evidence missing from the row at close || PROOF: the row records\
+    \ the run id, both probe exit codes (0 healthy, 1 closed-port) and the timer unit\
+    \ paths; GATE: bash -n scripts/bus-alive.sh exits 0 and the probe file is not\
+    \ modified (git diff --exit-code scripts/bus-alive.sh) \u2014 the probe exists\
+    \ and works; this row only wires it."
+  status: complete
+  created_at: '2026-11-25T06:39:24.173294+00:00'
+  completed_at: '2026-11-25T06:57:02.382054+00:00'
