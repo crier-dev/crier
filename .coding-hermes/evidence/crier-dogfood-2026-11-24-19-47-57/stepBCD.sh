@@ -15,6 +15,9 @@ for i in $(seq 1 20); do
   echo "health=$st"; [ "$st" = "healthy" ] && break; sleep 1
 done
 echo "=== server cold boot (durable backend) ==="
+# CR-GAP-069 trap+ownership contract: the spawned server must not outlive this
+# capture script, and the port it binds must be held by the pid we started.
+trap '[ -n "$SRVPID" ] && kill "$SRVPID" 2>/dev/null' EXIT
 CRIER_PORT=18876 CR_DATABASE_URL='postgres://crier:crier@localhost:15437/crier?sslmode=disable' ./bin/crier -pidfile $H/crier.pid > $H/server.log 2>&1 &
 SRVPID=$!
 t0=$(date +%s.%N)
@@ -23,6 +26,8 @@ for i in $(seq 1 100); do
   [ "$code" = "200" ] && break
   sleep 0.1
 done
+. ./scripts/lib/port-guard.sh
+assert_port_owned 18876 "$SRVPID" "dogfood evidence server (stepBCD)"
 t1=$(date +%s.%N)
 echo "HEALTH_200_AFTER=$(echo "$t1 $t0" | awk '{printf "%.3f", $1-$2}') s (poll resolution 0.1s)"
 echo "health body: $(cat $H/health.json)"
