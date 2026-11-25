@@ -4834,3 +4834,13 @@ tasks:
   status: complete
   created_at: '2026-11-25T06:39:24.173294+00:00'
   completed_at: '2026-11-25T06:57:02.382054+00:00'
+- id: OPS-CRIER-003
+  title: Fleet dispatcher log rotation stanza
+  criteria:
+  - 'PROOF: grep -n maxsize deploy/crier-fleet/logrotate.conf returns one line per
+    stanza including dispatcher.log -- FAILIF: dispatcher.log basename absent from
+    tracked config || PROOF: logrotate -d (debug dry-run) exits 0 naming the dispatcher
+    log -- FAILIF: dry-run prints an error'
+  status: complete
+  created_at: '2026-11-25T18:03:51.481301+00:00'
+  completed_at: '2026-11-25T18:15:39.811018+00:00'
