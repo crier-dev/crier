@@ -1,0 +1,22 @@
+{
+  "tick_id": "crier-foreman-2026-11-25-01-38-12",
+  "block": "DF-CRIER-518",
+  "wave_id": "crier-foreman-2026-11-25-01-38-12-wave1",
+  "wave_size": 1,
+  "wave_size_reason": "slots=1: loadavg 24.81 on 16 cores -> max(1, min(6, 16-ceil(24.81))) = 1; WAVE_BUDGET=4 is a ceiling, box load gates concurrency. Loaded box = one worker, not idle (owner ruling 2026-10-19). Serial repopulation planned: DF-CRIER-516 next after merge if tick time remains.",
+  "rows": [
+    {
+      "id": "DF-CRIER-518",
+      "title": "TestStopRefusesForeignProcess reads a recycled pid: refusal names server.test instead of the spawned sleep - false red on fresh machines",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-518",
+      "branch": "wt/DF-CRIER-518",
+      "base_sha": "a29eb6c8",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "opencode-go",
+      "brief_file": "/tmp/brief-DF-CRIER-518-20261125.txt",
+      "depends_on": []
+    }
+  ],
+  "pending_next": ["DF-CRIER-516", "DF-CRIER-515"],
+  "gitreins_task": "DF-CRIER-518"
+}
