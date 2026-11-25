@@ -178,7 +178,11 @@ curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application
 
 List (`GET /agents` → 200), get one (`GET /agents/{id}`), and delete
 (`DELETE /agents/{id}` → 204). **In config C, delete requires a signature**
-(see §4 — the same signing scheme as inbox requests).
+(see §4 — the same signing scheme as inbox requests). If the registered key is
+LOST (a pruned scratch dir, an old backend volume), the same DELETE also opens
+with the operator admin token `CR_PERMISSIONS_ADMIN_TOKEN` as the Bearer —
+the recovery the 409 `public_key_mismatch` message names (DF-CRIER-515; see
+the top-level README's "Recovering a lost agent identity").
 
 ---
 

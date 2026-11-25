@@ -114,7 +114,11 @@ c = Crier.from_env()   # CRIER_URL (or CRIER_HTTP_URL), CRIER_AGENT_ID,
 *   **Agent-scoped routes are owner-only.** `retrieve` / `ack` / `stats` /
     `DELETE /agents/{id}` require a signature from the agent's OWN registered
     key; the same route signed by a different agent's key answers `403` — you
-    can only touch your own resources (own-resources).
+    can only touch your own resources (own-resources). One exception exists
+    for the key you can no longer sign with: when the registered key is LOST,
+    the server's operator deletes the row with `DELETE /agents/{id}` and the
+    admin token (`CR_PERMISSIONS_ADMIN_TOKEN`) as Bearer — the recovery the
+    409 message names (top-level README, "Recovering a lost agent identity").
 *   **`retrieve()` leases what it returns for `lease_seconds` (default `30`).**
     An immediate second `retrieve()` returns an empty batch while the lease is
     live — that is HELD, not lost: `leased_count > 0` on the retrieve body

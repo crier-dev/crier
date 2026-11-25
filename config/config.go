@@ -488,8 +488,13 @@ type PermissionsConfig struct {
 	// /agents/{agentid}/class) must present it as Bearer, constant-time
 	// compared; it is deliberately distinct from CR_AUTH_TOKEN so a leaked
 	// message token cannot mint permissions, and Load REFUSES a boot that sets
-	// the two to the same secret (DF-CRIER-297). Empty (the default) keeps the
-	// gate closed: the routes answer every write 403 MANAGEMENT_FORBIDDEN.
+	// the two to the same secret (DF-CRIER-297). Since DF-CRIER-515 the same
+	// token ALSO arms the registry's operator delete (DELETE /agents/{id} with
+	// the admin Bearer — the lost-key recovery the 409 public_key_mismatch
+	// message names), independent of CR_PERMISSIONS_ENABLED; the boot refusal
+	// above therefore applies whenever the token is set at all. Empty (the
+	// default) keeps every gate closed: the routes answer every write 403
+	// MANAGEMENT_FORBIDDEN.
 	AdminToken string
 }
 
@@ -1604,15 +1609,19 @@ func LoadFrom(getenv Getenv) (Config, error) {
 	// DF-CRIER-297: CR_PERMISSIONS_ADMIN_TOKEN is a SECOND secret, deliberately
 	// distinct from CR_AUTH_TOKEN (see PermissionsConfig.AdminToken). Set to the
 	// same value the two roles collapse into one credential — the message token
-	// becomes an admin token, so the surface's "a leaked message token cannot
+	// becomes an admin token, so the surfaces' "a leaked message token cannot
 	// mint permissions" property is lost and the middleware's per-surface split
 	// (management routes accept either secret) stops meaning anything. Refuse
 	// the boot naming both variables rather than serving a deployment whose
-	// admin gate is the shared token. Only checked when the ACL is enabled:
-	// with CR_PERMISSIONS_ENABLED unset the admin token arms nothing.
-	if cfg.Permissions.Enabled && cfg.AuthToken != "" && cfg.Permissions.AdminToken != "" &&
+	// admin gate is the shared token. DF-CRIER-515: checked whenever the admin
+	// token is set at all, not only with the ACL enabled — the same token now
+	// also arms the registry's operator delete (DELETE /agents/{id} with the
+	// admin Bearer, the lost-key recovery), so with the ACL off the collision
+	// is no longer inert: a leaked message token would be able to delete
+	// identities.
+	if cfg.AuthToken != "" && cfg.Permissions.AdminToken != "" &&
 		cfg.AuthToken == cfg.Permissions.AdminToken {
-		return cfg, fmt.Errorf("CR_PERMISSIONS_ADMIN_TOKEN and CR_AUTH_TOKEN are set to the same secret — the permissions management surface's admin gate must be distinct from the message token (DF-CRIER-297); give them different values, or unset the one this deployment does not need")
+		return cfg, fmt.Errorf("CR_PERMISSIONS_ADMIN_TOKEN and CR_AUTH_TOKEN are set to the same secret — the admin gate must be distinct from the message token (DF-CRIER-297; it arms the permissions management surface and, since DF-CRIER-515, the registry's operator delete even when CR_PERMISSIONS_ENABLED is off); give them different values, or unset the one this deployment does not need")
 	}
 
 	// Dagger control surface (CR-CHAT-033). OPT-IN and additive: with

@@ -464,6 +464,108 @@ func TestAuthTokensDualSecretPerSurface(t *testing.T) {
 	}
 }
 
+// TestAuthTokensAdminTokenRegistryDelete pins the DF-CRIER-515 exception: the
+// admin token may present on DELETE /agents/{id} — the registry's operator
+// lost-key recovery — and on NO other agent-owned route or method. The message
+// token keeps reaching every path exactly as before.
+func TestAuthTokensAdminTokenRegistryDelete(t *testing.T) {
+	const (
+		messageToken = "message-secret"
+		adminToken   = "admin-secret"
+	)
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		bearer     string
+		wantStatus int
+		wantCalled bool
+	}{
+		{
+			name:       "admin token reaches the operator delete (DF-CRIER-515)",
+			method:     http.MethodDelete,
+			path:       "/agents/atlas",
+			bearer:     adminToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "admin token is refused on the agent-owned PATCH of the same path",
+			method:     http.MethodPatch,
+			path:       "/agents/atlas",
+			bearer:     adminToken,
+			wantStatus: http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			name:       "admin token is refused on the agent-owned GET of the same path",
+			method:     http.MethodGet,
+			path:       "/agents/atlas",
+			bearer:     adminToken,
+			wantStatus: http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			name:       "admin token is refused on a sub-path of the agent route",
+			method:     http.MethodDelete,
+			path:       "/agents/atlas/inbox",
+			bearer:     adminToken,
+			wantStatus: http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			name:       "admin token is refused on an empty-id agents path",
+			method:     http.MethodDelete,
+			path:       "/agents/",
+			bearer:     adminToken,
+			wantStatus: http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			name:       "message token still reaches the agent-owned delete",
+			method:     http.MethodDelete,
+			path:       "/agents/atlas",
+			bearer:     messageToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "message token still reaches the agent-owned patch",
+			method:     http.MethodPatch,
+			path:       "/agents/atlas",
+			bearer:     messageToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			handler := AuthTokens(messageToken, adminToken)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("authenticated"))
+			}))
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.bearer != "" {
+				request.Header.Set("Authorization", "Bearer "+tc.bearer)
+			}
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d (body: %s)", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("handler called = %v, want %v", called, tc.wantCalled)
+			}
+		})
+	}
+}
+
 // TestAuthTokensWithoutManagementTokenIsTheSingleSecretMiddleware is the
 // byte-compat guard: an unconfigured deployment (no admin token) must behave
 // exactly as it did before DF-CRIER-297 — a management path with any credential

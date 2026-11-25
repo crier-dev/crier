@@ -110,6 +110,12 @@ func wantsHTMLRefusal(r *http.Request) bool {
 //     passed straight through so the handler answers its named 403
 //     MANAGEMENT_FORBIDDEN — a reach credential is not an admin credential —
 //     and the admin token reaches the handler, which re-checks it.
+//   - DELETE /agents/{id} accepts the admin token too (DF-CRIER-515): it is
+//     the operator lost-key recovery the registration-conflict message names
+//     — the registry's own delete, which a lost key can never sign. The
+//     handler re-checks the token; every other method on that path (GET, the
+//     PATCH) and every other non-management path still answers the admin
+//     token 403.
 //   - GET /status accepts either token so its viewer-specific management
 //     posture can reflect the same admin credential as the read routes.
 //   - on every other path, only the message token is accepted. Presenting the
@@ -194,7 +200,12 @@ func authTokens(authToken, managementToken string, bypassIngest bool) func(http.
 
 			if managementToken != "" &&
 				subtle.ConstantTimeCompare([]byte(token), []byte(managementToken)) == 1 {
-				if management || (r.Method == http.MethodGet && r.URL.Path == "/status") {
+				// DF-CRIER-515: DELETE /agents/{id} is the registry's operator
+				// lost-key recovery — the one agent-owned route the admin token
+				// may present (the handler re-checks it; a lost key can never
+				// sign, so no agent signature could ever perform this delete).
+				if management || (r.Method == http.MethodDelete && isAgentDeletePath(r.URL.Path)) ||
+					(r.Method == http.MethodGet && r.URL.Path == "/status") {
 					// The read-only status projection uses this SAME request's
 					// admin gate decision. No relay/session/registry reach granted.
 					next.ServeHTTP(w, r)
@@ -232,6 +243,17 @@ func isManagementPath(path string) bool {
 	}
 	return (segs[0] == "grants" && segs[2] == "revoke") ||
 		(segs[0] == "agents" && segs[2] == "class")
+}
+
+// isAgentDeletePath reports whether path is the registry's agent-delete route
+// — exactly "/agents/{id}", two segments, the second non-empty. It is the one
+// agent-owned route the admin token may present (DF-CRIER-515, the operator
+// lost-key recovery), so the predicate is deliberately narrow: a longer path
+// (/agents/{id}/inbox), an empty id, or any other method is NOT the operator
+// delete and keeps the message-token rule.
+func isAgentDeletePath(path string) bool {
+	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	return len(segs) == 2 && segs[0] == "agents" && segs[1] != ""
 }
 
 // writeAuthJSON writes one of the middleware's JSON refusals.

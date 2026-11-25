@@ -833,7 +833,9 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 				"error": CodePublicKeyMismatch,
 				"message": fmt.Sprintf("agent %q is already registered with a different public_key; "+
 					"a registered key is immutable and the existing registration was left unchanged — "+
-					"delete the agent first (DELETE /agents/%s) or register under a new id",
+					"delete the agent first (DELETE /agents/%s signed with its registered key; if that key "+
+					"is lost, the same DELETE with the operator admin token CR_PERMISSIONS_ADMIN_TOKEN as "+
+					"the Bearer — see the README's lost-key recovery) or register under a new id",
 					agent.ID, agent.ID),
 			})
 		case errors.Is(err, ErrAgentExists):
@@ -898,10 +900,27 @@ func (h *Handler) HandleGetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleUnregister handles DELETE /agents/{id} — removes an agent.
-// Agent-owned: requires a valid per-agent signature when enabled.
+//
+// Two credentials open this route (DF-CRIER-515):
+//
+//   - the AGENT's own valid per-agent signature when enforcement is on — the
+//     historical, agent-owned path ("an agent may only delete itself"); and
+//   - the OPERATOR admin token (CR_PERMISSIONS_ADMIN_TOKEN) as the request
+//     Bearer — the lost-key recovery the registration-conflict message names.
+//     A key that no longer exists can never sign anything, so an operator
+//     credential is the only way to delete a tombstoned identity, and the
+//     credential is deliberately distinct from CR_AUTH_TOKEN (DF-CRIER-297)
+//     so a leaked message token cannot delete identities either.
+//
+// With no admin token armed the route is unchanged: only the agent signature
+// opens it, and an unsigned request keeps its exact historical 401.
 func (h *Handler) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	if !h.requireAgent(w, r, id) {
+	if h.registryDeleteAuthorized(r) {
+		slog.Info("operator unregister",
+			"agent", id,
+			"detail", "registry row deleted with the CR_PERMISSIONS_ADMIN_TOKEN bearer (DF-CRIER-515 lost-key recovery)")
+	} else if !h.requireAgent(w, r, id) {
 		return
 	}
 	if err := h.store.Unregister(id); err != nil {

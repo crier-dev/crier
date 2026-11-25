@@ -78,16 +78,20 @@ func TestPermissionsAdminTokenDistinctFromAuthTokenLoads(t *testing.T) {
 	require.Equal(t, "admin-secret", cfg.Permissions.AdminToken)
 }
 
-// Two accepted positions look like the rejected one and must still boot:
-// the collision CHECK is exactly "enabled AND both set AND equal".
-func TestPermissionsEqualTokensWithAclDisabledLoads(t *testing.T) {
+// DF-CRIER-515 flipped the ACL-off case: the admin token now arms the
+// registry's operator delete (DELETE /agents/{id} with the admin Bearer) even
+// when CR_PERMISSIONS_ENABLED is off, so the old "the admin token arms nothing
+// with the ACL disabled" premise no longer holds and the collision is a boot
+// refusal in every configuration (DF-CRIER-297's rule, unconditionally).
+func TestPermissionsEqualTokensWithAclDisabledFailsBoot(t *testing.T) {
 	unsetAll(t)
 	t.Setenv("CR_AUTH_TOKEN", "one-secret-for-both")
-	t.Setenv("CR_PERMISSIONS_ADMIN_TOKEN", "one-secret-for-both") // no CR_PERMISSIONS_ENABLED: the admin token arms nothing
+	t.Setenv("CR_PERMISSIONS_ADMIN_TOKEN", "one-secret-for-both") // no CR_PERMISSIONS_ENABLED: still a refusal (DF-CRIER-515)
 
-	cfg, err := config.Load()
-	require.NoError(t, err, "with the ACL off the admin token has no role, so the collision is inert")
-	require.False(t, cfg.Permissions.Enabled)
+	_, err := config.Load()
+	require.Error(t, err, "the admin token arms the registry's operator delete even with the ACL off, so the collision is not inert")
+	require.Contains(t, err.Error(), "CR_PERMISSIONS_ADMIN_TOKEN")
+	require.Contains(t, err.Error(), "CR_AUTH_TOKEN")
 }
 
 func TestPermissionsAdminTokenWithoutAuthTokenLoads(t *testing.T) {

@@ -606,7 +606,6 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		// permissions; with no token armed the routes exist and refuse every
 		// write 403 MANAGEMENT_FORBIDDEN (the gate closed is the default).
 		registryHandler.SetPermissionsStore(permsStore)
-		registryHandler.SetPermissionsAdminToken(cfg.Permissions.AdminToken)
 		slog.Info("delivery acl armed",
 			"store_dir", cfg.Permissions.StoreDir,
 			"detail", "classed targets are default-deny; unclassed targets keep the shipped posture (CR-CHAT-003)")
@@ -615,6 +614,14 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 			"enabled", false,
 			"detail", "no ACL deployed: deliveries are authorized exactly as before CR-CHAT-003")
 	}
+	// DF-CRIER-515: the admin token ALSO arms the registry's operator delete
+	// (DELETE /agents/{id} with the admin Bearer) — the lost-key recovery the
+	// 409 public_key_mismatch message names. Arming is deliberately
+	// independent of the delivery ACL: a durable deployment that never enabled
+	// CR_PERMISSIONS_ENABLED still needs an operator path to delete an
+	// identity whose registered key was lost. An empty token keeps the gate
+	// closed (the route then opens only by the agent's own signature).
+	registryHandler.SetPermissionsAdminToken(cfg.Permissions.AdminToken)
 	// Presence (CR-FEAT-024): the status every registry read reports is DERIVED
 	// from the row's liveness evidence (`last_seen`) and this documented window,
 	// so a crashed agent goes stale instead of reporting "online" forever. The

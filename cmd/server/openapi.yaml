@@ -1591,8 +1591,11 @@ paths:
             names the consequence and the remedy — a registered key is
             IMMUTABLE, so nothing was changed and an agent left signing with
             the rejected key would fail every later signed request with 401;
-            delete the agent first (DELETE /agents/{id}) or register under a new
-            id. The historical duplicate: the SAME key material is
+            delete the agent first (DELETE /agents/{id} signed with its
+            registered key — or, when that key is LOST, the same DELETE with
+            the operator admin token CR_PERMISSIONS_ADMIN_TOKEN as the Bearer,
+            DF-CRIER-515) or register under a new id. The historical duplicate:
+            the SAME key material is
             re-registered, answered with the body `agent already registered:
             <id>` under `error`, as before.
 
@@ -1707,6 +1710,15 @@ paths:
         "DELETE\n/agents/{id}\n<unix-seconds>". An unsigned or invalidly signed
         DELETE is rejected with 401; an agent may only delete itself (the
         X-Agent-ID must match the {id} in the path, else 403).
+
+        Operator alternative (DF-CRIER-515): when the registered key is LOST,
+        no signature can exist, so the same DELETE accepts the operator admin
+        token CR_PERMISSIONS_ADMIN_TOKEN as the Authorization Bearer instead of
+        the signature trio — the recovery the 409 public_key_mismatch message
+        names. The token is deliberately distinct from CR_AUTH_TOKEN
+        (DF-CRIER-297) and arms this route on its own, with no need for
+        CR_PERMISSIONS_ENABLED; while it is unset the route stays
+        signature-only. A successful operator delete is logged.
       parameters:
         - name: id
           in: path

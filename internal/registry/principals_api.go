@@ -106,6 +106,28 @@ func (h *Handler) managementAuthorized(r *http.Request) bool {
 		[]byte(h.permissionsAdminToken)) == 1
 }
 
+// registryDeleteAuthorized reports whether this request presents the armed
+// admin token as its Bearer — the operator credential for DELETE /agents/{id}
+// (DF-CRIER-515). Unlike managementAuthorized it deliberately does NOT require
+// a wired permission store: losing a registered key has nothing to do with the
+// delivery ACL, and the remedy the 409 public_key_mismatch message names must
+// work on a deployment that set CR_PERMISSIONS_ADMIN_TOKEN but never enabled
+// CR_PERMISSIONS_ENABLED. The secret itself is the SAME one — one operator
+// credential, deliberately distinct from CR_AUTH_TOKEN (DF-CRIER-297), so a
+// leaked message token can neither mint permissions nor delete identities.
+func (h *Handler) registryDeleteAuthorized(r *http.Request) bool {
+	if h.permissionsAdminToken == "" {
+		return false
+	}
+	const prefix = "Bearer "
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, prefix) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, prefix)),
+		[]byte(h.permissionsAdminToken)) == 1
+}
+
 // refuseManagement writes the named 403 every unauthorized management write
 // gets — never a silent no-op and never a 404 that reads as a missing route.
 func refuseManagement(w http.ResponseWriter, armed bool) {

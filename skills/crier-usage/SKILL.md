@@ -400,10 +400,13 @@ c.stats(your_own_id)             # agent-scoped routes are OWNER-ONLY: another i
   you own → wait out `lease_seconds` for the unacked → stop/restart →
   re-register idempotently → retrieve returns exactly the unacked (3/3 with
   payloads intact, this fire's trust test).
-- **Lost-key tombstone (DF-CRIER-515, open):** a 409 `public_key_mismatch`
-  cannot be recovered client-side — `DELETE /agents/{id}` needs the OLD
-  registered key → 401 with any new key, and no admin path deletes registry
-  rows. Register under a NEW id instead (diagnostics:
+- **Lost-key tombstone (fixed by DF-CRIER-515):** a 409 `public_key_mismatch`
+  could not be recovered client-side — `DELETE /agents/{id}` needed the OLD
+  registered key → 401 with any new key. Recovery is now an operator delete:
+  the same `DELETE /agents/{id}` with `CR_PERMISSIONS_ADMIN_TOKEN` as Bearer
+  (armed on the server independently of the ACL), then re-register with the
+  fresh key. Without that token armed the tombstone stands — register under a
+  NEW id (diagnostics:
   `docs/dogfood/diagnostics-2026-11-24-lost-key-lockout.md`).
 
 
