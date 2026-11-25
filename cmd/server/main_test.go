@@ -1357,8 +1357,23 @@ func TestStopRefusesForeignProcess(t *testing.T) {
 	}()
 
 	path := filepath.Join(t.TempDir(), "crier.pid")
-	if err := pidfile.Write(path, pidfile.Record{PID: sleep.Process.Pid, Port: 8767, Binary: "/opt/crier/bin/crier"}); err != nil {
+	rec := pidfile.Record{PID: sleep.Process.Pid, Port: 8767, Binary: "/opt/crier/bin/crier"}
+	if err := pidfile.Write(path, rec); err != nil {
 		t.Fatalf("seed foreign pidfile: %v", err)
+	}
+
+	// Resolve the live occupant identity the SAME way the refusal path does
+	// (pidfile.SafeToSignal -> readlink /proc/<pid>/exe) instead of hard-coding
+	// "sleep": the refusal correctly names whoever currently occupies the pid,
+	// and on some machines the spawned child's pid is recycled before the check
+	// runs (DF-CRIER-518). If SafeToSignal fails for any other reason (pid
+	// vanished, unsupported platform) wantLive stays empty and only the
+	// live-identity assertion below is skipped — the refusal and no-signal
+	// gates still hold.
+	var wantLive string
+	var pre *pidfile.MismatchError
+	if err := pidfile.SafeToSignal(rec); errors.As(err, &pre) {
+		wantLive = pre.Live
 	}
 
 	var out bytes.Buffer
@@ -1374,8 +1389,8 @@ func TestStopRefusesForeignProcess(t *testing.T) {
 			t.Errorf("refusal output missing %q:\nstderr: %s", want, stderr)
 		}
 	}
-	if !strings.Contains(stderr, "sleep") {
-		t.Errorf("refusal output does not name the live binary (sleep):\nstderr: %s", stderr)
+	if wantLive != "" && !strings.Contains(stderr, wantLive) {
+		t.Errorf("refusal output does not name the live occupant %q:\nstderr: %s", wantLive, stderr)
 	}
 	// The load-bearing safety assertion: nothing was signalled.
 	if !pidfile.Alive(sleep.Process.Pid) {
