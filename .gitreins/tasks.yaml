@@ -4721,3 +4721,17 @@ tasks:
   status: complete
   created_at: '2026-11-25T01:42:18.325893+00:00'
   completed_at: '2026-11-25T01:55:31.546795+00:00'
+- id: DF-CRIER-516
+  title: 'Client onboarding README: re-run semantics + lease/owner-only facts'
+  criteria:
+  - "FAILIF: clients/README.md Using-the-client section lacks the four facts (register_if_missing\
+    \ re-register, 404 unregistered target, owner-only 403, lease_seconds default\
+    \ 30) \u2014 grep register_if_missing clients/README.md returns 0 || PROOF: grep\
+    \ -c register_if_missing clients/README.md >= 1 and grep -c lease_seconds clients/README.md\
+    \ >= 1 || FAILIF: python3 clients/python/round_trip.py --server S --id X --key\
+    \ K fails twice back-to-back with --keep on one running server || PROOF: python3\
+    \ clients/python/round_trip.py twice with RC 0 and both negative controls held\
+    \ (probe log /home/kara/.hermes/cache/scratch/crier-516-probe.*)"
+  status: complete
+  created_at: '2026-11-25T01:59:05.480938+00:00'
+  completed_at: '2026-11-25T02:07:35.266942+00:00'

@@ -1,0 +1,24 @@
+{
+  "tick_id": "crier-foreman-2026-11-25-01-38-12",
+  "block": "DF-CRIER-518",
+  "wave_id": "crier-foreman-2026-11-25-01-38-12-wave2",
+  "wave_size": 1,
+  "wave_size_reason": "Serial repopulation after wave1 merged (slots=1, loadavg still > nproc). One row: DF-CRIER-516.",
+  "rows": [
+    {
+      "id": "DF-CRIER-516",
+      "title": "Client onboarding: transcripts abort on re-run (register_if_missing unused) and clients/README omits lease/owner-only semantics",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-516",
+      "branch": "wt/DF-CRIER-516",
+      "base_sha": "e4b00c66",
+      "mode": "foreman-direct (premise probe showed part (a) already satisfied in code; remaining delta = one README file, within the trivial one-file rule)",
+      "worker_model": "n/a (foreman-direct)",
+      "worker_provider": "n/a",
+      "brief_file": null,
+      "depends_on": []
+    }
+  ],
+  "premise_evidence": "Live probe: scratch server (worktree binary, sqlite registry, port 8911) + 4x round_trip.py RC0 (incl. 2x back-to-back --keep re-register on the same server; both negative controls held). Probe log via process proc_d492eac501c0, scratch /home/kara/.hermes/cache/scratch/crier-516-probe-*.",
+  "pending_next": ["DF-CRIER-515"],
+  "gitreins_task": "DF-CRIER-516"
+}
