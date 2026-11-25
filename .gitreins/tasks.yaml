@@ -4772,3 +4772,40 @@ tasks:
   status: complete
   created_at: '2026-11-25T05:45:32.683923+00:00'
   completed_at: '2026-11-25T06:00:08.464065+00:00'
+- id: INT-CI-043
+  title: 'scheduled bunker-e2e agent arms 402 Insufficient Balance: CI compose provider
+    wallet drained (external fix, closed verification-only)'
+  criteria:
+  - "FAILIF: the latest scheduled bunker-e2e run on main (event=schedule) reports\
+    \ conclusion failure, or its Agent-ecosystem battery step still shows the pi-agent/opencode\
+    \ round-trip arms failing with 402 Insufficient Balance (failing baseline: run\
+    \ 44765799760 on e5efe73f, 7 pass / 2 fail / 4 skip, request ids db97dd8c, 98611616,\
+    \ af5e8418, d5ddee23) || PROOF: curl -s 'https://api.github.com/repos/crier-dev/crier/actions/runs?per_page=8&event=schedule'\
+    \ reports the latest scheduled bunker-e2e run on main with conclusion success\
+    \ (id 45456227956, head_sha b48e1aadebe2424124cb027ea19bb72392cfed19, status completed,\
+    \ event schedule, created_at 2026-11-24T18:08:21Z), and its Agent-ecosystem battery\
+    \ job log (job 138666280410) shows 'PASS  round-trip pi-agent via crier prompt\
+    \ 1' and 'prompt 2' and 'PASS  round-trip opencode via crier prompt 1' and 'prompt\
+    \ 2' with live=true, ending 'battery done: 9 pass / 0 fail / 4 skip' || FAILIF:\
+    \ the relay cells regressed in that same run || PROOF: the same battery log shows\
+    \ 'PASS  crier health (HTTP 200)', 'PASS  round-trip sink echo via crier (HTTP\
+    \ 200)', 'PASS  async deliver (202) (HTTP 202)', 'PASS  async delivered (count\
+    \ 2->3)', 'PASS  guard clean payload allowed (HTTP 201)', 'PASS  guard injection\
+    \ blocked (HTTP 403)' || FAILIF: the close presents a crier source change as the\
+    \ fix, or leaves the funding change unnamed || PROOF: git diff --stat 042660d1\
+    \ c148cd6c (last red scheduled sha -> first green scheduled sha) shows the ONLY\
+    \ changed file is .coding-hermes/board/tasks.jsonl \u2014 zero crier source/workflow/compose\
+    \ changes; the fix is external funding: the DEEPSEEK_API_KEY GitHub secret behind\
+    \ the CI compose agent lanes (examples/agent-ecosystem/docker-compose.yml wires\
+    \ DEEPSEEK_API_KEY into pi-agent/opencode, model deepseek-flash) was refilled\
+    \ by the owner between the red run 44916178133 (2026-11-21T14:52Z) and the green\
+    \ run 45034828102 (2026-11-22T14:48Z) || FAILIF: the close note lacks the provider\
+    \ reset/expiry fact || PROOF: the row summary records that DeepSeek topped-up\
+    \ (prepaid) balance does not expire per provider billing docs (no calendar reset;\
+    \ drains are consumption-driven), with the observed drain window red 2026-11-19..21\
+    \ -> refilled by 2026-11-22 and the current top-up sustaining three consecutive\
+    \ green scheduled runs (2026-11-22 45034828102, 11-23 45240655655, 11-24 45456227956)\
+    \ so the next drain is consumption-expected, not calendar-expected."
+  status: complete
+  created_at: '2026-11-25T06:19:29.276470+00:00'
+  completed_at: '2026-11-25T06:34:06.305517+00:00'
