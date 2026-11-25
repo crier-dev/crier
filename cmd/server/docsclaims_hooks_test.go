@@ -35,10 +35,25 @@ func liveBehavior(repoRoot, id string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "make", "--no-print-directory", "doctor-hooks-selftest")
 	cmd.Dir = repoRoot
-	// The selftest has its own explicit short bound for the intentional hanging-hook
-	// case. Keep the normal probe bound conservative here so this docs behavior claim
-	// cannot consume the entire 60s package budget when the suite is loaded.
-	cmd.Env = append(os.Environ(), "DOCTOR_PROBE_TIMEOUT=5", "DOCTOR_HOOKS_CLAIM_FAST=1")
+	// DOCTOR_HOOKS_CLAIM_FAST selects the claim-fast battery (a few live checks
+	// instead of the standalone 51-case battery, which keeps its own explicit
+	// short bound for the intentional hanging-hook case). DF-CRIER-517: the probe
+	// bound stays at the doctor's SHIPPED default (20s, scripts/doctor-hooks.sh)
+	// — deliberately NOT overridden here. INT-CI-014 pinned
+	// DOCTOR_PROBE_TIMEOUT=5 to protect the 60s package budget, but the bound is
+	// a ceiling per hook invocation, not a cost: a healthy commit takes what it
+	// takes (DF-CRIER-431 measured 0.7-1.0s through the full gate on the dev
+	// host), so the pin saved nothing on green runs and made the claim STRICTER
+	// than the product it documents — a real gated commit slower than 5s
+	// (bunker-las-03: a fresh machine with cold caches, 5-7x the dev host) sits
+	// inside the doctor's own 20s bound, yet the claim refused it. Measured at
+	// the default bound the claim-fast battery is ~7s wall on a loaded 16-core
+	// box. Worst case — a genuinely hung hook — the battery's <=10 boundable
+	// invocations (4 under the real doctor, 6 under the NEUTER doctor) at 20s
+	// each are still caught red, fail-closed by the DF-CRIER-441 refusal (exit
+	// 124/137 never passes), with the 600s context below and make test's
+	// -timeout 60s package alarm as outer backstops.
+	cmd.Env = append(os.Environ(), "DOCTOR_HOOKS_CLAIM_FAST=1")
 	cmd.WaitDelay = 2 * time.Second
 	// The selftest's hook probes spawn bounded subprocess trees. Capture to a
 	// file rather than CombinedOutput's pipe: a descendant that outlives a
@@ -96,12 +111,12 @@ func verifyBehaviorClaims(set claimsFile, probe func(string) (string, error)) []
 }
 
 func TestDocsClaimsBehaviors(t *testing.T) {
-	// INT-CI-014: deliberately NOT parallelBoot. The probe shells out to
-	// `make doctor-hooks-selftest` (make + python + git subprocess trees);
-	// queued at the tail of the parallel batch it starts after the drain and
-	// then runs its subprocesses under post-storm cache pressure — measured
-	// 18s past a 60s package alarm (make2, three-run floor). In the serial
-	// phase it is uncontended and finishes inside the phase every time.
+	// The probe shells out to `make doctor-hooks-selftest` (make + python + git
+	// subprocess trees). INT-CI-014 ran this test serially because, queued at the
+	// tail of the parallel batch, its subprocesses started after the drain under
+	// post-storm cache pressure — measured 18s past a 60s package alarm (make2,
+	// three-run floor). DF-CRIER-506 returned it to parallelBoot (the battery is
+	// now the claim-fast subset — see liveBehavior for its budget).
 	parallelBoot(t)
 	root := resolveRepoRoot(t)
 
