@@ -4757,5 +4757,6 @@ tasks:
     || FAILIF: CI workflow red on main from this gate (runs 45529315464, 45529963409,
     45530777723, 45535707249) || PROOF: gh run list on the next pushed head shows
     the CI workflow conclusion success'
-  status: in_progress
+  status: complete
   created_at: '2026-11-25T03:56:30.765938+00:00'
+  completed_at: '2026-11-25T05:41:42.065531+00:00'
