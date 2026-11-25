@@ -100,6 +100,28 @@ c = Crier.from_env()   # CRIER_URL (or CRIER_HTTP_URL), CRIER_AGENT_ID,
                        # CRIER_AGENT_PRIVATE_KEY_FILE, CR_AUTH_TOKEN
 ```
 
+### Four semantics a self-built consumer trips over
+
+*   **Re-running a transcript is normal.** Registration is idempotent through
+    `register_if_missing()` (Python) / `registerIfMissing()` (TypeScript): the
+    server answers `409 public_key_mismatch` when the id already exists, and the
+    client treats that as "already registered" and carries on instead of
+    aborting. A `409` for a NEW key on an EXISTING id you don't own is a genuine
+    conflict — re-register never overwrites another agent's identity.
+*   **Delivery to an unregistered target answers `404 agent not found`.**
+    Delivery targets must be registered agents; the sender needs no key, but
+    the recipient must exist.
+*   **Agent-scoped routes are owner-only.** `retrieve` / `ack` / `stats` /
+    `DELETE /agents/{id}` require a signature from the agent's OWN registered
+    key; the same route signed by a different agent's key answers `403` — you
+    can only touch your own resources (own-resources).
+*   **`retrieve()` leases what it returns for `lease_seconds` (default `30`).**
+    An immediate second `retrieve()` returns an empty batch while the lease is
+    live — that is HELD, not lost: `leased_count > 0` on the retrieve body
+    disambiguates it. Un-`ack`ed messages return to the queue when the lease
+    expires. The configurable range is the `lease_seconds` row of the
+    `retrieve_inbox` table in the top-level [README](../README.md#4-inboxes).
+
 ## What the clients do on the wire
 
 Nothing is hidden, because a client that hides the protocol cannot be debugged
