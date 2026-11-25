@@ -4705,5 +4705,6 @@ tasks:
     host) without matching package-budget headroom. PROOF: grep -n ''DOCTOR_PROBE_TIMEOUT''
     cmd/server/docsclaims_hooks_test.go scripts/doctor-hooks.sh && go test ./cmd/server/
     -run TestDocsClaimsBehaviors -count=1 -v 2>&1 | tail -5'
-  status: in_progress
+  status: complete
   created_at: '2026-11-25T00:51:46.926070+00:00'
+  completed_at: '2026-11-25T01:17:24.016219+00:00'
