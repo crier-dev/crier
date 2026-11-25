@@ -4760,3 +4760,15 @@ tasks:
   status: complete
   created_at: '2026-11-25T03:56:30.765938+00:00'
   completed_at: '2026-11-25T05:41:42.065531+00:00'
+- id: INT-CI-044
+  title: 'Pages deploy reds intermittently: deploy-pages finds 0 artifacts seconds
+    after upload (artifact-index propagation lag)'
+  criteria:
+  - 'FAILIF: deploy-pages queries the artifact index before the upload propagates
+    (Found 0 artifact(s) 0.1s after Upload artifact success: runs 45482601972/45521217599/45523207020)
+    || PROOF: pages.yml contains a bounded artifact-wait/retry between Upload and
+    Deploy; python3 -c ''import yaml;yaml.safe_load(open(".github/workflows/pages.yml"))''
+    exits 0'
+  status: complete
+  created_at: '2026-11-25T05:45:32.683923+00:00'
+  completed_at: '2026-11-25T06:00:08.464065+00:00'
