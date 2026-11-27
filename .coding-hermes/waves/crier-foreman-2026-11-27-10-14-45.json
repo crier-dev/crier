@@ -1,0 +1,33 @@
+{
+  "tick_id": "crier-foreman-2026-11-27-10-14-45",
+  "block": "INT-CI-046",
+  "block_progress": "46/46 complete after this tick",
+  "wave_size": 0,
+  "wave_kind": "zero-worker verification-only reconciliation",
+  "zero_worker_justification": "Row INT-CI-046 is a CI-health recurrence row (class INT-CI-039/043): the failure cause is an external provider wallet (CI compose deepseek 402 insufficient_balance), not crier source. The acceptance evidence is external hosted CI. A manual workflow_dispatch battery run 45972472779 (fired 2026-11-27T09:17:28Z by the 09:14-09:23Z cx/gpt-6.1-terra investigation batch) executed the full Agent-ecosystem battery on main @ 123b4d0f: 9 pass / 0 fail / 4 skip, pi-agent + opencode arms live=true, zero 402/insufficient-balance occurrences in log and current-run evidence artifact (nonce e5b2862c). No crier code change is required or made; per crier foreman doctrine a synthetic worker dispatch or a NEW gitreins task would be lifecycle theater.",
+  "rows": [
+    {
+      "id": "INT-CI-046",
+      "disposition": "closed complete (verification-only)",
+      "commit_hash": "123b4d0f6d65c1f0ea724bc7cde8db286f6bd50a",
+      "evidence_run_id": "ebbd3680",
+      "evidence_run_id_note": "gitreins tier-2 mint on tip 123b4d0f; task-complete re-grade run fc722050 (both passed=true); first attempt fff1bac0 preserved as INCOMPLETE (z.ai glm-5.3-flash 429, ungraded) — re-run on 9router kimi lane",
+      "verdicts": ["ebbd3680 PASS", "fc722050 PASS", "fff1bac0 INCOMPLETE (preserved)"],
+      "verdict_publication": "none:.gitreins/history is deliberately gitignored per repo policy (line 74: machine-local evidence, never shipped); verdict binding lives on the board row evidence fields",
+      "ci": "GREEN: run 45972472779 success (battery job 140415995241, artifact 15185377784)",
+      "worker_summary": "verification-only close, zero crier source changes; proof run 45972472779 battery 9/0/4 live=true; tier2 PASS on 9router kimi lane after z.ai 429"
+    }
+  ],
+  "barrier_disposition": {
+    "artifact": ".gitreins/tasks.yaml",
+    "finding": "uncommitted append of gitreins task INT-CI-046 (in_progress at capture) created by the 09:14-09:23Z cx/gpt-6.1-terra api_server investigation batch (state.db sessions 8f99de04/10a49f50/b2ccf50d); no live process, no fd owner at 10:15Z",
+    "handling": "receipt built (scratch crier-fm-2026-11-27-10-14-45/blocked-receipt.json, hand-built with mechanical path/count validation because the skill's referenced blocked-receipt-validate.py is absent from the foreman skill scripts dir); file NOT restored/staged/adopted/deleted during the barrier phase; after owner disposition menu, this tick completed the row THROUGH that same task record (menu option b) with disclosure; the completed task record is committed here",
+    "canonical_checkout_writes": "board closeout + lifecycle completion executed in the canonical checkout after the receipt validated and the disposition menu was recorded; disclosed here rather than replicated via a continuation worktree because the only tracked coordination artifact touched is the barrier artifact itself, now reconciled by the close"
+  },
+  "sha_roles": {
+    "graded_tip": "123b4d0f6d65c1f0ea724bc7cde8db286f6bd50a",
+    "source_sha": "123b4d0f6d65c1f0ea724bc7cde8db286f6bd50a",
+    "evidence_commit": "see closeout commit of this tick (bookkeeping: board row, event, gitreins task record, this manifest)"
+  },
+  "next": "block INT-CI-046 46/46 complete; remaining board: WAIT blocks INT-018-R1 (blocked on INT-010) and RSS-CRIER-002 (blocked on HARDEN-LOOP-001); no ready rows -> next tick discovery/audit"
+}

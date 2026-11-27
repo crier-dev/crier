@@ -4844,3 +4844,13 @@ tasks:
   status: complete
   created_at: '2026-11-25T18:03:51.481301+00:00'
   completed_at: '2026-11-25T18:15:39.811018+00:00'
+- id: INT-CI-046
+  title: bunker-e2e agent battery 402 recurrence (pi-agent+opencode arms, provider
+    balance)
+  criteria:
+  - 'PROOF: gh run view <run-id> on crier-dev/crier main showing Agent-ecosystem battery
+    job success with pi-agent+opencode arms pass (7 pass / 0 fail). FAILIF: arms return
+    402 insufficient_balance or any battery arm fails'
+  status: complete
+  created_at: '2026-11-27T09:17:20.453008+00:00'
+  completed_at: '2026-11-27T10:33:25.112336+00:00'
