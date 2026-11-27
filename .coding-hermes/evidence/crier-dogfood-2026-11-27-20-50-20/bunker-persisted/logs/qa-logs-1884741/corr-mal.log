@@ -1,0 +1,1 @@
+2026/11/27 13:19:19 crier-front: CR_AUTH_TOKEN is empty: an auth-enabled relay needs the shared bearer token, and the front will not start without it

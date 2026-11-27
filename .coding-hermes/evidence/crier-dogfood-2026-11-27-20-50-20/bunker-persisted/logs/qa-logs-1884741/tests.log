@@ -1,0 +1,54 @@
+ok  	github.com/crier-dev/crier/cmd/crier-front	0.040s
+ok  	github.com/crier-dev/crier/cmd/crier-mcp	7.388s
+?   	github.com/crier-dev/crier/cmd/mcp-capabilities	[no test files]
+ok  	github.com/crier-dev/crier/cmd/server	44.268s
+ok  	github.com/crier-dev/crier/config	0.118s
+?   	github.com/crier-dev/crier/examples/sqlite-quickstart	[no test files]
+ok  	github.com/crier-dev/crier/examples/ws-mesh-demo	19.962s
+ok  	github.com/crier-dev/crier/internal/a2a	0.011s
+ok  	github.com/crier-dev/crier/internal/a2a/client	0.039s
+ok  	github.com/crier-dev/crier/internal/addressing	0.006s
+ok  	github.com/crier-dev/crier/internal/archive	20.093s
+ok  	github.com/crier-dev/crier/internal/boardbridge	5.627s
+ok  	github.com/crier-dev/crier/internal/buildinfo	0.003s
+ok  	github.com/crier-dev/crier/internal/chat	0.003s
+ok  	github.com/crier-dev/crier/internal/ci	0.086s
+ok  	github.com/crier-dev/crier/internal/daggerctl	2.483s
+ok  	github.com/crier-dev/crier/internal/detect	0.085s
+ok  	github.com/crier-dev/crier/internal/dispatchlive	0.014s
+ok  	github.com/crier-dev/crier/internal/federation	1.306s
+ok  	github.com/crier-dev/crier/internal/guard	19.079s
+ok  	github.com/crier-dev/crier/internal/harness	6.410s
+ok  	github.com/crier-dev/crier/internal/harness/build	0.011s
+ok  	github.com/crier-dev/crier/internal/harness/claudecode	0.065s
+ok  	github.com/crier-dev/crier/internal/harness/codex	0.010s
+ok  	github.com/crier-dev/crier/internal/harness/hermes	0.005s
+ok  	github.com/crier-dev/crier/internal/harness/opencode	0.009s
+?   	github.com/crier-dev/crier/internal/harness/pi	[no test files]
+ok  	github.com/crier-dev/crier/internal/hermesession	0.424s
+ok  	github.com/crier-dev/crier/internal/httperr	0.009s
+ok  	github.com/crier-dev/crier/internal/ingest	0.178s
+ok  	github.com/crier-dev/crier/internal/ingress	0.028s
+ok  	github.com/crier-dev/crier/internal/mcp	6.889s
+ok  	github.com/crier-dev/crier/internal/mesh	8.246s
+ok  	github.com/crier-dev/crier/internal/metrics	0.196s
+ok  	github.com/crier-dev/crier/internal/middleware	0.193s
+ok  	github.com/crier-dev/crier/internal/namespace	0.027s
+ok  	github.com/crier-dev/crier/internal/permissions	0.053s
+--- FAIL: TestSafeToSignalRefusesForeignProcess (0.00s)
+    pidfile_test.go:167: MismatchError.Live = "/tmp/go-build2453769609/b609/pidfile.test", want it to name the real binary (sleep)
+FAIL
+FAIL	github.com/crier-dev/crier/internal/pidfile	0.142s
+ok  	github.com/crier-dev/crier/internal/protocol	0.014s
+ok  	github.com/crier-dev/crier/internal/ratelimit	0.692s
+ok  	github.com/crier-dev/crier/internal/reads	1.799s
+ok  	github.com/crier-dev/crier/internal/registry	10.133s
+ok  	github.com/crier-dev/crier/internal/relay	9.195s
+ok  	github.com/crier-dev/crier/internal/session	7.680s
+ok  	github.com/crier-dev/crier/internal/strictjson	0.066s
+ok  	github.com/crier-dev/crier/internal/tags	0.030s
+ok  	github.com/crier-dev/crier/internal/testsupport	5.354s
+ok  	github.com/crier-dev/crier/internal/tracing	0.008s
+ok  	github.com/crier-dev/crier/internal/trust	0.022s
+ok  	github.com/crier-dev/crier/internal/webhook	16.751s
+FAIL

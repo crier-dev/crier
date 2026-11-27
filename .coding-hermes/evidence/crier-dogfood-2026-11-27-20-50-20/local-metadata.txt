@@ -1,0 +1,11 @@
+HEAD=0db42bf65588563c07596421d8db3afd8db58f31
+cwd=/home/kara/crier
+build_rc=0
+-rwxrwxr-x 1 kara kara 42201581 Nov 27 15:58 /home/kara/.hermes/cache/scratch/crier-dogfood-2026-11-27-20-50-20/local/crier
+server_pid=1452115
+health_rc=0
+cold_health_ms=232
+roundtrip-cold_rc=0
+roundtrip-warm_rc=0
+two-agents_rc=0
+typescript_rc=2

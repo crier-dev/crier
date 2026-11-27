@@ -1,0 +1,1327 @@
+QA-6 hygiene: removed stale agent-workspace venv (/home/bunker-98a7292e/qa-crier/.venv) before act replay
+time="2026-11-27T13:12:02-08:00" level=info msg="Using docker host 'unix:///run/bunker/98a7292e/docker.sock', and daemon socket 'unix:///run/bunker/98a7292e/docker.sock'"
+[CI/Build & Test                        ] ⭐ Run Set up job
+[CI/Build & Test                        ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/Whole-board validation (fail closed)] ⭐ Run Set up job
+[CI/Whole-board validation (fail closed)] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/Whole-board validation (fail closed)]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/Build & Test                        ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/Build & Test                        ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Build & Test                        ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Whole-board validation (fail closed)]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Whole-board validation (fail closed)]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/Build & Test                        ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/Build & Test                        ]   ✅  Success - Set up job
+[CI/Build & Test                        ]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v6
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/Whole-board validation (fail closed)]   ✅  Success - Set up job
+[CI/Whole-board validation (fail closed)]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v6
+[CI/Build & Test                        ] 🧪  Matrix: map[go-version:1.26.11]
+[CI/Build & Test                        ] ⭐ Run Main Checkout
+[CI/Build & Test                        ]   🐳  docker cp src=/home/bunker-98a7292e/qa-crier/. dst=/home/bunker-98a7292e/qa-crier
+[CI/Whole-board validation (fail closed)]   ☁  git clone 'https://github.com/actions/checkout' # ref=v5
+[CI/Build & Test                        ]   ✅  Success - Main Checkout [1.387406316s]
+[CI/Build & Test                        ] ⭐ Run Main Set up Go 1.26.11
+[CI/Build & Test                        ]   🐳  docker cp src=/home/bunker-98a7292e/.cache/act/actions-setup-go@v6/ dst=/var/run/act/actions/actions-setup-go@v6/
+[CI/Build & Test                        ]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-go@v6/dist/setup/index.js] user= workdir=
+[CI/Build & Test                        ]   | Setup go version spec 1.26.11
+[CI/Build & Test                        ]   | Attempting to download 1.26.11...
+[CI/Build & Test                        ]   | matching 1.26.11...
+[CI/Build & Test                        ]   | Acquiring 1.26.11 from https://github.com/actions/go-versions/releases/download/1.26.11-42945178835/go-1.26.11-linux-x64.tar.gz
+[CI/Build & Test                        ]   | Extracting Go...
+[CI/Build & Test                        ]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/bd764013-3f49-4e9d-8eaa-416f3d2adf9a -f /tmp/b2bd7f26-35a6-43d6-ab32-52501cbd38f3
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Checkout
+[CI/Whole-board validation (fail closed)]   🐳  docker cp src=/home/bunker-98a7292e/qa-crier/. dst=/home/bunker-98a7292e/qa-crier
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Checkout [1.246882215s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Set up Go
+[CI/Whole-board validation (fail closed)]   🐳  docker cp src=/home/bunker-98a7292e/.cache/act/actions-setup-go@v6/ dst=/var/run/act/actions/actions-setup-go@v6/
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-go@v6/dist/setup/index.js] user= workdir=
+[CI/Whole-board validation (fail closed)]   | Setup go version spec 1.26.11
+[CI/Whole-board validation (fail closed)]   | Attempting to download 1.26.11...
+[CI/Whole-board validation (fail closed)]   | matching 1.26.11...
+[CI/Whole-board validation (fail closed)]   | Acquiring 1.26.11 from https://github.com/actions/go-versions/releases/download/1.26.11-42945178835/go-1.26.11-linux-x64.tar.gz
+[CI/Build & Test                        ]   | Successfully extracted go to /tmp/bd764013-3f49-4e9d-8eaa-416f3d2adf9a
+[CI/Build & Test                        ]   | Adding to the cache ...
+[CI/Build & Test                        ]   | Successfully cached go to /opt/hostedtoolcache/go/1.26.11/x64
+[CI/Build & Test                        ]   | Added go to the path
+[CI/Build & Test                        ]   | Successfully set up Go version 1.26.11
+[CI/Build & Test                        ]   | [command]/opt/hostedtoolcache/go/1.26.11/x64/bin/go env GOMODCACHE
+[CI/Build & Test                        ]   | [command]/opt/hostedtoolcache/go/1.26.11/x64/bin/go env GOCACHE
+[CI/Build & Test                        ]   | /root/go/pkg/mod
+[CI/Build & Test                        ]   | /root/.cache/go-build
+[CI/Build & Test                        ]   | Cache is not found
+[CI/Build & Test                        ]   ❓ add-matcher /run/act/actions/actions-setup-go@v6/matchers.json
+[CI/Build & Test                        ]   | go version go1.26.11 linux/amd64
+[CI/Build & Test                        ]   | 
+[CI/Build & Test                        ]   ❓  ::group::go env
+[CI/Build & Test                        ]   | AR='ar'
+[CI/Build & Test                        ]   | CC='gcc'
+[CI/Build & Test                        ]   | CGO_CFLAGS='-O2 -g'
+[CI/Build & Test                        ]   | CGO_CPPFLAGS=''
+[CI/Build & Test                        ]   | CGO_CXXFLAGS='-O2 -g'
+[CI/Build & Test                        ]   | CGO_ENABLED='1'
+[CI/Build & Test                        ]   | CGO_FFLAGS='-O2 -g'
+[CI/Build & Test                        ]   | CGO_LDFLAGS='-O2 -g'
+[CI/Build & Test                        ]   | CXX='g++'
+[CI/Build & Test                        ]   | GCCGO='gccgo'
+[CI/Build & Test                        ]   | GO111MODULE=''
+[CI/Build & Test                        ]   | GOAMD64='v1'
+[CI/Build & Test                        ]   | GOARCH='amd64'
+[CI/Build & Test                        ]   | GOAUTH='netrc'
+[CI/Build & Test                        ]   | GOBIN=''
+[CI/Build & Test                        ]   | GOCACHE='/root/.cache/go-build'
+[CI/Build & Test                        ]   | GOCACHEPROG=''
+[CI/Build & Test                        ]   | GODEBUG=''
+[CI/Build & Test                        ]   | GOENV='/root/.config/go/env'
+[CI/Build & Test                        ]   | GOEXE=''
+[CI/Build & Test                        ]   | GOEXPERIMENT=''
+[CI/Build & Test                        ]   | GOFIPS140='off'
+[CI/Build & Test                        ]   | GOFLAGS=''
+[CI/Build & Test                        ]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build1310314042=/tmp/go-build -gno-record-gcc-switches'
+[CI/Build & Test                        ]   | GOHOSTARCH='amd64'
+[CI/Build & Test                        ]   | GOHOSTOS='linux'
+[CI/Build & Test                        ]   | GOINSECURE=''
+[CI/Build & Test                        ]   | GOMOD='/home/bunker-98a7292e/qa-crier/go.mod'
+[CI/Build & Test                        ]   | GOMODCACHE='/root/go/pkg/mod'
+[CI/Build & Test                        ]   | GONOPROXY=''
+[CI/Build & Test                        ]   | GONOSUMDB=''
+[CI/Build & Test                        ]   | GOOS='linux'
+[CI/Build & Test                        ]   | GOPATH='/root/go'
+[CI/Build & Test                        ]   | GOPRIVATE=''
+[CI/Build & Test                        ]   | GOPROXY='https://proxy.golang.org,direct'
+[CI/Build & Test                        ]   | GOROOT='/opt/hostedtoolcache/go/1.26.11/x64'
+[CI/Build & Test                        ]   | GOSUMDB='sum.golang.org'
+[CI/Build & Test                        ]   | GOTELEMETRY='local'
+[CI/Build & Test                        ]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[CI/Build & Test                        ]   | GOTMPDIR=''
+[CI/Build & Test                        ]   | GOTOOLCHAIN='local'
+[CI/Build & Test                        ]   | GOTOOLDIR='/opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64'
+[CI/Build & Test                        ]   | GOVCS=''
+[CI/Build & Test                        ]   | GOVERSION='go1.26.11'
+[CI/Build & Test                        ]   | GOWORK=''
+[CI/Build & Test                        ]   | PKG_CONFIG='pkg-config'
+[CI/Build & Test                        ]   | 
+[CI/Build & Test                        ]   ❓  ::endgroup::
+[CI/Build & Test                        ]   ✅  Success - Main Set up Go 1.26.11 [27.673129199s]
+[CI/Build & Test                        ]   ⚙  ::set-env:: GOTOOLCHAIN=local
+[CI/Build & Test                        ]   ⚙  ::set-output:: cache-hit=false
+[CI/Build & Test                        ]   ⚙  ::set-output:: go-version=1.26.11
+[CI/Build & Test                        ]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.26.11/x64/bin
+[CI/Build & Test                        ]   ⚙  ::add-path:: /root/go/bin
+[CI/Build & Test                        ] ⭐ Run Main Toolchain floor (go.mod vs running go)
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[CI/Build & Test                        ]   | toolchain-check: OK — installed go1.26.11 satisfies the module floor go 1.26.11 (go.mod `go 1.26.11`, /home/bunker-98a7292e/qa-crier/go.mod, probed with GOTOOLCHAIN=local; environment GOTOOLCHAIN=local)
+[CI/Build & Test                        ]   | toolchain-check selftest: floor read from go.mod = go 1.26.11
+[CI/Build & Test                        ]   | PASS  real host: verdict agrees with the INSTALLED toolchain (1.26.11 vs floor 1.26.11) (rc 0)
+[CI/Build & Test                        ]   | PASS  simulated go1.26.5 is rejected (rc 1)
+[CI/Build & Test                        ]   | PASS  the failure names the required version mentions '1.26.11'
+[CI/Build & Test                        ]   | PASS  the failure names the running version mentions 'go1.26.5'
+[CI/Build & Test                        ]   | PASS  the failure says the bootstrap must install at or above the floor mentions 'bootstrap'
+[CI/Build & Test                        ]   | PASS  the failure quotes the GOTOOLCHAIN=local refusal mentions 'GOTOOLCHAIN=local'
+[CI/Build & Test                        ]   | PASS  the failure is the check's own FAIL verdict mentions 'toolchain-check: FAIL'
+[CI/Build & Test                        ]   | PASS  a toolchain that only LOOKS healthy under GOTOOLCHAIN=auto is rejected (rc 1)
+[CI/Build & Test                        ]   | PASS  the masking rejection names the INSTALLED version mentions 'go1.26.5'
+[CI/Build & Test                        ]   | PASS  the masking rejection names the required version mentions '1.26.11'
+[CI/Build & Test                        ]   | PASS  a toolchain exactly at the floor passes (rc 0)
+[CI/Build & Test                        ]   | PASS  the OK line names the floor mentions 'go 1.26.11'
+[CI/Build & Test                        ]   | PASS  the OK verdict is a single OK line mentions 'toolchain-check: OK'
+[CI/Build & Test                        ]   | PASS  a toolchain above the floor passes (rc 0)
+[CI/Build & Test                        ]   | PASS  a floor above the running toolchain is rejected (rc 1)
+[CI/Build & Test                        ]   | PASS  the rejection names the raised floor (not a constant) mentions '1.99.0'
+[CI/Build & Test                        ]   | PASS  a missing module file is REFUSED (2), not passed (rc 2)
+[CI/Build & Test                        ]   | PASS  an unparseable version is REFUSED (2), not passed (rc 2)
+[CI/Build & Test                        ]   | PASS  NEUTER  the neutered copy differs from the shipped check
+[CI/Build & Test                        ]   | PASS  NEUTER  with the verdict forced to success the old toolchain passes (rc 0)
+[CI/Build & Test                        ]   | 
+[CI/Build & Test                        ]   | toolchain-check selftest: PASS (every arm behaved; nothing downloaded)
+[CI/Build & Test                        ]   ✅  Success - Main Toolchain floor (go.mod vs running go) [1.219391095s]
+[CI/Build & Test                        ] ⭐ Run Main Agent-ecosystem registration contract
+[CI/Build & Test                        ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/Build & Test                        ]   | go: downloading gopkg.in/yaml.v3 v3.0.1
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/otel v1.47.0
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.47.0
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/otel/sdk v1.47.0
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/otel/trace v1.47.0
+[CI/Build & Test                        ]   | go: downloading github.com/gorilla/mux v1.8.1
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/proto/otlp v1.11.0
+[CI/Build & Test                        ]   | go: downloading google.golang.org/protobuf v1.36.12
+[CI/Build & Test                        ]   | go: downloading github.com/google/uuid v1.6.0
+[CI/Build & Test                        ]   | go: downloading golang.org/x/sys v0.49.0
+[CI/Build & Test                        ]   | go: downloading github.com/go-logr/logr v1.4.4
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/otel/log v1.47.0
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/otel/metric v1.47.0
+[CI/Build & Test                        ]   | go: downloading github.com/cespare/xxhash/v2 v2.3.0
+[CI/Build & Test                        ]   | go: downloading google.golang.org/grpc v1.85.0
+[CI/Build & Test                        ]   | go: downloading github.com/cenkalti/backoff/v5 v5.0.3
+[CI/Build & Test                        ]   | go: downloading github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0
+[CI/Build & Test                        ]   | go: downloading github.com/go-logr/stdr v1.2.2
+[CI/Build & Test                        ]   | go: downloading go.opentelemetry.io/auto/sdk v1.2.1
+[CI/Build & Test                        ]   | go: downloading golang.org/x/net v0.62.0
+[CI/Build & Test                        ]   | go: downloading google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc
+[CI/Build & Test                        ]   | go: downloading google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc
+[CI/Build & Test                        ]   | go: downloading golang.org/x/text v0.43.0
+[CI/Whole-board validation (fail closed)]   | Extracting Go...
+[CI/Whole-board validation (fail closed)]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/a1bbff38-a1cb-4d85-8062-0508b8f9ff7b -f /tmp/7a51620e-a983-4f08-932e-d88dc4baf859
+[CI/Whole-board validation (fail closed)]   | Successfully extracted go to /tmp/a1bbff38-a1cb-4d85-8062-0508b8f9ff7b
+[CI/Whole-board validation (fail closed)]   | Adding to the cache ...
+[CI/Build & Test                        ]   | net/http/internal/ascii: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | log/slog/internal/buffer: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | # crypto/internal/fips140/nistec
+[CI/Build & Test                        ]   | /opt/hostedtoolcache/go/1.26.11/x64/src/crypto/internal/fips140/nistec/p256_asm_amd64.s:6: #include: open /opt/hostedtoolcache/go/1.26.11/x64/pkg/include/textflag.h: no such file or directory
+[CI/Build & Test                        ]   | github.com/cespare/xxhash/v2: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/asm: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/asm: no such file or directory
+[CI/Build & Test                        ]   | go.opentelemetry.io/otel/attribute/internal: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | go.opentelemetry.io/otel/internal/baggage: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | hash/fnv: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | google.golang.org/protobuf/internal/pragma: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | embed: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | html: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | google.golang.org/grpc/backoff: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | google.golang.org/grpc/balancer/pickfirst/internal: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | golang.org/x/sys/unix: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/asm: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/asm: no such file or directory
+[CI/Build & Test                        ]   | google.golang.org/grpc/internal/idle: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | golang.org/x/text/transform: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | golang.org/x/net/internal/httpsfv: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | internal/reflectlite: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/reflectlite: no such file or directory
+[CI/Build & Test                        ]   | errors: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/errors: no such file or directory
+[CI/Build & Test                        ]   | google.golang.org/grpc/internal/buffer: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | iter: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/iter: no such file or directory
+[CI/Build & Test                        ]   | slices: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/slices: no such file or directory
+[CI/Build & Test                        ]   | google.golang.org/grpc/keepalive: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | strconv: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/strconv: no such file or directory
+[CI/Build & Test                        ]   | internal/oserror: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/oserror: no such file or directory
+[CI/Build & Test                        ]   | sync: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | io: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | bytes: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/bytes: no such file or directory
+[CI/Build & Test                        ]   | math/rand/v2: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | encoding/base64: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/encoding/base64: no such file or directory
+[CI/Build & Test                        ]   | internal/bisect: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/bisect: no such file or directory
+[CI/Build & Test                        ]   | reflect: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | internal/godebug: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/godebug: no such file or directory
+[CI/Build & Test                        ]   | internal/fmtsort: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/fmtsort: no such file or directory
+[CI/Build & Test                        ]   | syscall: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/syscall: no such file or directory
+[CI/Build & Test                        ]   | time: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/time: no such file or directory
+[CI/Build & Test                        ]   | path: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | io/fs: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/io/fs: no such file or directory
+[CI/Build & Test                        ]   | internal/filepathlite: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/filepathlite: no such file or directory
+[CI/Build & Test                        ]   | internal/testlog: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/testlog: no such file or directory
+[CI/Build & Test                        ]   | strings: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/strings: no such file or directory
+[CI/Build & Test                        ]   | context: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/context: no such file or directory
+[CI/Build & Test                        ]   | internal/syscall/unix: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | hash: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/hash: no such file or directory
+[CI/Build & Test                        ]   | internal/poll: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/poll: no such file or directory
+[CI/Build & Test                        ]   | crypto: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | internal/syscall/execenv: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140deps/godebug: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140deps/time: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/entropy/v1.0.0: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/impl: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/sha3: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/randutil: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/sha256: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/sha3: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/crypto/sha3: no such file or directory
+[CI/Build & Test                        ]   | math/rand: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140hash: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | bufio: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/bufio: no such file or directory
+[CI/Build & Test                        ]   | encoding/binary: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/encoding/binary: no such file or directory
+[CI/Build & Test                        ]   | sort: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/sort: no such file or directory
+[CI/Build & Test                        ]   | hash/crc32: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/hash/crc32: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/sha512: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | weak: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/weak: no such file or directory
+[CI/Build & Test                        ]   | github.com/crier-dev/crier/internal/dispatchlive: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140cache: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/crypto/internal/fips140cache: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/hmac: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | fmt: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/sysrand: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | os/signal: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/asm: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/os/signal: no such file or directory
+[CI/Build & Test                        ]   | internal/sysinfo: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | go.opentelemetry.io/otel/sdk/internal/x: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | path/filepath: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | vendor/golang.org/x/sys/cpu: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/asm: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/asm: no such file or directory
+[CI/Build & Test                        ]   | os: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp/internal/x: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/check: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | vendor/golang.org/x/crypto/internal/poly1305: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/aes: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/fips140: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/crypto/fips140: no such file or directory
+[CI/Build & Test                        ]   | internal/saferio: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/saferio: no such file or directory
+[CI/Build & Test                        ]   | encoding/pem: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/encoding/pem: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/nistec/fiat: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/edwards25519/field: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/hkdf: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | google.golang.org/grpc/internal/envconfig: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/compile: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/bigmod: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/tls12: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | crypto/tls/internal/fips140tls: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | vendor/golang.org/x/net/dns/dnsmessage: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | maps: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/maps: no such file or directory
+[CI/Build & Test                        ]   | internal/singleflight: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/internal/singleflight: no such file or directory
+[CI/Build & Test                        ]   | unique: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/unique: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/tls13: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | vendor/golang.org/x/text/transform: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | net/netip: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/net/netip: no such file or directory
+[CI/Build & Test                        ]   | regexp/syntax: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/regexp/syntax: no such file or directory
+[CI/Build & Test                        ]   | crypto/internal/fips140/edwards25519: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: no such file or directory
+[CI/Build & Test                        ]   | regexp: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/vet: chdir /opt/hostedtoolcache/go/1.26.11/x64/src/regexp: no such file or directory
+[CI/Build & Test                        ]   | runtime/cgo: /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/cgo: fork/exec /opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64/cgo: no such file or directory
+[CI/Build & Test                        ]   | FAIL	github.com/crier-dev/crier/internal/ci [build failed]
+[CI/Build & Test                        ]   | FAIL
+[CI/Build & Test                        ]   ❌  Failure - Main Agent-ecosystem registration contract [19.985887707s]
+[CI/Build & Test                        ] exitcode '1': failure
+[CI/Build & Test                        ] ⭐ Run Complete job
+[CI/Build & Test                        ]   ✅  Success - Complete job
+[CI/Build & Test                        ] 🏁  Job failed
+[CI/Whole-board validation (fail closed)]   | Successfully cached go to /opt/hostedtoolcache/go/1.26.11/x64
+[CI/Whole-board validation (fail closed)]   | Added go to the path
+[CI/Whole-board validation (fail closed)]   | Successfully set up Go version 1.26.11
+[CI/Whole-board validation (fail closed)]   | [command]/opt/hostedtoolcache/go/1.26.11/x64/bin/go env GOMODCACHE
+[CI/Whole-board validation (fail closed)]   | [command]/opt/hostedtoolcache/go/1.26.11/x64/bin/go env GOCACHE
+[CI/Whole-board validation (fail closed)]   | /root/go/pkg/mod
+[CI/Whole-board validation (fail closed)]   | /root/.cache/go-build
+[CI/Whole-board validation (fail closed)]   | Cache is not found
+[CI/Whole-board validation (fail closed)]   ❓ add-matcher /run/act/actions/actions-setup-go@v6/matchers.json
+[CI/Whole-board validation (fail closed)]   | go version go1.26.11 linux/amd64
+[CI/Whole-board validation (fail closed)]   | 
+[CI/Whole-board validation (fail closed)]   ❓  ::group::go env
+[CI/Whole-board validation (fail closed)]   | AR='ar'
+[CI/Whole-board validation (fail closed)]   | CC='gcc'
+[CI/Whole-board validation (fail closed)]   | CGO_CFLAGS='-O2 -g'
+[CI/Whole-board validation (fail closed)]   | CGO_CPPFLAGS=''
+[CI/Whole-board validation (fail closed)]   | CGO_CXXFLAGS='-O2 -g'
+[CI/Whole-board validation (fail closed)]   | CGO_ENABLED='1'
+[CI/Whole-board validation (fail closed)]   | CGO_FFLAGS='-O2 -g'
+[CI/Whole-board validation (fail closed)]   | CGO_LDFLAGS='-O2 -g'
+[CI/Whole-board validation (fail closed)]   | CXX='g++'
+[CI/Whole-board validation (fail closed)]   | GCCGO='gccgo'
+[CI/Whole-board validation (fail closed)]   | GO111MODULE=''
+[CI/Whole-board validation (fail closed)]   | GOAMD64='v1'
+[CI/Whole-board validation (fail closed)]   | GOARCH='amd64'
+[CI/Whole-board validation (fail closed)]   | GOAUTH='netrc'
+[CI/Whole-board validation (fail closed)]   | GOBIN=''
+[CI/Whole-board validation (fail closed)]   | GOCACHE='/root/.cache/go-build'
+[CI/Whole-board validation (fail closed)]   | GOCACHEPROG=''
+[CI/Whole-board validation (fail closed)]   | GODEBUG=''
+[CI/Whole-board validation (fail closed)]   | GOENV='/root/.config/go/env'
+[CI/Whole-board validation (fail closed)]   | GOEXE=''
+[CI/Whole-board validation (fail closed)]   | GOEXPERIMENT=''
+[CI/Whole-board validation (fail closed)]   | GOFIPS140='off'
+[CI/Whole-board validation (fail closed)]   | GOFLAGS=''
+[CI/Whole-board validation (fail closed)]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build1051330519=/tmp/go-build -gno-record-gcc-switches'
+[CI/Whole-board validation (fail closed)]   | GOHOSTARCH='amd64'
+[CI/Whole-board validation (fail closed)]   | GOHOSTOS='linux'
+[CI/Whole-board validation (fail closed)]   | GOINSECURE=''
+[CI/Whole-board validation (fail closed)]   | GOMOD='/home/bunker-98a7292e/qa-crier/go.mod'
+[CI/Whole-board validation (fail closed)]   | GOMODCACHE='/root/go/pkg/mod'
+[CI/Whole-board validation (fail closed)]   | GONOPROXY=''
+[CI/Whole-board validation (fail closed)]   | GONOSUMDB=''
+[CI/Whole-board validation (fail closed)]   | GOOS='linux'
+[CI/Whole-board validation (fail closed)]   | GOPATH='/root/go'
+[CI/Whole-board validation (fail closed)]   | GOPRIVATE=''
+[CI/Whole-board validation (fail closed)]   | GOPROXY='https://proxy.golang.org,direct'
+[CI/Whole-board validation (fail closed)]   | GOROOT='/opt/hostedtoolcache/go/1.26.11/x64'
+[CI/Whole-board validation (fail closed)]   | GOSUMDB='sum.golang.org'
+[CI/Whole-board validation (fail closed)]   | GOTELEMETRY='local'
+[CI/Whole-board validation (fail closed)]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[CI/Whole-board validation (fail closed)]   | GOTMPDIR=''
+[CI/Whole-board validation (fail closed)]   | GOTOOLCHAIN='local'
+[CI/Whole-board validation (fail closed)]   | GOTOOLDIR='/opt/hostedtoolcache/go/1.26.11/x64/pkg/tool/linux_amd64'
+[CI/Whole-board validation (fail closed)]   | GOVCS=''
+[CI/Whole-board validation (fail closed)]   | GOVERSION='go1.26.11'
+[CI/Whole-board validation (fail closed)]   | GOWORK=''
+[CI/Whole-board validation (fail closed)]   | PKG_CONFIG='pkg-config'
+[CI/Whole-board validation (fail closed)]   | 
+[CI/Whole-board validation (fail closed)]   ❓  ::endgroup::
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Set up Go [31.403742287s]
+[CI/Whole-board validation (fail closed)]   ⚙  ::set-env:: GOTOOLCHAIN=local
+[CI/Whole-board validation (fail closed)]   ⚙  ::set-output:: cache-hit=false
+[CI/Whole-board validation (fail closed)]   ⚙  ::set-output:: go-version=1.26.11
+[CI/Whole-board validation (fail closed)]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.26.11/x64/bin
+[CI/Whole-board validation (fail closed)]   ⚙  ::add-path:: /root/go/bin
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Checkout pinned boardctl anonymously (no runner token — act)
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Checkout pinned boardctl anonymously (no runner token — act) [2.056883158s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Build required boardctl
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/4] user= workdir=.ci-boardctl
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Build required boardctl [16.236577867s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Main Validate the whole checked-out board
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/5] user= workdir=
+[CI/Whole-board validation (fail closed)]   | board: validator /tmp/boardctl — boardctl version dev
+[CI/Whole-board validation (fail closed)]   | board: root /home/bunker-98a7292e/qa-crier
+[CI/Whole-board validation (fail closed)]   | board: scope working tree
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: worktree vs HEAD — 2 file(s) compared, no shrink
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: HEAD vs HEAD^1 — baseline HEAD^1 unavailable (root commit); comparison skipped
+[CI/Whole-board validation (fail closed)]   | board: close-ancestry: neither main nor origin/main resolves here — verifying against HEAD (the branch tip this commit extends)
+[CI/Whole-board validation (fail closed)]   | board: close-ancestry: checked 0 new close(s) against HEAD; 0 close(s) carried no commit_hash (allowed, advisory only); 0 refused
+[CI/Whole-board validation (fail closed)]   | board: /home/bunker-98a7292e/qa-crier/.coding-hermes/board (topology A)
+[CI/Whole-board validation (fail closed)]   | rows: 999 tasks, 2781 events, 3 fixtures, header parsed
+[CI/Whole-board validation (fail closed)]   | key uniformity: 588/999 rows carry only canon keys; drift 411 row(s): acceptance(62), base_sha(3), blocked_on(4), body(12), complete(3), created_at_source(320), defer_reason(13), defer_review_by(13), gitreins(1), lane(5), note(4), notes(1), previous_blocked_reason(4), previous_status(4), status_reason(1), tick_number(1), title_full(6), verdict(2), verification(1), wave_id(1) — 15 fixable by 'boardctl update <id> --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 86 (task DF-CRIER-214): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 88 (task DOC-1): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 89 (task QA-CRIER-12): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 90 (task QA-CRIER-13): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 91 (task QA-CRIER-14): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 93 (task DF-CRIER-217): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 94 (task DF-CRIER-218): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 95 (task DF-CRIER-219): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 96 (task QA-CRIER-16): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 97 (task QA-CRIER-1): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 98 (task QA-CRIER-3): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 99 (task DF-CRIER-6): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 100 (task DF-CRIER-7): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 101 (task DF-CRIER-8): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 102 (task DF-CRIER-9): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 103 (task DF-CRIER-11): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 104 (task DF-CRIER-12): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 105 (task DF-CRIER-220): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 106 (task DF-CRIER-250): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 107 (task DF-CRIER-224): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 108 (task DF-CRIER-226): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 109 (task DF-CRIER-227): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 110 (task DF-CRIER-228): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 111 (task DF-CRIER-229): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 112 (task DF-CRIER-232): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 113 (task DF-CRIER-235): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 114 (task DF-CRIER-236): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 115 (task DF-CRIER-237): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 116 (task DF-CRIER-238): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 117 (task DF-CRIER-240): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 118 (task DF-CRIER-241): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 119 (task DF-CRIER-242): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 120 (task DF-CRIER-243): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 121 (task DF-CRIER-244): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 122 (task DF-CRIER-247): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 123 (task DF-CRIER-248): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 124 (task DF-CRIER-249): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 125 (task DF-CRIER-1): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 126 (task DF-CRIER-2): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 127 (task DF-CRIER-3): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 128 (task DF-CRIER-4): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 129 (task DF-CRIER-5): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 130 (task DF-CRIER-16): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 131 (task DF-CRIER-17): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 132 (task DF-CRIER-18): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 133 (task DF-CRIER-19): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 134 (task DF-CRIER-20): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 135 (task DF-CRIER-23): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 136 (task DF-CRIER-26): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 137 (task DF-CRIER-28): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 138 (task DF-CRIER-29): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 139 (task CR-GAP-051): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 140 (task CR-GAP-052): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 141 (task CR-GAP-054): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 144 (task DF-CRIER-31): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 145 (task DF-CRIER-32): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 146 (task DF-CRIER-33): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 147 (task DF-CRIER-36): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 148 (task DF-CRIER-37): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 149 (task DF-CRIER-39): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 150 (task DF-CRIER-40): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 151 (task DF-CRIER-47): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 152 (task DF-CRIER-48): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 153 (task DF-CRIER-58): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 154 (task DF-CRIER-62): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 155 (task DF-CRIER-66): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 156 (task DF-CRIER-72): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 157 (task DF-CRIER-81): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 158 (task DF-CRIER-88): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 159 (task DF-CRIER-90): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 160 (task DF-CRIER-91): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 161 (task DF-CRIER-92): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 162 (task DF-CRIER-101): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 163 (task DF-CRIER-102): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 164 (task DF-CRIER-104): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 165 (task DF-CRIER-105): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 166 (task DF-CRIER-106): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 167 (task DF-CRIER-109): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 168 (task DF-CRIER-112): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 169 (task DF-CRIER-113): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 170 (task DF-CRIER-115): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 171 (task DF-CRIER-116): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 172 (task DF-CRIER-118): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 173 (task DF-CRIER-122): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 174 (task DF-CRIER-125): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 175 (task DF-CRIER-126): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 176 (task DF-CRIER-127): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 177 (task DF-CRIER-129): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 178 (task DF-CRIER-130): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 179 (task DF-CRIER-131): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 180 (task INT-CI-002): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 181 (task DF-CRIER-134): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 182 (task DF-CRIER-137): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 183 (task DF-CRIER-138): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 184 (task DF-CRIER-140): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 185 (task QA-CRIER-5): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 186 (task DF-CRIER-141): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 187 (task DF-CRIER-142): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 188 (task DF-CRIER-143): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 189 (task DF-CRIER-147): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 190 (task DF-CRIER-148): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 191 (task DF-CRIER-149): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 192 (task DF-CRIER-150): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 193 (task DF-CRIER-151): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 194 (task DF-CRIER-152): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 195 (task DF-CRIER-153): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 196 (task DF-CRIER-154): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 197 (task QA-CRIER-6): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 198 (task QA-CRIER-7): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 199 (task QA-CRIER-8): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 200 (task QA-CRIER-9): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 201 (task DF-CRIER-156): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 202 (task DF-CRIER-157): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 203 (task DF-CRIER-158): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 204 (task DF-CRIER-159): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 205 (task DF-CRIER-160): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 206 (task DF-CRIER-166): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 207 (task INT-CI-003): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 208 (task DF-CRIER-167): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 209 (task DF-CRIER-168): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 210 (task DF-CRIER-169): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 211 (task DF-CRIER-170): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 212 (task DF-CRIER-171): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 213 (task DF-CRIER-172): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 215 (task DF-CRIER-173): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 216 (task DF-CRIER-174): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 217 (task DF-CRIER-175): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 218 (task DF-CRIER-176): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 219 (task DF-CRIER-177): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 220 (task DF-CRIER-178): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 221 (task DF-CRIER-179): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 222 (task DF-CRIER-180): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 223 (task DF-CRIER-181): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 224 (task DF-CRIER-182): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 225 (task DF-CRIER-185): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 226 (task DF-CRIER-186): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 227 (task DF-CRIER-187): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 228 (task DF-CRIER-75): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 229 (task DF-CRIER-124): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 230 (task DF-CRIER-132): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 231 (task DF-CRIER-133): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 232 (task DF-CRIER-162): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 233 (task DF-CRIER-21): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 234 (task DF-CRIER-24): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 235 (task DF-CRIER-57): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 236 (task DF-CRIER-100): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 237 (task DF-CRIER-50): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 238 (task DF-CRIER-183): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 239 (task DF-CRIER-184): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 242 (task CR-GAP-055): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 243 (task CR-GAP-056): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 244 (task CR-GAP-057): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 245 (task CR-GAP-058): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 246 (task CR-GAP-059): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 247 (task CR-GAP-060): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 248 (task CR-GAP-061): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 249 (task CR-GAP-053): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 250 (task CR-GAP-062): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 253 (task DF-CRIER-192): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 254 (task DF-CRIER-193): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 255 (task DF-CRIER-194): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 256 (task DF-CRIER-195): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 257 (task DF-CRIER-196): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 265 (task DF-CRIER-203): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 266 (task DF-CRIER-204): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 267 (task DF-CRIER-205): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 268 (task DF-CRIER-206): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 269 (task DF-CRIER-207): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 284 (task QA-CRIER-17): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 285 (task QA-CRIER-19): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 286 (task QA-CRIER-20): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 287 (task DF-CRIER-251): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 288 (task DF-CRIER-252): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 289 (task DF-CRIER-253): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 290 (task DF-CRIER-254): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 291 (task DF-CRIER-255): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 292 (task DF-CRIER-256): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 293 (task QA-CRIER-21): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 294 (task DF-CRIER-257): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 295 (task DF-CRIER-258): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 296 (task INT-CI-006): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 297 (task QA-CRIER-22): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 298 (task QA-CRIER-23): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 307 (task DF-CRIER-38): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 308 (task DF-CRIER-41): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 309 (task DF-CRIER-42): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 310 (task DF-CRIER-45): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 311 (task DF-CRIER-52): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 312 (task DF-CRIER-55): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 313 (task DF-CRIER-60): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 314 (task DF-CRIER-65): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 315 (task DF-CRIER-68): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 316 (task DF-CRIER-70): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 317 (task DF-CRIER-80): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 318 (task DF-CRIER-86): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 319 (task DF-CRIER-95): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 320 (task DF-CRIER-110): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 321 (task DF-CRIER-111): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 322 (task DF-CRIER-120): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 323 (task DF-CRIER-121): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 324 (task DF-CRIER-136): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 325 (task DF-CRIER-13): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 326 (task DF-CRIER-22): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 327 (task DF-CRIER-25): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 328 (task DF-CRIER-43): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 329 (task DF-CRIER-46): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 330 (task DF-CRIER-53): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 331 (task DF-CRIER-67): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 332 (task DF-CRIER-89): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 333 (task DF-CRIER-96): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 334 (task DF-CRIER-221): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 335 (task DF-CRIER-225): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 336 (task DF-CRIER-230): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 337 (task DF-CRIER-234): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 338 (task DF-CRIER-239): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 339 (task DF-CRIER-245): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 340 (task DF-CRIER-61): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 341 (task DF-CRIER-82): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 342 (task DF-CRIER-97): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 343 (task DF-CRIER-14): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 344 (task DF-CRIER-30): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 345 (task DF-CRIER-34): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 346 (task DF-CRIER-35): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 347 (task DF-CRIER-103): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 348 (task DF-CRIER-108): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 349 (task DF-CRIER-117): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 350 (task DF-CRIER-155): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 351 (task DF-CRIER-222): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 352 (task DF-CRIER-223): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 353 (task DF-CRIER-233): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 354 (task DF-CRIER-246): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 355 (task DF-CRIER-10): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 356 (task DF-CRIER-69): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 357 (task DF-CRIER-71): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 358 (task DF-CRIER-73): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 359 (task DF-CRIER-87): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 360 (task DF-CRIER-98): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 361 (task DF-CRIER-114): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 362 (task DF-CRIER-123): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 363 (task DF-CRIER-128): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 364 (task DF-CRIER-139): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 365 (task DF-CRIER-161): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 366 (task DF-CRIER-54): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 367 (task DF-CRIER-56): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 368 (task DF-CRIER-44): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 369 (task DF-CRIER-49): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 370 (task DF-CRIER-64): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 371 (task DF-CRIER-76): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 372 (task DF-CRIER-77): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 373 (task DF-CRIER-78): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 374 (task DF-CRIER-79): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 375 (task DF-CRIER-84): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 376 (task DF-CRIER-85): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 377 (task DF-CRIER-94): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 378 (task DF-CRIER-99): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 379 (task DF-CRIER-119): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 380 (task DF-CRIER-135): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 381 (task DF-CRIER-144): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 382 (task DF-CRIER-145): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 383 (task DF-CRIER-146): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 384 (task DF-CRIER-163): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 385 (task DF-CRIER-164): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 386 (task DF-CRIER-165): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 387 (task DF-CRIER-215): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 388 (task DF-CRIER-216): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 389 (task QA-CRIER-11): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 390 (task QA-CRIER-15): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 391 (task QA-CRIER-2): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 392 (task QA-CRIER-4): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 393 (task DF-CRIER-93): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 394 (task DF-CRIER-15): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 395 (task DF-CRIER-27): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 396 (task DF-CRIER-51): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 397 (task DF-CRIER-59): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 398 (task DF-CRIER-63): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 399 (task DF-CRIER-74): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 400 (task DF-CRIER-83): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 401 (task DF-CRIER-231): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 402 (task DF-CRIER-107): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 403 (task QA-CRIER-24): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 404 (task QA-CRIER-25): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 405 (task QA-CRIER-26): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 406 (task QA-CRIER-27): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 407 (task QA-CRIER-28): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 408 (task QA-CRIER-29): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 409 (task DF-CRIER-265): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 410 (task DF-CRIER-266): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 411 (task DF-CRIER-267): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 412 (task DF-CRIER-268): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 413 (task DF-CRIER-269): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 414 (task DF-CRIER-270): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 415 (task DF-CRIER-271): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 416 (task DF-CRIER-272): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 417 (task DF-CRIER-273): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 418 (task DF-CRIER-274): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 419 (task DF-CRIER-275): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 420 (task CI-016): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 422 (task DF-CRIER-277): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 423 (task DEPS-004): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 424 (task DF-CRIER-278): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 425 (task QA-CRIER-30): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 426 (task QA-CRIER-31): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 427 (task RELEASE-001): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 430 (task CR-GAP-063): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 431 (task CR-GAP-064): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 432 (task CR-GAP-065): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 477 (task RELEASE-004): created_at unparseable ".000000" — the report parser excludes this row from time-based metrics; hand-edit the row to add a parseable created_at
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 488 (task QA-CRIER-33): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 541 (task CR-CHAT-002): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 546 (task QA-CRIER-38): key(s) {gitreins} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 548 (task CR-CHAT-028-FOLLOWUP): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 558 (task DF-CRIER-303): key(s) {body, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 559 (task DF-CRIER-304): key(s) {body, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 560 (task DF-CRIER-305): key(s) {body, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 561 (task DF-CRIER-306): key(s) {body, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 562 (task DF-CRIER-307): key(s) {body, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 563 (task DF-CRIER-308): key(s) {body, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 565 (task QA-CRIER-41): key(s) {created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 571 (task DF-CRIER-314): key(s) {body} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 572 (task DF-CRIER-315): key(s) {body} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 573 (task DF-CRIER-316): key(s) {body} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 574 (task DF-CRIER-318): key(s) {body} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 575 (task DF-CRIER-317): key(s) {body} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 576 (task INT-CRIER-012): key(s) {body} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 586 (task INT-CI-011): key(s) {status_reason, tick_number} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 593 (task DF-CRIER-333): key(s) {acceptance, blocked_on} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 595 (task DF-CRIER-335): key(s) {acceptance, blocked_on} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 673 (task INT-CI-012): key(s) {verdict} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 683 (task DF-CRIER-417): guard_result "degraded-pass" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 694 (task DF-CRIER-428): guard_result "degraded-pass" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 701 (task DF-CRIER-435): guard_result "degraded-pass" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 714 (task QA-CRIER-44): key(s) {verification} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 715 (task INT-CI-014): key(s) {acceptance, notes} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 716 (task QA-CRIER-45): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 717 (task QA-CRIER-46): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 737 (task DF-CRIER-464): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-464 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 738 (task DF-CRIER-465): key(s) {acceptance, note, previous_blocked_reason, previous_status} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 739 (task DF-CRIER-466): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-466 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 740 (task DF-CRIER-467): key(s) {acceptance, note, previous_blocked_reason, previous_status} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 741 (task DF-CRIER-468): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-468 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 742 (task DF-CRIER-469): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-469 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 743 (task DF-CRIER-470): key(s) {acceptance, note, previous_blocked_reason, previous_status} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 744 (task DF-CRIER-471): key(s) {acceptance, note, previous_blocked_reason, previous_status} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 745 (task DF-CRIER-472): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-472 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 746 (task DF-CRIER-473): guard_result "PASS (degraded: no Go files staged; source gates run independently)" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 746 (task DF-CRIER-473): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-473 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 747 (task DF-CRIER-474): guard_result "PASS (branch and merged-tree gates; standalone post-merge guard degraded on no staged Go files)" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 747 (task DF-CRIER-474): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-474 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 748 (task RELEASE-010): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update RELEASE-010 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 749 (task RELEASE-009): key(s) {acceptance, blocked_on} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 750 (task QA-CRIER-47): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update QA-CRIER-47 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 751 (task INT-CRIER-015): key(s) {acceptance, title_full} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 752 (task DF-CRIER-475): key(s) {acceptance, title_full} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 753 (task DF-CRIER-476): key(s) {acceptance, title_full} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 754 (task DF-CRIER-477): key(s) {acceptance, title_full} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 755 (task DF-CRIER-478): key(s) {acceptance, title_full} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 756 (task DF-CRIER-479): key(s) {acceptance, title_full} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 757 (task DF-CRIER-480): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-480 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 758 (task DF-CRIER-481): guard_result "DEGRADED PASS (board-only standalone guard; direct gates passed)" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 758 (task DF-CRIER-481): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-481 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 759 (task DF-CRIER-482): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-482 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 760 (task DF-CRIER-483): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-483 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 761 (task QA-CRIER-48): key(s) {acceptance, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 762 (task QA-CRIER-49): key(s) {acceptance, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 763 (task QA-CRIER-REVIEW-1): key(s) {acceptance, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 764 (task QA-CRIER-REVIEW-2): key(s) {acceptance, created_at_source} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 765 (task QA-CRIER-50): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 766 (task QA-CRIER-51): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 767 (task INT-CI-015): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 768 (task INT-CI-016): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 769 (task DF-CRIER-484): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 770 (task DOC-2): guard_result "PASS (make docs-check + TestDocsClaims)" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 770 (task DOC-2): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 771 (task DOC-3): guard_result "PASS (go build ./... + go vet ./... + go test ./... -count=1; make generate byte-identical; make docs-check exit 0)" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 771 (task DOC-3): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 772 (task DOC-4): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 773 (task DOC-5): guard_result "PASS (go build ./... + go vet ./... + go test ./... -count=1 -timeout 300s; make docs-check exit 0; GitReins tier-1 PASS + tier-2 COMPLETE)" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 773 (task DOC-5): key(s) {acceptance, verdict} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 774 (task DOC-6): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 780 (task DF-CRIER-485): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-485 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 781 (task DF-CRIER-486): key(s) {acceptance} outside the declared canon — fixable with 'boardctl update DF-CRIER-486 --normalize'
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 789 (task INT-CI-019): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 799 (task QA-CRIER-REVIEW-3): created_at absent — the report parser excludes this row from time-based metrics; hand-edit the row to add a parseable created_at
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 800 (task QA-CRIER-README-1): created_at absent — the report parser excludes this row from time-based metrics; hand-edit the row to add a parseable created_at
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 801 (task QA-CRIER-RELENG-1): created_at absent — the report parser excludes this row from time-based metrics; hand-edit the row to add a parseable created_at
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 802 (task README-012): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 803 (task README-013): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 804 (task README-014): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 810 (task MON-CRIER-001): key(s) {lane} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 811 (task MON-CRIER-002): key(s) {lane} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 812 (task MON-CRIER-003): key(s) {lane} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 813 (task MON-CRIER-004): key(s) {lane} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 814 (task MON-CRIER-005): key(s) {lane} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 832 (task INT-CI-025): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 836 (task CRIER-HARNESS-6): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 837 (task CRIER-HARNESS-7): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 838 (task CRIER-INGRESS-4): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 839 (task CRIER-HARNESS-8): key(s) {acceptance, blocked_on} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 843 (task CR-GAP-073): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 844 (task CR-GAP-074): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 846 (task CRIER-HARNESS-10): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 847 (task CRIER-HARNESS-12): key(s) {acceptance, base_sha} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 850 (task CR-GAP-076): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 854 (task QA-CRIER-REVIEW-7): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 857 (task CR-GAP-077): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 858 (task CR-GAP-078): key(s) {acceptance} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 859 (task CRIER-HARNESS-13): ci_result fails the result-value schema: object "status" "partial" not in vocabulary {pass,fail,skip,pending} — valid forms: a plain {PASS,FAIL,SKIP}/{GREEN,RED,SKIP} string or {"status":"pass|fail|skip|pending","details":"<prose>"}
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 859 (task CRIER-HARNESS-13): key(s) {base_sha} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 885 (task INT-005): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 890 (task INT-010): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 909 (task RSS-CRIER-001): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 910 (task HARDEN-LOOP-001): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 912 (task BOARDCTL-HOOK-001): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 935 (task QA-CRIER-62): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 939 (task RELEASE-027): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 948 (task QA-CRIER-066): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 951 (task DF-CRIER-497-R2): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 952 (task QA-CRIER-066-R2): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 954 (task QA-CRIER-066-R3): guard_result "PASS (tier1-only ad8e35de; tier2 feedfcdc INCOMPLETE on deepseek-402)" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 954 (task QA-CRIER-066-R3): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 956 (task DF-CRIER-506): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 974 (task README-017): key(s) {defer_reason, defer_review_by} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 977 (task PERF-004): key(s) {complete} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 978 (task INT-CI-041): key(s) {complete} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 981 (task DF-CRIER-510): key(s) {complete} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 990 (task OPS-CRIER-001): guard_result "gitreins tier-1 bash -n PASS + secrets clean; go build ./... && go vet ./... PASS in worktree and merged tree" is free-form — not in the guard_result vocabulary {PASS,FAIL,SKIP} (valid: that vocabulary or the structured form {"status":"pass|fail|skip|pending","details":"<prose>"}; writes now enforce this; hand-edit the row or rewrite via boardctl update)
+[CI/Whole-board validation (fail closed)]   | [warn] tasks.jsonl line 990 (task OPS-CRIER-001): key(s) {base_sha, wave_id} outside the declared canon
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1334: event id "1334" is not a JSON number (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1404: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1405: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1406: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1407: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1425: event id "evt-1791952129-df314-close" is not a JSON number (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1855: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1856: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1857: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1864: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1873: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1874: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1883: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1952: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1953: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1954: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1955: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1956: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 1979: duplicate event id 1965 (also line 1978) — benign legacy duplicates exist on live boards
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2185: duplicate event id 2174 (also line 2184) — benign legacy duplicates exist on live boards
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2207: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2208: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2211: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2212: event id "evt-crier-foreman-2026-11-07-06-55-29" is not a JSON number (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2220: event id "" is not a JSON number (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2221: event id "" is not a JSON number (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2222: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2360: duplicate event id 1794115926888324250 (also line 2359) — benign legacy duplicates exist on live boards
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2493: duplicate event id 1794115926888324473 (also line 2492) — benign legacy duplicates exist on live boards
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2587: duplicate event id 1794692633205781851 (also line 2584) — benign legacy duplicates exist on live boards
+[CI/Whole-board validation (fail closed)]   | [warn] events.jsonl line 2593: event has no id field (legacy shape tolerated)
+[CI/Whole-board validation (fail closed)]   | RESULT: OK (458 warning(s))
+[CI/Whole-board validation (fail closed)]   | board: validation PASS — 999 row(s) accepted (458 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | selftest: canonical board accepted (exit 0)
+[CI/Whole-board validation (fail closed)]   | selftest: status 'closed' accepted
+[CI/Whole-board validation (fail closed)]   | selftest: status 'completed' accepted
+[CI/Whole-board validation (fail closed)]   | selftest: status 'done' accepted
+[CI/Whole-board validation (fail closed)]   | selftest: off-vocabulary row rejected (exit 1)
+[CI/Whole-board validation (fail closed)]   | selftest: missing boardctl exits 2
+[CI/Whole-board validation (fail closed)]   | selftest: neutered copy accepts the bad fixture (fixture 2 is not vacuous)
+[CI/Whole-board validation (fail closed)]   | selftest: staged-only invalid row rejected while the worktree is clean (index scope)
+[CI/Whole-board validation (fail closed)]   | selftest: empty events.jsonl refused (exit 1)
+[CI/Whole-board validation (fail closed)]   | selftest: the hatch does not permit an empty events.jsonl (exit 1)
+[CI/Whole-board validation (fail closed)]   | selftest: close naming an ancestor of main accepted (43b9502)
+[CI/Whole-board validation (fail closed)]   | selftest: close naming unmerged commit 90c3159 refused, naming the commit and the base
+[CI/Whole-board validation (fail closed)]   | selftest: 'already merged' close with no commit_hash refused, naming the row
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl zero-bytes standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-newline standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl nine-spaces standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl two-newlines standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl (retention: worktree vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl (retention: index vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl (retention: HEAD vs HEAD^1): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl comment-not-blank standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] tasks.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-real-record worktree hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 1 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl (retention: worktree vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-real-record staged-index hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 1 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl (retention: index vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-real-record CI-bare hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 1 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/tasks.jsonl (retention: HEAD vs HEAD^1): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl one-real-record standalone hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 1 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row worktree hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row worktree hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row worktree hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row staged-index hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row staged-index hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row staged-index hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row CI-bare hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row CI-bare hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row CI-bare hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row standalone hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row standalone hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 tasks.jsonl healthy-multi-row standalone hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl zero-bytes standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-newline standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 1 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl nine-spaces standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 9 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl two-newlines standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 2 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank worktree hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank worktree hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl (retention: worktree vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank worktree hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank staged-index hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank staged-index hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl (retention: index vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank staged-index hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank CI-bare hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank CI-bare hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl (retention: HEAD vs HEAD^1): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank CI-bare hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank standalone hatch=unset: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank standalone hatch=1: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl comment-not-blank standalone hatch=true: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   |   [error] events.jsonl: line 1: not valid JSON: invalid character '#' looking for beginning of value
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: validation FAILED (boardctl exit 1) — fix the rows named above; do not commit an invalid board with --no-verify.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-real-record worktree hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl (retention: worktree vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-real-record staged-index hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl (retention: index vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-real-record CI-bare hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   |   check-board.sh: board: .coding-hermes/board/events.jsonl (retention: HEAD vs HEAD^1): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, still populated (5 -> 1 row(s)); required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl one-real-record standalone hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row worktree hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row worktree hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row worktree hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row staged-index hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row staged-index hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row staged-index hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row CI-bare hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row CI-bare hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row CI-bare hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row standalone hatch=unset: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row standalone hatch=1: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 events.jsonl healthy-multi-row standalone hatch=true: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   |   board: validation PASS — 5 row(s) accepted (0 warning(s), not fatal)
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 missing validator census fails closed: exit 2, expected 2: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-453 duplicate validator census fails closed: exit 2, expected 2: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: 691 -> 1 exact checker stderr BEGIN
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — .coding-hermes/board/tasks.jsonl shrank: HEAD=691, index=1; 690 row(s) lost
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — lost ids (690 total; first 20): SELFTEST-2, SELFTEST-3, SELFTEST-4, SELFTEST-5, SELFTEST-6, SELFTEST-7, SELFTEST-8, SELFTEST-9, SELFTEST-10, SELFTEST-11, SELFTEST-12, SELFTEST-13, SELFTEST-14, SELFTEST-15, SELFTEST-16, SELFTEST-17, SELFTEST-18, SELFTEST-19, SELFTEST-20, SELFTEST-21 ... (670 more)
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: shrink refused: .coding-hermes/board/tasks.jsonl (retention: index vs HEAD); if this deletion is intended, rerun with BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).
+[CI/Whole-board validation (fail closed)]   | commit selftest: 691 -> 1 exact checker stderr END
+[CI/Whole-board validation (fail closed)]   | commit selftest: 691 -> 1 truncation: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: shrink counts, lost-id total and bounded list: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: real commit rejects staged shrink despite repaired worktree: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: hatch requires exact 1, not a truthy string: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: events 3 -> 1 exact checker stderr BEGIN
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — .coding-hermes/board/events.jsonl shrank: HEAD=3, index=1; 2 row(s) lost
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — lost ids (2 total; first 20): 2, 3
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: shrink refused: .coding-hermes/board/events.jsonl (retention: index vs HEAD); if this deletion is intended, rerun with BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).
+[CI/Whole-board validation (fail closed)]   | commit selftest: events 3 -> 1 exact checker stderr END
+[CI/Whole-board validation (fail closed)]   | commit selftest: events-only shrink 3 -> 1 rejected: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: events shrink names the file, both counts and the lost ids: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: real commit rejects a staged events-only shrink: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: events hatch requires exact 1, not a truthy string: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: declared events deletion accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI rejects a committed events shrink against the first parent: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI accepts an explicitly declared events deletion, saying it is still populated: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: worktree-shrink fixture premise (HEAD 5, index 5, worktree 1 — index untouched): PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: unstaged worktree shrink, default (no-flag) command exact checker stderr BEGIN
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: worktree vs HEAD — .coding-hermes/board/tasks.jsonl shrank: HEAD=5, worktree=1; 4 row(s) lost
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: worktree vs HEAD — lost ids (4 total; first 20): SELFTEST-2, SELFTEST-3, SELFTEST-4, SELFTEST-5
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: HEAD vs HEAD^1 — 2 file(s) compared, no shrink
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: shrink refused: .coding-hermes/board/tasks.jsonl (retention: worktree vs HEAD); if this deletion is intended, rerun with BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).
+[CI/Whole-board validation (fail closed)]   | commit selftest: unstaged worktree shrink, default (no-flag) command exact checker stderr END
+[CI/Whole-board validation (fail closed)]   | commit selftest: default mode refuses a worktree shrink with an untouched index: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: worktree shrink names worktree vs HEAD, the file, both counts and the bounded lost-id list: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: the same tree under --staged-index still validates the 5-row index: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: committed-shrink fixture premise (clean checkout, worktree == HEAD): PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: committed shrink on a clean checkout, default (CI) command exact checker stderr BEGIN
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: worktree vs HEAD — 2 file(s) compared, no shrink
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: HEAD vs HEAD^1 — .coding-hermes/board/tasks.jsonl shrank: HEAD^1=5, HEAD=1; 4 row(s) lost
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: HEAD vs HEAD^1 — lost ids (4 total; first 20): SELFTEST-2, SELFTEST-3, SELFTEST-4, SELFTEST-5
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: shrink refused: .coding-hermes/board/tasks.jsonl (retention: HEAD vs HEAD^1); if this deletion is intended, rerun with BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).
+[CI/Whole-board validation (fail closed)]   | commit selftest: committed shrink on a clean checkout, default (CI) command exact checker stderr END
+[CI/Whole-board validation (fail closed)]   | commit selftest: default mode (the CI command) refuses a committed shrink: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: committed shrink names HEAD vs HEAD^1, the file, both counts and the bounded lost-id list: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: healthy tree (worktree == HEAD == HEAD^1), default command exact checker stderr BEGIN
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: worktree vs HEAD — 2 file(s) compared, no shrink
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: HEAD vs HEAD^1 — 2 file(s) compared, no shrink
+[CI/Whole-board validation (fail closed)]   | commit selftest: healthy tree (worktree == HEAD == HEAD^1), default command exact checker stderr END
+[CI/Whole-board validation (fail closed)]   | commit selftest: healthy tree accepted by the default command: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: healthy default run states both comparisons it made: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: lost event row without an id is refused, not skipped: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: id-less lost row is named by its line number: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: tasks-only shrink still rejected: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: tasks-only shrink names tasks.jsonl and only tasks.jsonl: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: both board files growing accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI accepts both board files growing: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: normal row edit (same count) accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: undeclared deletion of one row rejected: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: declared deletion of one row accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI rejects committed shrink against first parent: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI accepts explicitly declared deletion: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI cannot borrow an unstaged repair to hide committed shrink: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: hatch does not bypass row validation on a shrink: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: empty candidate reports both counts before refusal: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: hatch does not permit empty board: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: hatch does not permit whole-file deletion: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: events 5 -> 0, no hatch (staged) exact checker stderr BEGIN
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — .coding-hermes/board/events.jsonl shrank: HEAD=5, index=0; 5 row(s) lost
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — lost ids (5 total; first 20): 1, 2, 3, 4, 5
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: shrink refused: .coding-hermes/board/events.jsonl (retention: index vs HEAD); if this deletion is intended, rerun with BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: an empty board file is not a valid board; BOARD_ALLOW_SHRINK=1 permits a declared reduction, never the disappearance of a board file.
+[CI/Whole-board validation (fail closed)]   | commit selftest: events 5 -> 0, no hatch (staged) exact checker stderr END
+[CI/Whole-board validation (fail closed)]   | commit selftest: events 5 -> 0 without the hatch is still refused as a shrink: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: events 5 -> 0 with the hatch (staged) exact checker stderr BEGIN
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — .coding-hermes/board/events.jsonl shrank: HEAD=5, index=0; 5 row(s) lost
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: retention: index vs HEAD — lost ids (5 total; first 20): 1, 2, 3, 4, 5
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: .coding-hermes/board/events.jsonl (retention: index vs HEAD): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, but the file is now EMPTY (5 -> 0 row(s)) — an empty board file is not a valid board; required paths and row validation still apply.
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: .coding-hermes/board/events.jsonl is empty: 0 byte(s), 0 nonblank record(s) — no board records to validate.
+[CI/Whole-board validation (fail closed)]   | check-board.sh: board: an empty board file is not a valid board; BOARD_ALLOW_SHRINK=1 permits a declared reduction, never the disappearance of a board file.
+[CI/Whole-board validation (fail closed)]   | commit selftest: events 5 -> 0 with the hatch (staged) exact checker stderr END
+[CI/Whole-board validation (fail closed)]   | commit selftest: declared events 5 -> 0 refused: the hatch is not a licence to empty a board file: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: declared events 5 -> 0 says which outcome was declared: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: real commit refuses a declared events 5 -> 0: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: tasks 5 -> 0 without the hatch is still refused as a shrink: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: tasks 5 -> 0 with the hatch keeps its own refusal: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: the default run refuses it too, not just the hook form: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: declared reduction with both halves still populated is accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: brand-new board with no HEAD board accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI accepts first board when parent has none: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: unborn HEAD accepts staged first board: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI accepts genuine root board commit without parent: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI refuses unavailable shallow baseline: exit 2, expected 2: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI accepts depth-two checkout with available baseline: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: dedupe counts records, not unique ids or blank lines: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: explicitly declared dedupe accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: real merge rejects shrink against its first parent: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: merge shrink retains board-only scope disclosure: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: explicitly declared merge deletion accepted: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI merge check uses first parent, not shrunk second parent: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: staged deletion .coding-hermes/board/tasks.jsonl: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: staged deletion .coding-hermes/board/events.jsonl: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: staged deletion .coding-hermes/board/board.jsonl: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: staged deletion .coding-hermes/board/fixtures.jsonl: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: whole index includes staged topology-A header, not its worktree repair: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: installer ignores inherited global hooksPath: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: local core.hooksPath selects repository hooks: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: inherited global hooksPath untouched: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: unrelated repository .git/hooks untouched: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: unrelated repository without crier checker still commits: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: repository-local installer repeat is idempotent: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: repository-local crier hook stays fail-closed without checker: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: staged deletion cannot borrow an unstaged restored file: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: D is classified as a board path before the absent-file skip: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: invalid HEAD/index plus unstaged repair: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: missing .gitreins/config.yaml plus invalid staged board: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-399 staged invalid plus repaired worktree: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-389 non-board commit on unchanged invalid board: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: canonical index with config True: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: canonical index with config False: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: missing checker on non-board commit: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: real merge invalid board True: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: pre-merge-commit discloses board-only scope: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | gate scope: pre-merge-commit: this entrypoint validates the board only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and Makefile/Dockerfile checks are NOT RUN here).
+[CI/Whole-board validation (fail closed)]   | commit selftest: real merge invalid board False: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: pre-merge-commit discloses board-only scope: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | gate scope: pre-merge-commit: this entrypoint validates the board only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and Makefile/Dockerfile checks are NOT RUN here).
+[CI/Whole-board validation (fail closed)]   | commit selftest: real git am invalid board True: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: pre-applypatch discloses board-only scope: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | gate scope: pre-applypatch: this entrypoint validates the board only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and Makefile/Dockerfile checks are NOT RUN here).
+[CI/Whole-board validation (fail closed)]   | commit selftest: real git am invalid board False: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: pre-applypatch discloses board-only scope: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | gate scope: pre-applypatch: this entrypoint validates the board only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and Makefile/Dockerfile checks are NOT RUN here).
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-452 real commit refuses a close over a sibling-branch commit: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-452 the refusal left HEAD on the merged baseline: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: DF-CRIER-452 real commit accepts a close over a commit on main: exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: --no-verify still bypasses local hooks (CI backstop required): exit 0, expected 0: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI command rejects the checked-out invalid bypass commit: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: CI command refuses an absent board: exit 1, expected 1: PASS
+[CI/Whole-board validation (fail closed)]   | commit selftest: 0 failure(s)
+[CI/Whole-board validation (fail closed)]   | selftest PASS
+[CI/Whole-board validation (fail closed)]   ✅  Success - Main Validate the whole checked-out board [32.239048988s]
+[CI/Whole-board validation (fail closed)] ⭐ Run Post Set up Go
+[CI/Whole-board validation (fail closed)]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-go@v6/dist/cache-save/index.js] user= workdir=
+[CI/Whole-board validation (fail closed)]   | [command]/opt/hostedtoolcache/go/1.26.11/x64/bin/go env GOMODCACHE
+[CI/Whole-board validation (fail closed)]   | [command]/opt/hostedtoolcache/go/1.26.11/x64/bin/go env GOCACHE
+[CI/Whole-board validation (fail closed)]   | /root/go/pkg/mod
+[CI/Whole-board validation (fail closed)]   | /root/.cache/go-build
+[CI/Whole-board validation (fail closed)]   | [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/bunker-98a7292e/qa-crier --files-from manifest.txt --use-compress-program zstdmt
+[CI/Whole-board validation (fail closed)]   | Cache Size: ~23 MB (23722440 B)
+[CI/Whole-board validation (fail closed)]   | Cache saved successfully
+[CI/Whole-board validation (fail closed)]   | Cache saved with the key: setup-go-Linux-x64-ubuntu20-go-1.26.11-ceac5d8a6c4471a64c261cabf370bb688a173be60fb9c4fbca8b376b7a3e28b4
+[CI/Whole-board validation (fail closed)]   ✅  Success - Post Set up Go [637.361903ms]
+[CI/Whole-board validation (fail closed)] ⭐ Run Complete job
+[CI/Whole-board validation (fail closed)] Cleaning up container for job Whole-board validation (fail closed)
+[CI/Whole-board validation (fail closed)]   ✅  Success - Complete job
+[CI/Whole-board validation (fail closed)] 🏁  Job succeeded
+Error: Job 'Build & Test' failed

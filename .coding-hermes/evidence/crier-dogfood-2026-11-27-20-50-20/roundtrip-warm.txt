@@ -1,0 +1,48 @@
+crier python client round-trip
+  server : http://127.0.0.1:28971
+  agent  : dogfood-alice-2
+  key    : /home/kara/.hermes/cache/scratch/crier-dogfood-2026-11-27-20-50-20/local/alice2.key
+  signing backend: cryptography 50.0.2
+
+-- [1] load the key and derive the public half
+     OK   public key 105bfc7b02ac8fa83c2631951c2742cc64a0d85c368fe597b09f9bf7fb583354 (derived from the private key, so the halves cannot drift)
+     OK   backend cryptography 50.0.2
+
+-- [2] reach the server (GET /health, no auth, no signature)
+     OK   /health -> {'status': 'ok'}
+
+-- [3] register the agent (POST /agents, public key in the body)
+     OK   registered dogfood-alice-2 (201)
+
+-- [4] deliver a message (POST /agents/dogfood-alice-2/inbox — SIGNED by this agent: X-Agent-ID + X-Agent-Ts + X-Agent-Sig)
+     OK   202/201 with id=313cf6afa9f760dafd3c8e96 transport=inbox expires_at=2026-11-27T21:58:14.885578671Z
+
+-- [5] retrieve it (GET /agents/dogfood-alice-2/inbox — SIGNED: X-Agent-ID + X-Agent-Ts + X-Agent-Sig)
+     OK   got 1 message(s); payload decoded to {"hello": "from the python client"}
+     OK   payload is byte-identical to what was delivered
+     OK   lease_id b86c3277a1245edb56c5ddc259988111 (the lease is what lets ack be exact)
+
+-- [6] read the queue counters (GET /agents/dogfood-alice-2/inbox/stats — SIGNED)
+     OK   queue_depth=1 leased_count=1
+
+-- [7] ack it (POST /agents/dogfood-alice-2/inbox/ack — SIGNED; lease_id + message_ids)
+     OK   acked 313cf6afa9f760dafd3c8e96 (204 — permanently removed, never redelivered)
+     OK   a second signed retrieve does not return it — the ack held
+
+-- [8] relay publish + subscribe (dogfood-roundtrip-warm)
+     OK   publish -> 202
+     OK   subscriber received {"topic": "dogfood-roundtrip-warm", "event": {"hello": "subscribers", "from": "dogfood-alice-2"}}
+
+-- [9] negative control: the SAME retrieve with no signature must be refused
+     OK   401 missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)
+
+-- [10] negative control: a signature from a DIFFERENT key must be refused
+     OK   401 signature verification failed
+
+-- [11] informational: does the relay verify an offered publish signature? (README: signing is optional, but offered proof is checked)
+     ..   a publish signed with the WRONG key was refused: HTTP 401 signature verification failed — matching the README: signing is optional, but offered proof is checked and bogus proof is refused
+
+-- [12] clean up: unregister (DELETE /agents/dogfood-alice-2 — SIGNED)
+     OK   unregistered (204)
+
+ROUND-TRIP OK — 12 steps, all held, over the real HTTP/WS API with real signatures.

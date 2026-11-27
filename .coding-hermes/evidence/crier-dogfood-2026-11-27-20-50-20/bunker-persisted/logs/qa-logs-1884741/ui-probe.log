@@ -1,0 +1,19 @@
+time=2026-11-27T13:18:22.753-08:00 level=WARN msg="auth disabled, all requests pass through (development mode)"
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="namespaces: none declared — the implicit default namespace serves every agent"
+time=2026-11-27T13:18:22.754-08:00 level=WARN msg="registry backend is the in-memory store — DEMO-ONLY and non-durable: agents and undelivered inbox messages are lost when this process exits. Set CR_REGISTRY_BACKEND=sqlite with CR_REGISTRY_SQLITE_PATH, or CR_DATABASE_URL (docker compose up -d postgres), for durable agents and inboxes" type=memory durable=false hint="set CR_REGISTRY_BACKEND=sqlite and CR_REGISTRY_SQLITE_PATH, or CR_DATABASE_URL for PostgreSQL"
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="inbox ingest budget" global_per_minute=0 detail="no global budget: the per-agent publish cap (CR_RATE_LIMIT_PER_MINUTE) remains the only backpressure, exactly as before CR-FEAT-035"
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="delivery acl" enabled=false detail="no ACL deployed: deliveries are authorized exactly as before CR-CHAT-003"
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg=presence stale_after=1m30s evidence="mesh connect + KEEPALIVE heartbeat + signed PATCH; stored status is never rewritten (stale is derived per read)"
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="mesh authentication" required=false origin_policy=allow-all detail="the agent id in /mesh/connect/{agentID} is taken at face value: any client that can reach this port can speak as any registered agent. Set CR_REQUIRE_MESH_AUTH=true to require the ed25519 connect challenge (docs/mesh-protocol.md §Authentication)"
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="message guard" enabled=true model=deepseek-v4-flash timeout=10s max_concurrent=8 circuit_threshold=10 kanban_queue=100 kanban_writer=cli
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="federation inbound posture" require_peer_configured=false require_peer_effective=false peers=0 token_only_accepted=true
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="webhook delivery" enabled=true timeout=30s retries=5 signing=false
+time=2026-11-27T13:18:22.754-08:00 level=INFO msg="signing trust tree enabled" registry_backend=memory detail="anchors and delegations supported on memory, sqlite and postgres; management requires a distinct CR_PERMISSIONS_ADMIN_TOKEN"
+time=2026-11-27T13:18:22.755-08:00 level=INFO msg="session api enabled" backend=jsonl detail="GET/POST /sessions, GET/POST /sessions/{id}/messages, POST /sessions/{id}/tasks, POST /sessions/{id}/tasks/{task_id}/claim|complete, GET/POST /sessions/{id}/participants, GET/PUT /sessions/{id}/participants/{member_type}/{member_id}/context, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand"
+time=2026-11-27T13:18:22.755-08:00 level=INFO msg="named group api enabled" store_dir=crier-groups detail="POST/GET /groups, GET /groups/{name}, PATCH /groups/{name}/members — a curated roster (@team:x) ONE message fans out to; capability (@cap:y) stays the dynamic pool (D8)"
+time=2026-11-27T13:18:22.755-08:00 level=INFO msg="protocol disabled" protocol=a2a
+time=2026-11-27T13:18:22.755-08:00 level=INFO msg="protocol disabled" protocol=dagger
+time=2026-11-27T13:18:22.755-08:00 level=INFO msg="observability: metrics enabled" path=/metrics format="prometheus text 0.0.4" auth="not exempt (requires Bearer when CR_AUTH_TOKEN is set)"
+time=2026-11-27T13:18:22.755-08:00 level=INFO msg="crier starting" port=8767 services=relay+mesh+registry version=dev
+time=2026-11-27T13:18:23.470-08:00 level=INFO msg=request method=GET path=/docs status=200 duration=90.78µs request_id=ddd389dc02f8910708056835
+time=2026-11-27T13:18:23.495-08:00 level=INFO msg="shutdown signal received" signal=terminated port=8767 version=dev

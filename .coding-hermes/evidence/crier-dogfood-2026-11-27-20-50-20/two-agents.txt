@@ -1,0 +1,20 @@
+crier two-agent round-trip: dogfood-alice -> dogfood-bob
+     OK   loaded two keys: alice b8e8789ced82… bob 184118b7cff3…
+     OK   dogfood-alice registered (201)
+     OK   dogfood-bob registered (201)
+
+-- deliver dogfood-alice -> dogfood-bob (SIGNED by alice's own key — INT-018)
+     OK   delivered id=36183591e14f68039995cad9 transport=inbox
+
+-- dogfood-bob reads its own inbox (SIGNED with bob's key, not alice's)
+     OK   dogfood-bob received {"hello": "bob", "n": 1} from dogfood-alice
+
+-- dogfood-bob's signature is what acks it (alice's key could not)
+     OK   alice's ack of bob's inbox was refused: 403 agent "dogfood-alice" may only access its own resources (target "dogfood-bob")
+     OK   bob's ack succeeded (204)
+
+-- deliver is GATED: an unsigned sender is refused (INT-018)
+     OK   an unsigned POST /agents/dogfood-bob/inbox was refused: 401 missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)
+     OK   bob's SIGNED read does not see it (the refusal stored nothing)
+
+TWO-AGENT ROUND-TRIP OK — dogfood-alice -> dogfood-bob with both identities' own keys.

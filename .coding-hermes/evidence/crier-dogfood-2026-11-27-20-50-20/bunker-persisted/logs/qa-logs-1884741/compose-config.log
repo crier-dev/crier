@@ -1,0 +1,54 @@
+name: qa-crier
+services:
+  crier:
+    build:
+      context: /home/bunker-98a7292e/qa-crier
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      CR_DATABASE_URL: postgres://crier:crier@postgres:5432/crier?sslmode=disable
+      CRIER_PORT: "8767"
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 8767
+        published: "8767"
+        protocol: tcp
+    restart: unless-stopped
+  postgres:
+    environment:
+      POSTGRES_DB: crier
+      POSTGRES_PASSWORD: crier
+      POSTGRES_USER: crier
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U crier -d crier
+      timeout: 5s
+      interval: 5s
+      retries: 5
+      start_period: 10s
+    image: postgres:16-alpine
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 5432
+        published: "5437"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: pgdata
+        target: /var/lib/postgresql/data
+        volume: {}
+networks:
+  default:
+    name: qa-crier_default
+volumes:
+  pgdata:
+    name: qa-crier_pgdata

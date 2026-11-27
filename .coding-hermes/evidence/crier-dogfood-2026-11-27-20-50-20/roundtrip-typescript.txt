@@ -1,0 +1,47 @@
+crier typescript client round-trip
+  server : http://127.0.0.1:28972
+  agent  : dogfood-ts
+  key    : /home/kara/.hermes/cache/scratch/crier-dogfood-2026-11-27-20-50-20/typescript/alice.key
+  signing backend: node:crypto ed25519 (node 22.22.3)
+
+-- [1] load the key and derive the public half
+     OK   public key 6e02ec2782d2305b587bbde6c99475a6c07cb8b1cf3d785bf858bb4bb4530036 (derived from the private key, so the halves cannot drift)
+
+-- [2] reach the server (GET /health, no auth, no signature)
+     OK   /health -> {"status":"ok"}
+
+-- [3] register the agent (POST /agents, public key in the body)
+     OK   registered dogfood-ts (201)
+
+-- [4] deliver a message (POST /agents/dogfood-ts/inbox — SIGNED by this agent)
+     OK   delivered id=9d538d73959cf63725d1c774 transport=inbox expires_at=2026-11-27T21:59:09.318180799Z
+
+-- [5] retrieve it (GET /agents/dogfood-ts/inbox — SIGNED)
+     OK   got 1 message(s); payload decoded to {"hello":"from the typescript client"}
+     OK   payload is byte-identical to what was delivered
+     OK   lease_id 3f35e1b2e17c0b69fe43a3bdcb4c9602 (the lease is what lets ack be exact)
+
+-- [6] read the queue counters (GET /agents/dogfood-ts/inbox/stats — SIGNED)
+     OK   queue_depth=1 leased_count=1
+
+-- [7] ack it (POST /agents/dogfood-ts/inbox/ack — SIGNED; lease_id + message_ids)
+     OK   acked 9d538d73959cf63725d1c774 (204 — permanently removed, never redelivered)
+     OK   a second signed retrieve does not return it — the ack held
+
+-- [8] relay publish + subscribe (dogfood-ts-topic)
+     OK   publish -> 202
+     OK   subscriber received {"topic":"dogfood-ts-topic","event":{"hello":"subscribers","from":"dogfood-ts"}}
+
+-- [9] negative control: the SAME retrieve with no signature must be refused
+     OK   401 HTTP 401 (/agents/dogfood-ts/inbox): missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)
+
+-- [10] negative control: a signature from a DIFFERENT key must be refused
+     OK   401 HTTP 401 (/agents/dogfood-ts/inbox): signature verification failed
+
+-- [11] informational: does the relay verify an offered publish signature? (README: signing is optional, but offered proof is checked)
+     ..   this client's publish carries no signature, so the relay accepted it with no proof offered — matching the README: signing is optional on ordinary topics, and offered proof is what gets checked
+
+-- [12] clean up: unregister (DELETE /agents/dogfood-ts — SIGNED)
+     OK   unregistered (204)
+
+ROUND-TRIP OK — 12 steps, all held, over the real HTTP/WS API with real signatures.
