@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -163,9 +162,16 @@ func TestSafeToSignalRefusesForeignProcess(t *testing.T) {
 	if mismatch.Recorded != "/opt/crier/bin/crier" {
 		t.Errorf("MismatchError.Recorded = %q, want /opt/crier/bin/crier", mismatch.Recorded)
 	}
-	if !strings.Contains(mismatch.Live, "sleep") {
-		t.Errorf("MismatchError.Live = %q, want it to name the real binary (sleep)", mismatch.Live)
+	expectedLive, err := procExe(sleep.Process.Pid)
+	if err != nil {
+		t.Fatalf("procExe(%d): %v", sleep.Process.Pid, err)
 	}
+	if mismatch.Live != expectedLive {
+		t.Errorf("MismatchError.Live = %q, want the live /proc identity %q", mismatch.Live, expectedLive)
+	}
+
+	// ch:trace row=DF-CRIER-518-R2 spec=internal/pidfile/pidfile_test.go#TestSafeToSignalRefusesForeignProcess wave=crier-foreman-2026-11-27-21-46-03-wave1 test=internal/pidfile/pidfile_test.go::TestSafeToSignalRefusesForeignProcess doc=none:code-test task evidence=go-test verdict=none:foreman-owned commit=worker
+	// DF-CRIER-518-R2 preserves the DF-CRIER-518 fresh-machine recurrence chain.
 
 	// And the sleep is still alive — the check never signals.
 	if !Alive(sleep.Process.Pid) {
