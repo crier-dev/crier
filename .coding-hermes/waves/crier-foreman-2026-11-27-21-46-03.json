@@ -1,0 +1,14 @@
+{
+  "tick": "crier-foreman-2026-11-27-21-46-03",
+  "wave_id": "crier-foreman-2026-11-27-21-46-03-wave1",
+  "wave_type": "wave",
+  "budget": 3,
+  "slots": 1,
+  "loadavg": "15.30/14.32/14.63 on 16 cores",
+  "reason": "WAVE_BUDGET permits 3, but slots=max(1,min(6,16-ceil(15.30)))=1; requested block has two ready rows that are independent by file seam, but the loaded-box sizing rule forces serial dispatch.",
+  "block": "DF-CRIER-519",
+  "rows": [
+    {"id":"DF-CRIER-518-R2","worktree":"/home/kara/worktrees/crier-DF-CRIER-518-R2","branch":"wt/DF-CRIER-518-R2","base":"7544be1df2416e36fc999e226231b3640c5c1fab","brief":"/home/kara/.hermes/cache/scratch/brief-DF-CRIER-518-R2.txt","model":"glm-5.3-flash","provider":"opencode-go-2","status":"prepared"},
+    {"id":"DF-CRIER-519","worktree":"/home/kara/worktrees/crier-DF-CRIER-519","branch":"wt/DF-CRIER-519","base":"7544be1df2416e36fc999e226231b3640c5c1fab","brief":"/home/kara/.hermes/cache/scratch/brief-DF-CRIER-519.txt","model":"glm-5.3-flash","provider":"opencode-go-2","status":"prepared"}
+  ]
+}
