@@ -4873,3 +4873,21 @@ tasks:
   status: complete
   created_at: '2026-11-28T04:51:03.862784+00:00'
   completed_at: '2026-11-28T06:15:20.256498+00:00'
+- id: OPS-CRIER-004
+  title: 'crier-ci-sink: adopt the supervised unit over the orphan holder and bound
+    the restart loop'
+  criteria:
+  - 'PROOF: /usr/bin/diff -u deploy/crier-ci-sink.service ~/.config/systemd/user/crier-ci-sink.service
+    exits 0 and /usr/bin/grep -c StartLimitBurst deploy/crier-ci-sink.service.d/10-start-limit.conf
+    returns 1 -- FAILIF: any of the three artifacts is missing or an installed copy
+    differs from its repo file'
+  - 'PROOF: /usr/bin/systemctl --user is-active crier-ci-sink.service prints active
+    and /usr/bin/systemctl --user show -p NRestarts --value returns the same number
+    on two reads 60 seconds apart -- FAILIF: the unit is not active or the restart
+    counter advances between the two reads'
+  - 'PROOF: /usr/bin/ss -ltnp sport = :19012 prints exactly one LISTEN line whose
+    pid equals /usr/bin/systemctl --user show -p MainPID --value -- FAILIF: zero or
+    multiple listeners on :19012 or the listening pid differs from the supervised
+    MainPID'
+  status: in_progress
+  created_at: '2026-11-28T07:31:50.205756+00:00'
