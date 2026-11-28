@@ -1,0 +1,14 @@
+[Unit]
+Description=Crier CI echo sink (bunker-e2e matrix webhook receiver, :19012)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PORT=19012
+ExecStart=/usr/bin/python3 /home/kara/bin/crier-ci-sink.py 19012
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
