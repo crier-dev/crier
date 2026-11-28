@@ -1,0 +1,45 @@
+{
+  "tick": "crier-foreman-2026-11-28-08-08-32",
+  "project": "crier",
+  "block": "OPS-CRIER-004",
+  "base_sha": "dd56c45667894044ef62ee2318415c5c524a3847",
+  "wave_id": "crier-foreman-2026-11-28-08-08-32-wave1",
+  "wave_budget": 1,
+  "wave_size": 0,
+  "mode": "verification-only",
+  "verification_only": true,
+  "workers": [],
+  "selected_rows": [
+    {
+      "id": "OPS-CRIER-004",
+      "status": "pending",
+      "classification": "owner-gated host-ops; implementation and live orphan adoption already landed",
+      "worktree": "/home/kara/worktrees/crier-OPS-CRIER-004",
+      "branch": "wt/OPS-CRIER-004",
+      "owner": "operator approval for live install and systemd daemon-reload",
+      "acceptance_remaining": [
+        "AC2 durable start-limit drop-in installation",
+        "AC4 closing evidence run id and terminal row close"
+      ]
+    }
+  ],
+  "selection_reason": "block_drive ranked OPS-CRIER-004 as the only boardctl-ready row; the row's remaining work is an unattended live-host install owned by the operator, so no coding worker or synthetic GitReins lifecycle is authorized",
+  "local_gate": {
+    "fsck": "PASS git fsck --connectivity-only",
+    "build": "PASS go build ./...",
+    "vet": "PASS go vet ./...",
+    "board_validate": "PASS with 135 pre-existing warnings"
+  },
+  "live_observation": {
+    "service": "active/running",
+    "main_pid": 2101902,
+    "port": "19012",
+    "port_holder": 2101902,
+    "nrestarts": 44862,
+    "address_in_use_lines": 14695,
+    "dropin": "absent; owner-gated install remains outstanding"
+  },
+  "remote_ci": "green for the three most recent origin/main runs at dd56c456; no recent failure",
+  "status": "finished",
+  "next": "owner-approved ./deploy/install-ci-sink.sh, verify the installed drop-in and restart-policy arm, then run the exact OPS-CRIER-004 evidence/judge closeout"
+}
