@@ -4891,3 +4891,17 @@ tasks:
     MainPID'
   status: in_progress
   created_at: '2026-11-28T07:31:50.205756+00:00'
+- id: INT-CI-049
+  title: 'Pages deploy recurrence at run 46127605174: attribute failing step and prove
+    the next exact-head runs green'
+  criteria:
+  - 'PROOF: grep -c ''No artifacts named'' docs/evidence/int-ci-049-pages-recurrence-20261128.md
+    returns at least 1 and the same file names the failing step ''Deploy to GitHub
+    Pages'', the failing head 458c25e1, and the green Pages run ids 46131554832, 46131707184
+    and 46136155856. FAILIF: any of those strings is absent from that file.'
+  - 'PROOF: git show 458c25e1:.github/workflows/pages.yml | grep -c ''Wait for artifact
+    to reach the index'' returns 1, proving the INT-CI-044 mitigation existed at the
+    failing head. FAILIF: the step is missing from that revision.'
+  status: complete
+  created_at: '2026-11-28T12:16:02.125257+00:00'
+  completed_at: '2026-11-28T12:22:32.833806+00:00'
