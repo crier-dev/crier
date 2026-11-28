@@ -817,7 +817,10 @@ Those two scripts are the whole signed round-trip — register, deliver, signed
 retrieve, signed ack, signed stats, relay publish/subscribe — with a printed
 transcript and two negative controls (an unsigned call and a wrongly-signed call
 must both be refused), so the green means the signatures were verified rather
-than ignored. The clients are stdlib-only Python and dependency-free Node, and
+than ignored. The clients are stdlib-only Python and dependency-free Node — the
+TypeScript directory's one-key `package.json` (`{"type": "module"}`) is only a
+module-mode declaration, so `node clients/typescript/round-trip.ts` runs
+warning-free on Node 22.6+ with no packages, no scripts, and no lockfile — and
 `clients/README.md` documents the method surface and the wire contract.
 `make client-roundtrip-check` runs both of them, plus a two-agent exchange and a
 bearer-token arm, against a server it starts itself — with no openssl and no xxd

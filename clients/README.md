@@ -199,10 +199,13 @@ make client-roundtrip-check
 *   **Python**: 3.8+ (f-strings, `typing`), stdlib only. No `pip install`.
 *   **TypeScript**: Node **22.6+** to run the `.ts` files directly (native type
     stripping), e.g. `node clients/typescript/round-trip.ts`; `tsx` also works.
-    No `package.json`, no `node_modules`, no build step. Imports carry the `.ts`
+    No `node_modules`, no build step, no dependencies. Imports carry the `.ts`
     extension (what Node's resolver needs), so `tsc --noEmit` wants
     `allowImportingTsExtensions` — and editor types want `@types/node`. Neither
-    is needed to run anything.
+    is needed to run anything. The directory's one-key `package.json`
+    (`{"type": "module"}`) is only a module-mode declaration so Node 22.6+ runs
+    these `.ts` files as ESM warning-free; it declares no name, scripts,
+    dependencies, or lockfile.
 *   **Keys**: the private key file must be the PKCS#8 PEM that `crier keygen`
     writes, which is exactly what `openssl genpkey -algorithm ED25519` writes —
     so an existing key keeps working and openssl can still read the new one.
@@ -220,3 +223,5 @@ make client-roundtrip-check
     the route and validated by the server; a multi-segment literal is publishable
     (`202`) but not subscribable through this endpoint. The raw WebSocket client
     has the same limit — it is the route, not the client.
+
+ch:trace row=DF-CRIER-519 spec=README.md#typescript-client wave=crier-foreman-2026-11-28-03-38-05-wave1 test=clients/typescript/round-trip.ts::main doc=README.md:813 prompt=/home/kara/.hermes/cache/scratch/brief-DF-CRIER-519.txt evidence=node-round-trip verdict=none:foreman-owned commit=worker
