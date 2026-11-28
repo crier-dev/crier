@@ -13,6 +13,7 @@ SERVER_PID=''
 cleanup() {
   if test -n "$SERVER_PID" && kill -0 "$SERVER_PID" 2>/dev/null; then
     env -u CR_DATABASE_URL -u DATABASE_URL -u CRIER_DATABASE_URL CR_REQUIRE_AGENT_SIG=true CR_GUARD_ENABLED=false "$OUT/crier" -stop -pidfile "$OUT/crier.pid" > "$OUT/stop.out" 2>&1 || true
+    kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
 }
@@ -20,6 +21,11 @@ trap cleanup EXIT HUP INT TERM
 (env -u CR_DATABASE_URL -u DATABASE_URL -u CRIER_DATABASE_URL CR_REQUIRE_AGENT_SIG=true CR_GUARD_ENABLED=false CRIER_PORT=$PORT "$OUT/crier" -pidfile "$OUT/crier.pid" > "$OUT/server.out" 2> "$OUT/server.err") &
 SERVER_PID=$!
 for i in $(seq 1 60); do code=$(curl -sS -o "$OUT/health.json" -w '%{http_code}' "http://127.0.0.1:$PORT/health" 2> "$OUT/health.err") || code=000; test "$code" = 200 && break; sleep .2; done
+# CR-GAP-069 trap+ownership contract: the port this capture measures must be
+# held by the pid this script started (the phantom-green guard — a stale
+# squatter on :28972 must abort the run, not be measured).
+. ./scripts/lib/port-guard.sh
+assert_port_owned "$PORT" "$SERVER_PID" "dogfood evidence server (typescript)"
 cat /proc/loadavg > "$OUT/load-before.txt"
 /usr/bin/time -p -o "$OUT/time.txt" node clients/typescript/round-trip.ts --server "http://127.0.0.1:$PORT" --id dogfood-ts --key "$OUT/alice.key" --topic dogfood-ts-topic > "$OUT/roundtrip.stdout" 2> "$OUT/roundtrip.stderr"
 rc=$?
