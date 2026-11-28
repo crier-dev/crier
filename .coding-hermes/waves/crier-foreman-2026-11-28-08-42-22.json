@@ -1,0 +1,44 @@
+{
+  "tick": "crier-foreman-2026-11-28-08-42-22",
+  "project": "crier",
+  "block": "OPS-CRIER-004",
+  "wave_id": ".coding-hermes/waves/crier-foreman-2026-11-28-08-42-22.json",
+  "wave_mode": "serial-fallback",
+  "wave_size": 0,
+  "wave_budget": 1,
+  "base_sha": "1c5416a6e27c42dbe9216e3beb1f7c02ed711849",
+  "selected_rows": ["OPS-CRIER-004"],
+  "outcome": "blocked-owner-gate-and-ci-followup-filed",
+  "selection": "block_drive ranked OPS-CRIER-004 as the only ready row; its remaining AC2 action is live installation owned by the operator, so no coding worker was dispatched. The requested WAVE_BUDGET=1 permits only a singleton serial path.",
+  "ownership": {
+    "status": "clean before board mutation",
+    "cwd_service": "pid 2450054 /home/kara/crier/bin/crier",
+    "write_fds_under_checkout": "none"
+  },
+  "local_gate": {
+    "board_validate": "PASS with 135 pre-existing warnings",
+    "git_fsck": "PASS connectivity check; dangling objects reported only",
+    "go_build": "PASS go build ./..."
+  },
+  "remote_ci": {
+    "repo": "crier-dev/crier",
+    "run": 46125714008,
+    "head_sha": "1c5416a6e27c42dbe9216e3beb1f7c02ed711849",
+    "conclusion": "failure",
+    "failure": "Bunker config-matrix E2E job reported failure while its deploy-container/config-matrix step was still in_progress; build/publish succeeded and Agent-ecosystem battery was skipped with zero steps",
+    "board_followup": "INT-CI-048 filed and published"
+  },
+  "host_observation": {
+    "service": "crier-fleet service process active with zero write fds under checkout",
+    "ops_row": "OPS-CRIER-004 remains pending: install-ci-sink.sh approval required for durable drop-in arm"
+  },
+  "landed": {
+    "commit": "458c25e14abec1b87882e9acca277894902c0b56",
+    "remote_parity": "origin/main == HEAD; 0 unpushed",
+    "files": [".coding-hermes/board/tasks.jsonl", ".coding-hermes/board/events.jsonl"],
+    "summary": "Filed INT-CI-048 for the newly observed CI failure; no product worker commit this tick"
+  },
+  "next": "Owner-approved deploy/install-ci-sink.sh for OPS-CRIER-004, or dispatch a worker for INT-CI-048 once block selection makes it ready; recheck the failed workflow's terminal job details.",
+  "memory": "pending",
+  "session": "crier-foreman-2026-11-28-08-42-22"
+}
